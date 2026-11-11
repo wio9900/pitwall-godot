@@ -1,0 +1,330 @@
+{
+ "engines": {
+  "Mercedes": 0.89,
+  "Ferrari": 0.91,
+  "Red Bull Ford": 0.88,
+  "Honda": 0.86,
+  "Audi": 0.83
+ },
+ "teams": [
+  {
+   "name": "Red Bull Racing",
+   "color": "#1e41ff",
+   "engine": "Red Bull Ford",
+   "aero": 0.95,
+   "chassis": 0.9,
+   "rel": 0.9,
+   "rim": "#facc15",
+   "drivers": [
+    {
+     "name": "M. Verstappen",
+     "speed": 0.96,
+     "cons": 0.94,
+     "tyreMgmt": 0.89,
+     "aggr": 0.75,
+     "def": 0.9,
+     "wet": 0.98
+    },
+    {
+     "name": "S. Pérez",
+     "speed": 0.84,
+     "cons": 0.82,
+     "tyreMgmt": 0.85,
+     "aggr": 0.5,
+     "def": 0.78,
+     "wet": 0.8
+    }
+   ]
+  },
+  {
+   "name": "Ferrari",
+   "color": "#dc0000",
+   "engine": "Ferrari",
+   "aero": 0.93,
+   "chassis": 0.92,
+   "rel": 0.91,
+   "rim": "#ffffff",
+   "drivers": [
+    {
+     "name": "C. Leclerc",
+     "speed": 0.93,
+     "cons": 0.89,
+     "tyreMgmt": 0.83,
+     "aggr": 0.65,
+     "def": 0.86,
+     "wet": 0.91
+    },
+    {
+     "name": "L. Hamilton",
+     "speed": 0.92,
+     "cons": 0.92,
+     "tyreMgmt": 0.88,
+     "aggr": 0.55,
+     "def": 0.89,
+     "wet": 0.96
+    }
+   ]
+  },
+  {
+   "name": "McLaren",
+   "color": "#ff8000",
+   "engine": "Mercedes",
+   "aero": 0.95,
+   "chassis": 0.94,
+   "rel": 0.92,
+   "rim": "#111827",
+   "drivers": [
+    {
+     "name": "L. Norris",
+     "speed": 0.93,
+     "cons": 0.9,
+     "tyreMgmt": 0.86,
+     "aggr": 0.6,
+     "def": 0.87,
+     "wet": 0.88
+    },
+    {
+     "name": "O. Piastri",
+     "speed": 0.91,
+     "cons": 0.92,
+     "tyreMgmt": 0.87,
+     "aggr": 0.5,
+     "def": 0.85,
+     "wet": 0.86
+    }
+   ]
+  },
+  {
+   "name": "Mercedes",
+   "color": "#00f5d0",
+   "engine": "Mercedes",
+   "aero": 0.93,
+   "chassis": 0.93,
+   "rel": 0.93,
+   "rim": "#c0c8d2",
+   "drivers": [
+    {
+     "name": "G. Russell",
+     "speed": 0.9,
+     "cons": 0.89,
+     "tyreMgmt": 0.85,
+     "aggr": 0.55,
+     "def": 0.86,
+     "wet": 0.89
+    },
+    {
+     "name": "K. Antonelli",
+     "speed": 0.87,
+     "cons": 0.83,
+     "tyreMgmt": 0.84,
+     "aggr": 0.6,
+     "def": 0.8,
+     "wet": 0.85
+    }
+   ]
+  },
+  {
+   "name": "Aston Martin",
+   "color": "#006f62",
+   "engine": "Honda",
+   "aero": 0.87,
+   "chassis": 0.85,
+   "rel": 0.88,
+   "rim": "#bde100",
+   "drivers": [
+    {
+     "name": "F. Alonso",
+     "speed": 0.9,
+     "cons": 0.93,
+     "tyreMgmt": 0.9,
+     "aggr": 0.65,
+     "def": 0.91,
+     "wet": 0.94
+    },
+    {
+     "name": "L. Stroll",
+     "speed": 0.8,
+     "cons": 0.78,
+     "tyreMgmt": 0.81,
+     "aggr": 0.45,
+     "def": 0.74,
+     "wet": 0.78
+    }
+   ]
+  },
+  {
+   "name": "Alpine",
+   "color": "#ff66b2",
+   "engine": "Mercedes",
+   "aero": 0.83,
+   "chassis": 0.82,
+   "rel": 0.89,
+   "rim": "#0090ff",
+   "drivers": [
+    {
+     "name": "P. Gasly",
+     "speed": 0.85,
+     "cons": 0.86,
+     "tyreMgmt": 0.83,
+     "aggr": 0.5,
+     "def": 0.8,
+     "wet": 0.85
+    },
+    {
+     "name": "J. Doohan",
+     "speed": 0.79,
+     "cons": 0.79,
+     "tyreMgmt": 0.8,
+     "aggr": 0.5,
+     "def": 0.72,
+     "wet": 0.76
+    }
+   ]
+  },
+  {
+   "name": "Williams",
+   "color": "#00a0de",
+   "engine": "Mercedes",
+   "aero": 0.86,
+   "chassis": 0.84,
+   "rel": 0.91,
+   "rim": "#ffffff",
+   "drivers": [
+    {
+     "name": "A. Albon",
+     "speed": 0.87,
+     "cons": 0.88,
+     "tyreMgmt": 0.86,
+     "aggr": 0.5,
+     "def": 0.84,
+     "wet": 0.87
+    },
+    {
+     "name": "C. Sainz",
+     "speed": 0.9,
+     "cons": 0.91,
+     "tyreMgmt": 0.88,
+     "aggr": 0.55,
+     "def": 0.88,
+     "wet": 0.9
+    }
+   ]
+  },
+  {
+   "name": "Racing Bulls",
+   "color": "#6692ff",
+   "engine": "Red Bull Ford",
+   "aero": 0.85,
+   "chassis": 0.84,
+   "rel": 0.88,
+   "rim": "#ef4444",
+   "drivers": [
+    {
+     "name": "Y. Tsunoda",
+     "speed": 0.85,
+     "cons": 0.82,
+     "tyreMgmt": 0.81,
+     "aggr": 0.65,
+     "def": 0.79,
+     "wet": 0.82
+    },
+    {
+     "name": "L. Lawson",
+     "speed": 0.83,
+     "cons": 0.83,
+     "tyreMgmt": 0.82,
+     "aggr": 0.6,
+     "def": 0.78,
+     "wet": 0.8
+    }
+   ]
+  },
+  {
+   "name": "Haas",
+   "color": "#b6babd",
+   "engine": "Ferrari",
+   "aero": 0.8,
+   "chassis": 0.8,
+   "rel": 0.89,
+   "rim": "#e11d48",
+   "drivers": [
+    {
+     "name": "E. Ocon",
+     "speed": 0.84,
+     "cons": 0.85,
+     "tyreMgmt": 0.84,
+     "aggr": 0.6,
+     "def": 0.82,
+     "wet": 0.85
+    },
+    {
+     "name": "O. Bearman",
+     "speed": 0.82,
+     "cons": 0.8,
+     "tyreMgmt": 0.82,
+     "aggr": 0.55,
+     "def": 0.76,
+     "wet": 0.8
+    }
+   ]
+  },
+  {
+   "name": "Audi Sauber",
+   "color": "#f50537",
+   "engine": "Audi",
+   "aero": 0.79,
+   "chassis": 0.8,
+   "rel": 0.85,
+   "rim": "#1f2937",
+   "drivers": [
+    {
+     "name": "N. Hülkenberg",
+     "speed": 0.84,
+     "cons": 0.89,
+     "tyreMgmt": 0.88,
+     "aggr": 0.45,
+     "def": 0.85,
+     "wet": 0.88
+    },
+    {
+     "name": "G. Bortoleto",
+     "speed": 0.8,
+     "cons": 0.81,
+     "tyreMgmt": 0.8,
+     "aggr": 0.5,
+     "def": 0.74,
+     "wet": 0.78
+    }
+   ]
+  },
+  {
+   "name": "Cadillac F1",
+   "color": "#eab308",
+   "engine": "Ferrari",
+   "aero": 0.76,
+   "chassis": 0.77,
+   "rel": 0.84,
+   "rim": "#1d4ed8",
+   "drivers": [
+    {
+     "name": "V. Bottas",
+     "speed": 0.83,
+     "cons": 0.85,
+     "tyreMgmt": 0.86,
+     "aggr": 0.4,
+     "def": 0.8,
+     "wet": 0.85
+    },
+    {
+     "name": "F. Drugovich",
+     "speed": 0.78,
+     "cons": 0.8,
+     "tyreMgmt": 0.79,
+     "aggr": 0.45,
+     "def": 0.72,
+     "wet": 0.76
+    }
+   ]
+  }
+ ]
+}
