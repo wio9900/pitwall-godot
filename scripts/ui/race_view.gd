@@ -97,7 +97,8 @@ func _update_camera(delta: float) -> void:
 # ═════════ 차량 위치: 실제 순서보다 앞서 그리지 않고, 부드럽게 보간 ═════════
 func _update_cars(delta: float) -> void:
 	var T = sim.T
-	var gap_d: float = T.L * 0.0045
+	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px)
+	var gap_d: float = maxf(T.L * 0.0045, 15.0 * _car_scale(false) / maxf(_s, 0.01))
 	var last_d: Variant = null
 	var targets := {}
 	for c in sim.order():
@@ -340,7 +341,7 @@ func _draw_labels(T, font, night: bool) -> void:
 		var p := _X(T.pts[si])
 		var n: Vector2 = T.nrm[si]
 		var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
-		var o: float = -float(T.inward) * 24.0
+		var o: float = -float(T.inward) * 34.0
 		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, size.y - 4))
 		for step in 5:
 			var hit := false
@@ -357,7 +358,7 @@ func _draw_labels(T, font, night: bool) -> void:
 		var anchor := lp + Vector2(tsz.x / 2, -4)
 		if anchor.distance_to(p) > 26:
 			draw_line(p, anchor, Color(LABEL, 0.45), 1.0)
-		draw_string(font, lp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#5d6674") if night else LABEL)
+		draw_string(font, lp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(Color("#5d6674") if night else LABEL, 0.8))
 	if sim.drs_on():
 		for z in T.drs:
 			var q := _X(T.pts[z["ia"]])
