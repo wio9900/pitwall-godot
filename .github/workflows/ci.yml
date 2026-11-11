@@ -1,0 +1,25 @@
+name: check
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  godot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Godot 받기
+        run: |
+          curl -sSL -o g.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q g.zip
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          chmod +x godot
+      - name: 임포트(스크립트 파싱)
+        run: ./godot --headless --path . --import 2>&1 | tee import.log
+      - name: 시뮬레이션 스모크 테스트
+        run: ./godot --headless --path . --script res://tests/sim_smoke.gd 2>&1 | tee sim.log
+      - name: UI 스모크 테스트
+        run: |
+          if [ -f tests/ui_smoke.gd ]; then ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee ui.log; fi
+      - name: 에러 검사
+        run: |
+          if grep -hE "SCRIPT ERROR|Parse Error|ERROR:" *.log; then exit 1; fi
