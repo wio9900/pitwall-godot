@@ -1,45 +1,87 @@
 extends Control
-## 탑뷰 레이스 화면. 시뮬레이션 상태(sim)를 읽어서 그리기만 한다 — 로직은 없다.
+## 탑뷰 레이스 화면. 시뮬레이션 상태(sim)를 읽어서 그리기만 한다 — 규칙 로직은 없다.
 ## 연출을 바꾸고 싶으면 이 파일만 고치면 된다.
 
-const BG := Color("#0b0f14")
-const RUNOFF := Color("#17202a")
-const ASPHALT := Color("#3a4350")
-const ASPHALT_WET := Color("#2a3b52")
-const EDGE := Color("#c8d0da")
-const KERB_A := Color("#e5484d")
-const KERB_B := Color("#f1f5f9")
-const PIT := Color("#252e39")
+const BG := Color("#10161d")
+const BG_NIGHT := Color("#0a0d12")
+const RUNOFF := Color("#1a232d")
+const ASPHALT := Color("#3a4250")
+const ASPHALT_IN := Color("#272e39")
+const WET_TINT := Color(0.29, 0.64, 1.0)
+const EDGE := Color("#d7dde5")
+const KERB_R := Color("#e8394a")
+const KERB_W := Color("#e9edf2")
 const AMBER := Color("#ffc53d")
-const DRS_COL := Color(0.25, 0.85, 0.45, 0.35)
+const GREEN := Color("#3ecf8e")
+const PURPLE := Color("#a855f7")
+const LABEL := Color("#7d8796")
 const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
+const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같게)
 
 var sim: Variant = null
-var follow_slot := -1   # -1 = 전체 화면, 0/1 = 내 차 추적
+var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
+var sel_slot := 0            # 강조 링을 굵게 그릴 내 차
+var lights := -1             # 출발 신호: -1 숨김, 0~5 점등 개수
+var lights_out_t := -10.0    # 소등 시각(실시간) — GO! 표시용
+var banner_text := ""
+var banner_kind := ""
+var banner_t := -10.0
+
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0
 var _s := 1.0
 var _off := Vector2.ZERO
+var _now := 0.0
+var _smooth := {}      # car id → {p, a}
+var _pit_seen := {}    # car id → 피트레인 진입 시각(시뮬레이션)
+var _popups: Array = [] # {id, text, col, t}
+var _last_pos := {}
+var _last_radio := {}
+var _radio_shown := {}
+var _last_fastest := -1
+var _last_log: Variant = null
+
+
+func reset() -> void:
+	_smooth.clear()
+	_pit_seen.clear()
+	_popups.clear()
+	_last_pos.clear()
+	_last_radio.clear()
+	_radio_shown.clear()
+	_last_fastest = -1
+	_last_log = null
+	banner_text = ""
+	_cam_center = Vector2.ZERO
+
+
+func now() -> float:
+	return _now
 
 
 func _X(p: Vector2) -> Vector2:
 	return p * _s + _off
 
 
+func show_banner(text: String, kind: String) -> void:
+	banner_text = text
+	banner_kind = kind
+	banner_t = _now
+
+
+# ═════════ 카메라 ═════════
 func _update_camera(delta: float) -> void:
 	var T = sim.T
-	var pad = 30.0
-	var bb: Rect2 = T.bbox.grow(pad)
+	var bb: Rect2 = T.bbox.grow(34.0)
 	var fit_s: float = minf(size.x / bb.size.x, size.y / bb.size.y)
 	var want_center: Vector2 = bb.get_center()
 	var want_zoom = 1.0
 	if follow_slot >= 0:
 		var mc: Array = sim.my_cars()
-		if follow_slot < mc.size() and mc[follow_slot].dnf == "":
-			want_center = sim.car_pos_angle(mc[follow_slot])[0]
-			want_zoom = 2.6
-	# 부드러운 카메라 이동
-	var k = clampf(delta * 4.0, 0.0, 1.0)
+		if follow_slot < mc.size() and mc[follow_slot].dnf == "" and _smooth.has(mc[follow_slot].id):
+			want_center = _smooth[mc[follow_slot].id]["p"]
+			want_zoom = 2.8
+	var k = clampf(delta * 3.5, 0.0, 1.0)
 	if _cam_center == Vector2.ZERO:
 		_cam_center = want_center
 		_cam_zoom = want_zoom
@@ -49,151 +91,475 @@ func _update_camera(delta: float) -> void:
 	_off = size / 2.0 - _cam_center * _s
 
 
+# ═════════ 차량 위치: 실제 순서보다 앞서 그리지 않고, 부드럽게 보간 ═════════
+func _update_cars(delta: float) -> void:
+	var T = sim.T
+	var gap_d: float = T.L * 0.0045
+	var last_d: Variant = null
+	var targets := {}
+	for c in sim.order():
+		if c.dnf != "":
+			continue
+		if not c.started or c.finished or sim.is_pitting(c):
+			var pa: Array = sim.car_pos_angle(c)
+			targets[c.id] = [pa[0], pa[1]]
+			continue
+		var dist: float = sim.car_dist(c)
+		if last_d != null and last_d - dist < T.L * 0.5:
+			dist = minf(dist, last_d - gap_d)
+		last_d = dist
+		targets[c.id] = [T.point_at_dist(dist), T.head_at_dist(dist)]
+	var kp = clampf(delta * 18.0, 0.0, 1.0)
+	var ka = clampf(delta * 14.0, 0.0, 1.0)
+	for id in targets:
+		var tp: Vector2 = targets[id][0]
+		var ta: float = targets[id][1]
+		if not _smooth.has(id) or (_smooth[id]["p"] - tp).length() > 40.0:
+			_smooth[id] = {"p": tp, "a": ta}
+		else:
+			var s: Dictionary = _smooth[id]
+			s["p"] = s["p"].lerp(tp, kp)
+			s["a"] = s["a"] + wrapf(ta - s["a"], -PI, PI) * ka
+	for id in _smooth.keys():
+		if not targets.has(id):
+			_smooth.erase(id)
+
+
+# ═════════ 팝업·말풍선·배너 (sim 상태 변화를 감지만 한다) ═════════
+func _update_effects() -> void:
+	var ord: Array = sim.order()
+	for i in ord.size():
+		var c = ord[i]
+		var pos = i + 1
+		if c.dnf == "" and c.started and not sim.sc and _last_pos.has(c.id) and pos < _last_pos[c.id]:
+			if (c.mine or pos <= 3) and _smooth.has(c.id) and not sim.is_pitting(c):
+				_popups.append({"id": c.id, "text": "▲ P%d" % pos, "col": GREEN if c.mine else Color.WHITE, "t": _now})
+		_last_pos[c.id] = pos
+		if c.mine and c.radio != "" and _last_radio.get(c.id, "") != c.radio:
+			_last_radio[c.id] = c.radio
+			_radio_shown[c.id] = _now
+	if sim.fastest_id >= 0 and sim.fastest_id != _last_fastest:
+		_last_fastest = sim.fastest_id
+		if sim.leader_lap >= 2:
+			_popups.append({"id": sim.fastest_id, "text": "최고 랩 %.3f" % sim.fastest_t, "col": PURPLE, "t": _now})
+	var keep: Array = []
+	for p in _popups:
+		if _now - p["t"] < 2.2:
+			keep.append(p)
+	_popups = keep
+	# 레이스 컨트롤 메시지 → 상단 배너
+	if not sim.radio_log.is_empty():
+		var top = sim.radio_log[0]
+		if not is_same(top, _last_log):
+			_last_log = top
+			if top["kind"] != "driver" and top["kind"] != "sc":
+				show_banner(top["msg"], top["kind"])
+
+
 func _process(delta: float) -> void:
-	if sim != null and sim.T != null:
+	_now += delta
+	if sim != null and sim.T != null and size.x > 4 and size.y > 4:
+		_update_cars(delta)
 		_update_camera(delta)
+		_update_effects()
 	queue_redraw()
 
 
+# ═════════ 그리기 ═════════
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), BG)
+	var night: bool = sim != null and sim.night
+	draw_rect(Rect2(Vector2.ZERO, size), BG_NIGHT if night else BG)
 	if sim == null or sim.T == null:
 		return
 	var T = sim.T
-	var tw = TRACK_W * _s
-	var poly = PackedVector2Array()
-	for p in T.pts:
-		poly.append(_X(p))
+	var font = get_theme_default_font()
+	_draw_backdrop()
+	_draw_track(T, night)
+	_draw_stalls(T)
+	_draw_labels(T, font, night)
+	var wet: float = sim.wet
+	if wet > 0.2:
+		for c in sim.cars:
+			if _smooth.has(c.id) and c.started and not sim.is_pitting(c):
+				_draw_spray(_smooth[c.id]["p"], _smooth[c.id]["a"], wet)
+	for pass_mine in [false, true]:
+		for c in sim.cars:
+			if c.mine != pass_mine or not _smooth.has(c.id):
+				continue
+			var sp: Dictionary = _smooth[c.id]
+			_draw_car(_X(sp["p"]), sp["a"], c, night)
+	_draw_my_labels(font)
+	_draw_safety_car(font)
+	_draw_popups(font)
+	if night:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.04, 0.12, 0.22))
+	if wet > 0.04:
+		_draw_rain(wet)
+	_draw_banner(font)
+	_draw_lights(font)
+
+
+func _draw_backdrop() -> void:
+	# 은은한 격자 (방송 그래픽 느낌)
+	var step := 48.0
+	var col := Color(1, 1, 1, 0.025)
+	var x := fposmod(_off.x, step)
+	while x < size.x:
+		draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
+		x += step
+	var y := fposmod(_off.y, step)
+	while y < size.y:
+		draw_line(Vector2(0, y), Vector2(size.x, y), col, 1.0)
+		y += step
+
+
+func _poly(pts: Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for p in pts:
+		out.append(_X(p))
+	return out
+
+
+func _draw_track(T, night: bool) -> void:
+	var w = TRACK_W * _s
+	var poly = _poly(T.pts)
 	poly.append(poly[0])
-	# 런오프 · 트랙 테두리 · 아스팔트
-	draw_polyline(poly, RUNOFF, tw * 2.4, true)
-	draw_polyline(poly, EDGE.darkened(0.35), tw + 2.0, true)
-	var asphalt = ASPHALT.lerp(ASPHALT_WET, clampf(sim.wet * 1.4, 0.0, 1.0))
-	draw_polyline(poly, asphalt, tw, true)
-	_draw_kerbs(T, tw)
+	# 피트레인 (점선 중앙선)
+	var pit = _poly(T.pit_pts)
+	draw_polyline(pit, Color("#20262f") if night else Color("#2c3440"), maxf(3.0, w * 0.55), true)
+	_dashed(pit, Color("#4b5564"), 1.0, 4.0, 5.0)
+	# 런오프 → 흰 테두리 → 아스팔트 → 안쪽 레이싱 라인
+	draw_polyline(poly, RUNOFF, w * 2.6, true)
+	draw_polyline(poly, EDGE.darkened(0.55 if night else 0.15), w + maxf(2.0, w * 0.14), true)
+	draw_polyline(poly, Color("#262c36") if night else ASPHALT, w, true)
+	var inner: Color = Color("#171c24") if night else ASPHALT_IN
+	if sim.wet > 0.05:
+		inner = inner.lerp(WET_TINT, 0.15 + sim.wet * 0.45)
+	draw_polyline(poly, inner, w * 0.62, true)
+	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차
+	var i := 0
+	while i < T.m:
+		if T.spd[i] <= 0.55:
+			var a: Vector2 = T.pts[i]
+			var b: Vector2 = T.pts[(i + 2) % T.m]
+			var c0: Vector2 = T.pts[(i - 2 + T.m) % T.m]
+			var hn := atan2(b.y - a.y, b.x - a.x)
+			var hp := atan2(a.y - c0.y, a.x - c0.x)
+			var side := -1.0 if wrapf(hn - hp, -PI, PI) > 0 else 1.0
+			var n: Vector2 = T.nrm[i] * (TRACK_W * 0.55 * side)
+			var col := KERB_W if (i / 2) % 2 == 1 else KERB_R
+			if night:
+				col = col.darkened(0.4)
+			draw_line(_X(a + n), _X(b + n), col, maxf(2.0, w * 0.2))
+		i += 2
 	# DRS 구간
 	if sim.drs_on():
 		for z in T.drs:
-			var seg = PackedVector2Array()
-			var i: int = z["ia"]
-			var guard = 0
+			var seg := PackedVector2Array()
+			var j: int = z["ia"]
+			var guard := 0
 			while guard < T.m:
-				seg.append(_X(T.pts[i]))
-				if i == z["ib"]:
+				seg.append(_X(T.pts[j]))
+				if j == z["ib"]:
 					break
-				i = (i + 1) % T.m
+				j = (j + 1) % T.m
 				guard += 1
 			if seg.size() >= 2:
-				draw_polyline(seg, DRS_COL, tw * 0.35, true)
-	# 피트레인
-	var pit_poly = PackedVector2Array()
-	for p in T.pit_pts:
-		pit_poly.append(_X(p))
-	draw_polyline(pit_poly, PIT, tw * 0.6, true)
-	_draw_stalls(T, tw)
-	_draw_start_line(T, tw)
-	# 차량: AI 먼저, 내 차는 맨 위에
-	var font = get_theme_default_font()
-	for pass_mine in [false, true]:
-		for c in sim.cars:
-			if c.mine != pass_mine or c.dnf != "":
-				continue
-			var pa: Array = sim.car_pos_angle(c)
-			_draw_car(_X(pa[0]), pa[1], c.color, c.rim, c.mine, c.drs and not sim.sc)
-			if c.mine:
-				draw_string(font, _X(pa[0]) + Vector2(-30, -16), c.code, HORIZONTAL_ALIGNMENT_CENTER, 60, 16, AMBER)
-	# 세이프티카
-	var scp: Array = sim.sc_pos_angle()
-	if not scp.is_empty():
-		_draw_car(_X(scp[0]), scp[1], Color("#f59e0b"), Color("#111827"), false, false)
-		draw_string(font, _X(scp[0]) + Vector2(-20, -14), "SC", HORIZONTAL_ALIGNMENT_CENTER, 40, 15, Color("#f59e0b"))
-	# 날씨·야간
-	if sim.night:
-		draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.04, 0.12, 0.28))
-	if sim.wet > 0.04:
-		_draw_rain()
-	if sim.sc:
-		var label = "SAFETY CAR" if sim.sc_kind == "SC" else "VIRTUAL SAFETY CAR"
-		draw_rect(Rect2(0, 0, size.x, 26), Color(0.96, 0.62, 0.04, 0.85))
-		draw_string(font, Vector2(0, 19), label, HORIZONTAL_ALIGNMENT_CENTER, size.x, 17, Color("#111827"))
+				draw_polyline(seg, Color(GREEN, 0.55), maxf(2.0, w * 0.22), true)
+	# 출발선 (체커)
+	var p0: Vector2 = T.pts[0]
+	var n0: Vector2 = T.nrm[0]
+	var d0 := Vector2(cos(T.head[0]), sin(T.head[0]))
+	var cells := 6
+	var cell := TRACK_W / cells
+	for k in cells:
+		for r in 2:
+			var q: Vector2 = p0 + n0 * (-TRACK_W * 0.5 + cell * k) + d0 * (cell * r)
+			var quad := PackedVector2Array([_X(q), _X(q + n0 * cell), _X(q + n0 * cell + d0 * cell), _X(q + d0 * cell)])
+			draw_colored_polygon(quad, Color.WHITE if (k + r) % 2 == 0 else Color("#111827"))
 
 
-func _draw_kerbs(T, tw: float) -> void:
-	# 느린 코너(속도 낮은 구간) 안쪽·바깥쪽에 빨강·흰색 연석
-	var step = 3
-	var i = 0
-	while i < T.m:
-		if T.spd[i] < 0.62:
-			var j: int = (i + step) % T.m
-			var off: Vector2 = T.nrm[i] * (TRACK_W * 0.5)
-			var col = KERB_A if (i / step) % 2 == 0 else KERB_B
-			for side in [1.0, -1.0]:
-				draw_line(_X(T.pts[i] + off * side), _X(T.pts[j] + off * side), col, maxf(1.5, tw * 0.16))
-		i += step
+func _dashed(pts: PackedVector2Array, col: Color, width: float, dash: float, gap: float) -> void:
+	var on := true
+	var left := dash
+	for i in range(pts.size() - 1):
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[i + 1]
+		var seg_len := a.distance_to(b)
+		if seg_len < 0.01:
+			continue
+		var t := 0.0
+		while t < seg_len:
+			var step := minf(left, seg_len - t)
+			if on:
+				draw_line(a.lerp(b, t / seg_len), a.lerp(b, (t + step) / seg_len), col, width)
+			t += step
+			left -= step
+			if left <= 0.0:
+				on = not on
+				left = dash if on else gap
 
 
-func _draw_stalls(T, tw: float) -> void:
-	var colors = {}
-	var mine = {}
+func _draw_stalls(T) -> void:
+	var colors := {}
+	var mine := {}
+	var working := {}
 	for c in sim.cars:
 		colors[c.stall_idx] = c.color
 		if c.mine:
 			mine[c.stall_idx] = true
+		if c.boxing != null and sim.is_pitting(c):
+			working[c.stall_idx] = true
 	for idx in sim.n_stalls:
 		var pp: Array = T.pit_lane_point(sim._stall_u(idx))
 		var ang: float = pp[1]
 		var nrm: Vector2 = Vector2(-sin(ang), cos(ang)) * float(T.inward)
-		var pos: Vector2 = _X(pp[0] + nrm * 7.0)
-		var w = maxf(4.0, tw * 0.55)
+		var pos: Vector2 = _X(pp[0] + nrm * 7.5)
+		var w := maxf(5.0, TRACK_W * _s * 0.6)
 		var col: Color = colors.get(idx, Color.GRAY)
 		draw_set_transform(pos, ang, Vector2.ONE)
-		draw_rect(Rect2(-w * 0.5, -w * 0.32, w, w * 0.64), col if mine.has(idx) else col.darkened(0.45))
+		draw_rect(Rect2(-w * 0.5, -w * 0.3, w, w * 0.6), col if mine.has(idx) else col.darkened(0.5))
 		if mine.has(idx):
-			draw_rect(Rect2(-w * 0.7, -w * 0.5, w * 1.4, w), AMBER, false, 2.0)
+			draw_rect(Rect2(-w * 0.7, -w * 0.48, w * 1.4, w * 0.96), AMBER, false, 2.0)
+		# 피트 작업 중: 깜박이는 작업등
+		if working.has(idx) and int(_now * 4.0) % 2 == 0:
+			draw_rect(Rect2(-w * 0.8, -w * 0.58, w * 1.6, w * 1.16), Color(1, 1, 1, 0.55), false, 1.5)
 		draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-func _draw_start_line(T, tw: float) -> void:
-	var p: Vector2 = T.pts[0]
-	var n: Vector2 = T.nrm[0]
-	var dir = Vector2(cos(T.head[0]), sin(T.head[0]))
-	var cells = 6
-	var cell = TRACK_W / cells
-	for k in cells:
-		for r in 2:
-			var a: Vector2 = p + n * (-TRACK_W * 0.5 + cell * k) + dir * (cell * r)
-			var col = Color.WHITE if (k + r) % 2 == 0 else Color("#111827")
-			var q = PackedVector2Array([_X(a), _X(a + n * cell), _X(a + n * cell + dir * cell), _X(a + dir * cell)])
-			draw_colored_polygon(q, col)
+func _draw_labels(T, font, night: bool) -> void:
+	var fs := 13
+	var placed: Array = []
+	var labels: Array = T.C.get("labels", [])
+	for lb in labels:
+		var si: int = (int(lb[0]) * SPC) % T.m
+		var txt: String = lb[1]
+		var p := _X(T.pts[si])
+		var n: Vector2 = T.nrm[si]
+		var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+		var o: float = -float(T.inward) * 24.0
+		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, size.y - 4))
+		for step in 5:
+			var hit := false
+			for r in placed:
+				if absf(lp.x + tsz.x / 2 - r.x) < (tsz.x + r.z) / 2 + 4 and absf(lp.y - r.y) < 13:
+					hit = true
+					break
+			if not hit:
+				break
+			var k := 1.25 + step * 0.28
+			var dy := 13.0 if step % 2 == 0 else -13.0
+			lp = Vector2(clampf(p.x + n.x * o * k - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o * k + dy, 14, size.y - 4))
+		placed.append(Vector3(lp.x + tsz.x / 2, lp.y, tsz.x))
+		var anchor := lp + Vector2(tsz.x / 2, -4)
+		if anchor.distance_to(p) > 26:
+			draw_line(p, anchor, Color(LABEL, 0.45), 1.0)
+		draw_string(font, lp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("#5d6674") if night else LABEL)
+	if sim.drs_on():
+		for z in T.drs:
+			var q := _X(T.pts[z["ia"]])
+			var nn: Vector2 = T.nrm[z["ia"]]
+			draw_string(font, q - nn * float(T.inward) * 18.0 + Vector2(-12, 4), "DRS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, GREEN)
 
 
-func _draw_car(pos: Vector2, ang: float, body: Color, rim: Color, is_mine: bool, drs: bool) -> void:
-	var sc = clampf(_s * 0.9, 1.4, 4.5)
-	if is_mine:
-		draw_circle(pos, 9.0 * sc * 0.75, Color(AMBER, 0.22))
-	if drs:
-		draw_circle(pos, 6.0 * sc * 0.75, Color(0.3, 0.9, 0.5, 0.25))
+func _car_scale(is_mine: bool) -> float:
+	# 화면 크기에 맞춘 차 크기, 추적 카메라로 확대하면 조금 더 커진다
+	var base := clampf(minf(size.x, size.y) / 520.0, 0.9, 2.0)
+	return base * (1.15 if is_mine else 0.98) * clampf(sqrt(_cam_zoom), 1.0, 1.7)
+
+
+func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
+	var sc := _car_scale(c.mine)
 	draw_set_transform(pos, ang, Vector2(sc, sc))
-	# 차체 (앞이 +x)
-	var shape = PackedVector2Array([Vector2(-5, -2.0), Vector2(3, -1.5), Vector2(6, -0.6), Vector2(6, 0.6), Vector2(3, 1.5), Vector2(-5, 2.0)])
-	draw_colored_polygon(shape, body)
-	draw_rect(Rect2(-6.2, -2.8, 1.4, 5.6), Color("#0f172a"))  # 리어 윙
-	draw_rect(Rect2(5.2, -2.6, 0.9, 5.2), rim)                # 프런트 윙
-	draw_rect(Rect2(-4.6, -2.9, 2.2, 1.0), Color("#111827"))  # 리어 타이어
-	draw_rect(Rect2(-4.6, 1.9, 2.2, 1.0), Color("#111827"))
-	draw_rect(Rect2(2.6, -2.6, 1.8, 0.9), Color("#111827"))   # 프런트 타이어
-	draw_rect(Rect2(2.6, 1.7, 1.8, 0.9), Color("#111827"))
-	draw_circle(Vector2(-0.6, 0), 0.9, rim)                    # 헬멧
+	if night:
+		var beam := Color(1, 0.97, 0.78, 0.38)
+		var fade := Color(1, 0.97, 0.78, 0.0)
+		draw_polygon(PackedVector2Array([Vector2(4, -2), Vector2(28, -9), Vector2(28, 9), Vector2(4, 2)]), PackedColorArray([beam, fade, fade, beam]))
+	# 그림자
+	draw_colored_polygon(_car_body(Vector2(0.8, 1.1)), Color(0, 0, 0, 0.35))
+	# 내 차 강조 링 · DRS 오라
+	if c.mine:
+		_ellipse(Vector2.ZERO, Vector2(9.5, 6.2), AMBER, 2.0 if c.slot == sel_slot else 1.3)
+	if c.drs and not sim.sc:
+		_ellipse(Vector2(-1, 0), Vector2(10.5, 6.8), GREEN, 1.4)
+	# 오픈 휠 4개 + 컴파운드 색 띠
+	var tyre := Color("#0b0e12")
+	draw_rect(Rect2(2.6, -4.8, 3.2, 1.7), tyre)
+	draw_rect(Rect2(2.6, 3.1, 3.2, 1.7), tyre)
+	draw_rect(Rect2(-5.8, -5.0, 3.5, 1.9), tyre)
+	draw_rect(Rect2(-5.8, 3.1, 3.5, 1.9), tyre)
+	var tcol: Color = Color(sim.TYRE_HEX[c.comp])
+	draw_rect(Rect2(3.7, -4.5, 1.0, 1.1), tcol)
+	draw_rect(Rect2(3.7, 3.4, 1.0, 1.1), tcol)
+	draw_rect(Rect2(-4.6, -4.7, 1.2, 1.3), tcol)
+	draw_rect(Rect2(-4.6, 3.4, 1.2, 1.3), tcol)
+	# 리어·프런트 윙
+	draw_rect(Rect2(-7.2, -4.2, 1.6, 8.4), c.rim)
+	draw_rect(Rect2(5.8, -4.4, 1.4, 8.8), c.rim)
+	# 바디 (노즈 + 사이드포드)
+	draw_colored_polygon(_car_body(Vector2.ZERO), c.color)
+	draw_line(Vector2(-4.5, 0), Vector2(5.5, 0), c.color.lightened(0.35), 0.7)
+	# 콕핏 · 헤일로
+	_fill_ellipse(Vector2(-0.5, 0), Vector2(2.0, 1.1), Color("#11161d"))
+	draw_arc(Vector2(-0.3, 0), 1.6, -1.2, 1.2, 8, Color("#6b7280"), 0.5)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-func _draw_rain() -> void:
-	var t = Time.get_ticks_msec() / 1000.0
-	var n = int(140 * clampf(sim.wet, 0.0, 1.0)) + 20
-	var col = Color(0.65, 0.78, 1.0, 0.18 + 0.25 * sim.wet)
+func _car_body(o: Vector2) -> PackedVector2Array:
+	var pts := [Vector2(6.8, 0), Vector2(2.5, -1.6), Vector2(0.8, -3.3), Vector2(-4.8, -2.8), Vector2(-6.2, -1.4), Vector2(-6.2, 1.4), Vector2(-4.8, 2.8), Vector2(0.8, 3.3), Vector2(2.5, 1.6)]
+	var out := PackedVector2Array()
+	for p in pts:
+		out.append(p + o)
+	return out
+
+
+func _ellipse(center: Vector2, r: Vector2, col: Color, width: float) -> void:
+	var pts := PackedVector2Array()
+	for k in 25:
+		var a := TAU * k / 24.0
+		pts.append(center + Vector2(cos(a) * r.x, sin(a) * r.y))
+	draw_polyline(pts, col, width, true)
+
+
+func _fill_ellipse(center: Vector2, r: Vector2, col: Color) -> void:
+	var pts := PackedVector2Array()
+	for k in 16:
+		var a := TAU * k / 16.0
+		pts.append(center + Vector2(cos(a) * r.x, sin(a) * r.y))
+	draw_colored_polygon(pts, col)
+
+
+func _draw_spray(p: Vector2, ang: float, wet: float) -> void:
+	# 젖은 노면: 차 뒤로 퍼지는 물보라
+	var back := Vector2(-cos(ang), -sin(ang))
+	var side := Vector2(-back.y, back.x)
+	var base := _X(p)
+	var k := _car_scale(false)
+	var ln := (16.0 + 18.0 * wet) * k
+	var spread := (5.0 + 6.0 * wet) * k
+	var mist := Color(0.85, 0.9, 1.0, 0.22 * wet + 0.08)
+	var clear := Color(0.85, 0.9, 1.0, 0.0)
+	draw_polygon(PackedVector2Array([base + side * 2.0, base + back * ln + side * spread, base + back * ln - side * spread, base - side * 2.0]), PackedColorArray([mist, clear, clear, mist]))
+
+
+func _draw_my_labels(font) -> void:
+	for c in sim.my_cars():
+		if not _smooth.has(c.id):
+			continue
+		var q := _X(_smooth[c.id]["p"])
+		var sc := _car_scale(true)
+		var tag: String = c.code
+		if sim.is_pitting(c):
+			if not _pit_seen.has(c.id):
+				_pit_seen[c.id] = sim.clock
+			tag += "  PIT %.1fs" % (sim.clock - _pit_seen[c.id])
+		else:
+			_pit_seen.erase(c.id)
+		var lp := q + Vector2(11, -9) * sc
+		draw_string_outline(font, lp, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, 4, Color(0, 0, 0, 0.7))
+		draw_string(font, lp, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, AMBER)
+		# 무전 말풍선 (4초)
+		if _radio_shown.has(c.id) and _now - _radio_shown[c.id] < 4.0 and c.radio != "":
+			var a := clampf((4.0 - (_now - _radio_shown[c.id])) / 0.6, 0.0, 1.0)
+			var txt: String = c.radio
+			if txt.length() > 26:
+				txt = txt.substr(0, 25) + "…"
+			var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+			var bp := Vector2(clampf(q.x - tsz.x / 2, 10, size.x - tsz.x - 18), clampf(q.y - 40 * sc, 54, size.y - 30))
+			var box := Rect2(bp - Vector2(8, 18), tsz + Vector2(16, 10))
+			draw_rect(box, Color(0.08, 0.1, 0.13, 0.88 * a))
+			draw_rect(box, Color(AMBER, 0.8 * a), false, 1.5)
+			draw_string(font, bp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, a))
+
+
+func _draw_safety_car(font) -> void:
+	var scp: Array = sim.sc_pos_angle()
+	if scp.is_empty():
+		return
+	var p := _X(scp[0])
+	var col := GREEN if sim.sc_in_pit_lane else AMBER
+	var r := 7.0 * _car_scale(false)
+	draw_circle(p, r, col)
+	draw_arc(p, r, 0, TAU, 20, Color.WHITE, 1.6, true)
+	var lbl := "IN" if sim.sc_in_pit_lane else "SC"
+	draw_string(font, p + Vector2(-r, 4), lbl, HORIZONTAL_ALIGNMENT_CENTER, r * 2, 11, Color("#1a1300"))
+	if sim.sc_in_notified:
+		var t := "SC PIT IN ▸" if sim.sc_in_pit_lane else "SC IN THIS LAP"
+		draw_string_outline(font, p + Vector2(-48, -r - 6), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 4, Color(0, 0, 0, 0.7))
+		draw_string(font, p + Vector2(-48, -r - 6), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col)
+
+
+func _draw_popups(font) -> void:
+	for pp in _popups:
+		if not _smooth.has(pp["id"]):
+			continue
+		var age: float = _now - pp["t"]
+		var a := clampf((2.2 - age) / 0.6, 0.0, 1.0)
+		var q := _X(_smooth[pp["id"]]["p"]) + Vector2(-20, -22 - age * 18)
+		draw_string_outline(font, q, pp["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, 4, Color(0, 0, 0, 0.7 * a))
+		draw_string(font, q, pp["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(pp["col"], a))
+
+
+func _draw_rain(wet: float) -> void:
+	var n := int(160 * clampf(wet, 0.0, 1.0)) + 24
+	var col := Color(0.65, 0.78, 1.0, 0.16 + 0.24 * wet)
 	for i in n:
-		var hx = fposmod(sin(i * 12.9898) * 43758.5453, 1.0)
-		var hy = fposmod(sin(i * 78.233) * 12345.678, 1.0)
-		var x = fposmod(hx * size.x + t * 40.0, size.x)
-		var y = fposmod(hy * size.y + t * (420.0 + 180.0 * hx), size.y)
-		draw_line(Vector2(x, y), Vector2(x - 3.0, y + 11.0), col, 1.2)
+		var hx := fposmod(sin(i * 12.9898) * 43758.5453, 1.0)
+		var hy := fposmod(sin(i * 78.233) * 12345.678, 1.0)
+		var x := fposmod(hx * size.x + _now * 40.0, size.x)
+		var y := fposmod(hy * size.y + _now * (420.0 + 180.0 * hx), size.y)
+		draw_line(Vector2(x, y), Vector2(x - 3.0, y + 12.0), col, 1.2)
+
+
+func _draw_banner(font) -> void:
+	# 상단 이벤트 띠: 세이프티카는 상시, 그 외 레이스 컨트롤 메시지는 5초
+	var text := ""
+	var col := Color(0.12, 0.15, 0.2, 0.92)
+	var fg := Color.WHITE
+	var slide := 1.0
+	if sim.sc:
+		text = "SAFETY CAR" if sim.sc_kind == "SC" else "VIRTUAL SAFETY CAR"
+		if sim.sc_in_notified:
+			text += "  ·  이번 랩 종료"
+		col = Color(0.96, 0.62, 0.04, 0.92)
+		fg = Color("#111827")
+	elif _now - banner_t < 5.0 and banner_text != "":
+		text = banner_text
+		slide = clampf((_now - banner_t) / 0.25, 0.0, 1.0)
+		if banner_kind == "bad":
+			col = Color(0.55, 0.12, 0.14, 0.92)
+		elif banner_kind == "wet":
+			col = Color(0.1, 0.3, 0.6, 0.92)
+		elif banner_kind == "green":
+			col = Color(0.08, 0.45, 0.25, 0.92)
+	if text == "":
+		return
+	var h := 32.0
+	var top := -h + h * slide
+	draw_rect(Rect2(0, top, size.x, h), col)
+	draw_string(font, Vector2(14, top + 22), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 28, 17, fg)
+
+
+func _draw_lights(font) -> void:
+	# 출발 신호등: 5개 점등 → 소등 + GO!
+	var go_age := _now - lights_out_t
+	if lights < 0 and go_age > 1.4:
+		return
+	var n := 5
+	var r := clampf(size.x / 40.0, 12.0, 26.0)
+	var gap := r * 2.8
+	var w := gap * (n - 1)
+	var origin := Vector2(size.x / 2 - w / 2, size.y * 0.2)
+	draw_rect(Rect2(origin - Vector2(r * 1.6, r * 1.6), Vector2(w + r * 3.2, r * 3.2)), Color(0.02, 0.03, 0.05, 0.9))
+	for i in n:
+		var on := lights > i
+		var c := origin + Vector2(gap * i, 0)
+		if on:
+			draw_circle(c, r * 1.5, Color(1, 0.1, 0.12, 0.18))
+		draw_circle(c, r, Color("#ef1d2a") if on else Color("#2a1416"))
+	if lights < 0:
+		var a := clampf((1.4 - go_age) / 0.4, 0.0, 1.0)
+		var t := "GO!"
+		var tsz: Vector2 = font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52)
+		draw_string_outline(font, Vector2(size.x / 2 - tsz.x / 2, origin.y + r * 4.4), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, 6, Color(0, 0, 0, 0.7 * a))
+		draw_string(font, Vector2(size.x / 2 - tsz.x / 2, origin.y + r * 4.4), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, Color(GREEN, a))

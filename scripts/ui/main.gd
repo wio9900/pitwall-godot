@@ -42,6 +42,20 @@ var result_box: Control
 var result_text: RichTextLabel
 var speed_btns: Array = []
 var cam_btns: Array = []
+# 반응형 배치: 가로 화면(PC·가로 폰) / 세로 화면(세로 폰)
+var hud_top: Control
+var panels_box: Control
+var tabs: TabContainer
+var port_box: VBoxContainer
+var land_box: HBoxContainer
+var land_left: VBoxContainer
+var land_right: VBoxContainer
+var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로
+var result_panel: PanelContainer
+# 출발 신호
+var starting := false
+var start_t := 0.0
+var start_hold := 4.5
 
 
 func _ready() -> void:
@@ -56,6 +70,49 @@ func _ready() -> void:
 	_build_race_ui()
 	_build_result()
 	_show_menu()
+	get_viewport().size_changed.connect(_on_resize)
+	_on_resize()
+
+
+func _on_resize() -> void:
+	var vs: Vector2 = get_viewport_rect().size
+	var want := 1 if vs.x > vs.y * 1.05 else 0
+	if want != landscape:
+		landscape = want
+		_apply_layout()
+	# 메뉴는 넓은 화면에서 가운데 정렬된 기둥으로
+	var side = maxf(28.0, (vs.x - 820.0) / 2.0)
+	menu_box.add_theme_constant_override("margin_left", int(side))
+	menu_box.add_theme_constant_override("margin_right", int(side))
+	result_panel.custom_minimum_size = Vector2(minf(760.0, vs.x - 32.0), minf(900.0, vs.y - 32.0))
+
+
+func _move(node: Control, parent: Control) -> void:
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	parent.add_child(node)
+
+
+func _apply_layout() -> void:
+	if landscape == 1:
+		# 왼쪽: 상단 바 + 큰 트랙 / 오른쪽: 내 차 지시 + 순위·무전
+		_move(hud_top, land_left)
+		_move(race_view, land_left)
+		_move(panels_box, land_right)
+		_move(tabs, land_right)
+		race_view.custom_minimum_size = Vector2(0, 0)
+		tabs.custom_minimum_size = Vector2(0, 160)
+		land_box.visible = true
+		port_box.visible = false
+	else:
+		_move(hud_top, port_box)
+		_move(race_view, port_box)
+		_move(panels_box, port_box)
+		_move(tabs, port_box)
+		race_view.custom_minimum_size = Vector2(0, 520)
+		tabs.custom_minimum_size = Vector2(0, 240)
+		land_box.visible = false
+		port_box.visible = true
 
 
 # ═════════ 테마 ═════════
@@ -224,8 +281,14 @@ func _start_race() -> void:
 	sim = RaceSimS.new()
 	var s = last_settings
 	sim.new_race(s["circ"], s["team"], s["laps"], s["wx"], s["start"])
+	race_view.reset()
 	race_view.sim = sim
 	race_view.follow_slot = -1
+	# 출발 신호: 1초마다 빨간불 하나씩 → 잠깐 정지 → 소등과 함께 출발
+	starting = true
+	start_t = 0.0
+	start_hold = 5.0 + randf_range(0.4, 1.1)
+	race_view.lights = 0
 	menu_box.visible = false
 	result_box.visible = false
 	race_box.visible = true
@@ -246,56 +309,78 @@ func _build_race_ui() -> void:
 		mc.add_theme_constant_override("margin_" + side, 10)
 	add_child(mc)
 	race_box = mc
-	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
-	mc.add_child(v)
-	# 상단 정보 + 배속
+	var root = Control.new()
+	mc.add_child(root)
+	# 두 가지 뼈대를 미리 만들어 두고, 화면 방향에 따라 부품을 옮겨 끼운다
+	port_box = VBoxContainer.new()
+	port_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	port_box.add_theme_constant_override("separation", 8)
+	root.add_child(port_box)
+	land_box = HBoxContainer.new()
+	land_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	land_box.add_theme_constant_override("separation", 10)
+	root.add_child(land_box)
+	land_left = VBoxContainer.new()
+	land_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	land_left.size_flags_stretch_ratio = 1.55
+	land_left.add_theme_constant_override("separation", 6)
+	land_box.add_child(land_left)
+	land_right = VBoxContainer.new()
+	land_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	land_right.add_theme_constant_override("separation", 8)
+	land_box.add_child(land_right)
+	# 상단 정보 + 배속 + 카메라
+	var top = VBoxContainer.new()
+	top.add_theme_constant_override("separation", 4)
+	hud_top = top
 	top_label = _rtl()
-	v.add_child(top_label)
+	top.add_child(top_label)
 	var sp = HBoxContainer.new()
-	sp.add_theme_constant_override("separation", 6)
-	v.add_child(sp)
+	sp.add_theme_constant_override("separation", 5)
+	top.add_child(sp)
 	speed_btns.clear()
 	for s in SPEEDS:
-		var b = _btn("멈춤" if s == 0 else "%d×" % s, 18)
+		var b = _btn("멈춤" if s == 0 else "%d×" % s, 16)
 		b.toggle_mode = true
 		b.pressed.connect(_set_speed.bind(s))
 		sp.add_child(b)
 		speed_btns.append(b)
-	var sep = VSeparator.new()
-	sp.add_child(sep)
+	sp.add_child(VSeparator.new())
 	cam_btns.clear()
 	for i in [-1, 0, 1]:
-		var b = _btn("전체" if i == -1 else "#%d" % (i + 1), 18)
+		var b = _btn("전체" if i == -1 else "#%d 추적" % (i + 1), 16)
 		b.toggle_mode = true
 		b.pressed.connect(_set_cam.bind(i))
 		sp.add_child(b)
 		cam_btns.append(b)
 	# 트랙
 	race_view = RaceViewS.new()
-	race_view.custom_minimum_size = Vector2(0, 420)
 	race_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	race_view.size_flags_stretch_ratio = 1.3
+	race_view.size_flags_stretch_ratio = 1.6
 	race_view.clip_contents = true
-	v.add_child(race_view)
-	# 내 차 패널
+	# 내 차 패널 2개
 	var h = HBoxContainer.new()
 	h.add_theme_constant_override("separation", 8)
-	v.add_child(h)
+	panels_box = h
 	car_panels.clear()
 	for i in 2:
 		car_panels.append(_build_car_panel(h, i))
 	# 순위 / 무전
-	var tabs = TabContainer.new()
+	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	tabs.custom_minimum_size = Vector2(0, 260)
-	v.add_child(tabs)
 	tower = _rtl(false)
 	tower.name = "순위"
+	_small_text(tower, 16)
 	tabs.add_child(tower)
 	radio = _rtl(false)
 	radio.name = "무전"
+	_small_text(radio, 16)
 	tabs.add_child(radio)
+
+
+func _small_text(r: RichTextLabel, fsize: int) -> void:
+	for k in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size", "mono_font_size"]:
+		r.add_theme_font_size_override(k, fsize)
 
 
 func _build_car_panel(parent: Control, slot: int) -> Dictionary:
@@ -306,8 +391,10 @@ func _build_car_panel(parent: Control, slot: int) -> Dictionary:
 	v.add_theme_constant_override("separation", 5)
 	pc.add_child(v)
 	var head = _rtl()
+	_small_text(head, 18)
 	v.add_child(head)
 	var status = _rtl()
+	_small_text(status, 15)
 	v.add_child(status)
 	var box_row = HBoxContainer.new()
 	box_row.add_theme_constant_override("separation", 4)
@@ -359,6 +446,7 @@ func _set_speed(s: int) -> void:
 
 func _set_cam(slot: int) -> void:
 	race_view.follow_slot = slot
+	race_view.sel_slot = maxi(0, slot)
 	_press_only(cam_btns, slot + 1)
 
 
@@ -399,7 +487,9 @@ func _on_ers(m: String, slot: int) -> void:
 func _process(delta: float) -> void:
 	if sim == null or not race_box.visible:
 		return
-	if speed_x > 0 and not sim.done:
+	if starting:
+		_update_start(delta)
+	elif speed_x > 0 and not sim.done:
 		sim.advance(delta * speed_x * RaceSimS.SPEED_BASE)
 	ui_timer += delta
 	if ui_timer >= 0.2:
@@ -407,6 +497,20 @@ func _process(delta: float) -> void:
 		_refresh_ui()
 		if sim.done and not result_box.visible:
 			_show_result()
+
+
+func _update_start(delta: float) -> void:
+	start_t += delta
+	var n = mini(5, int(floor(start_t)) + 1)
+	if start_t < start_hold:
+		if n != race_view.lights:
+			race_view.lights = n
+			top_label.text = "[b]%s[/b]  [color=#ef4444]스타트 시그널 점등 중… (%d/5)[/color]" % [sim.CIRC["name"], n]
+		return
+	starting = false
+	race_view.lights = -1
+	race_view.lights_out_t = race_view.now()
+	race_view.show_banner("소등! 레이스 시작", "green")
 
 
 func _tyre_bb(comp: String) -> String:
@@ -432,7 +536,8 @@ func _refresh_ui() -> void:
 	var sc_txt = ""
 	if sim.sc:
 		sc_txt = " · [color=#f59e0b][b]%s[/b][/color]" % sim.sc_kind
-	top_label.text = "[b]%s[/b]  [color=#ffc53d]L%d/%d[/color]  · %s%s%s%s" % [sim.CIRC["name"], lap_now, sim.laps, wx, fc_txt, sc_txt, " · 야간" if sim.night else ""]
+	if not starting:
+		top_label.text = "[b]%s[/b]  [color=#ffc53d]L%d/%d[/color]  · %s%s%s%s" % [sim.CIRC["name"], lap_now, sim.laps, wx, fc_txt, sc_txt, " · 야간" if sim.night else ""]
 	# 내 차
 	var mine: Array = sim.my_cars()
 	for i in 2:
@@ -531,7 +636,8 @@ func _build_result() -> void:
 	add_child(cc)
 	result_box = cc
 	var pc = PanelContainer.new()
-	pc.custom_minimum_size = Vector2(660, 900)
+	pc.custom_minimum_size = Vector2(660, 680)
+	result_panel = pc
 	cc.add_child(pc)
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
