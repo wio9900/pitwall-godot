@@ -56,7 +56,7 @@ var laps := 15
 var my_team := -1
 var cars: Array = []
 ## 난이도: 0 쉬움 · 1 보통(원작 밸런스) · 2 어려움 · 3 전설. AI 차 랩타임 배율.
-const DIFF_PACE := [1.0065, 1.0, 0.995, 0.991]
+const DIFF_PACE := [1.0065, 1.0, 0.994, 0.99]
 const DIFF_STRAT := [-0.12, 0.0, 0.05, 0.09]
 const DIFF_KO := ["쉬움", "보통", "어려움", "전설"]
 var difficulty: int = 1
@@ -88,10 +88,12 @@ var radio_log: Array = [] # {lap, who, color, msg, kind}
 var team_order := "free"   # 팀 오더: free 자유 경쟁 / hold 순서 유지
 var swap_req := false      # 팀 오더: 다음 기회에 앞 팀메이트가 양보
 var active_radio: Variant = null  # 엔지니어 제안 {slot, title, msg, opts:[{label, act, comp}]}
-var radio_seq := 0
-var sc_laps: Array = []    # SC·VSC·FCY 가 걸린 선두 랩 (복기 차트용)         # 새 제안이 뜰 때마다 +1 (UI가 감속·표시에 사용)
-var iradio_done := {}
-var prompts_enabled := true  # 설정에서 끄면 엔지니어 제안 창을 띄우지 않음      # "차id:종류" → true (같은 제안은 한 번만)
+var radio_seq := 0         # 새 제안이 뜰 때마다 +1 (UI가 감속·표시에 사용)
+var sc_laps: Array = []    # SC·VSC·FCY 가 걸린 선두 랩 (복기 차트용)
+var team_split := {}       # 팀 → 첫 차의 계획 스톱 수 (두 번째 차는 다른 전략으로 나누기도)
+var tally := {}            # 레이스 중 AI 전술·실수 횟수 (테스트·밸런스 확인용)
+var iradio_done := {}      # "차id:종류" → true (같은 제안은 한 번만)
+var prompts_enabled := true  # 설정에서 끄면 엔지니어 제안 창을 띄우지 않음
 
 var _cuts_cache: Dictionary = {}
 
@@ -230,6 +232,8 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.comp = sc_
 			else:
 				c.sc_early = rnd() < 0.7
+				c.sc_stay = rnd() < (0.3 if team_style(c.team) == "aggressive" else 0.12)
+				c.sc_miss = rnd() < 0.3
 				c.fuel = laps * FPL * (1.0 + uni(0.0, 0.04))
 				c.wing = snappedf(clampf(float(CIRC["wingOpt"]) + gauss(0.35), 1.0, 5.0), 0.1)
 				c.press = "low" if rnd() < 0.2 else ("high" if rnd() < 0.2 else "std")
@@ -272,6 +276,8 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	for i in cars.size():
 		cars[i].grid = i
 		cars[i].start_t = i * 0.22
+	team_split = {}
+	tally = {}
 	for c in cars:
 		if not c.mine and not is_wec():
 			plan_ai_strategy(c, "")
@@ -294,6 +300,21 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		fc = null
 	if CIRC.has("night") and CIRC["night"] != null:
 		night = float(CIRC["night"][0]) <= 0.0
+	_ai_setups()
+
+
+## 팀 엔지니어 실력 (0~1): 커리어는 수석 엔지니어 등급, 그 밖에는 팀 전략 능력
+func team_eng_q(c) -> float:
+	return clampf((c.strategy - 0.6) / 0.35, 0.0, 1.0)
+
+
+## AI 팀 세부 셋업: 전략·엔지니어 실력과 난이도만큼 최적값에 가깝게
+func _ai_setups() -> void:
+	for c in cars:
+		if c.mine:
+			continue
+		var q: float = clampf(team_eng_q(c) + 0.2 + (difficulty - 1) * 0.15, 0.0, 1.0)
+		engineer_setup(c, q)
 
 
 func apply_driver(c) -> void:
@@ -387,12 +408,12 @@ func setup_pen(c, w: float) -> float:
 	return 0.15 * d * d * wsc()
 
 
-## 세부 셋업 (서스펜션·브레이크 밸런스·디퍼렌셜). 모두 표준이면 효과 0 = 원작과 같다.
-## 서킷·드라이버에 맞으면 랩당 최대 약 0.08초씩 빨라지고, 안 맞으면 그만큼 느려진다. 마모·실수 확률에도 영향.
-const SUSP_KO := {"soft": "부드럽게", "std": "표준", "stiff": "단단하게"}
-const BBIAS_KO := {"fwd": "앞쪽", "std": "표준", "rear": "뒤쪽"}
-const DIFFL_KO := {"open": "열림 (부드러움)", "std": "표준", "locked": "잠김 (트랙션)"}
-const SETUP_K := 0.08
+## 세부 셋업 (서스펜션·브레이크 밸런스·디퍼렌셜) — 슬라이더 값과 숨은 최적값의 거리로 랩타임이 정해진다.
+## 최적값은 서킷 성격(연석·저속 vs 고속, 트랙션 vs 직선) + 드라이버 성향 + 서킷·드라이버별 고정 편차.
+## 각 항목: 딱 맞으면 랩당 -0.09초, 범위의 30% 이상 벗어나면 손해(최대 +0.045초).
+const SETUP_RANGE := {"susp": [1.0, 10.0], "bbias": [52.0, 62.0], "diff": [20.0, 80.0]}
+const SETUP_KO := {"wing": "윙", "susp": "서스펜션", "bbias": "브레이크 밸런스", "diff": "디퍼렌셜"}
+const SETUP_K := 0.09
 
 
 ## 서킷 성격 점수: bump(+ = 저속·연석 많음 / - = 고속·매끈), trac(+ = 탈출 트랙션 중요 / - = 고속 직선 위주)
@@ -403,63 +424,87 @@ func circ_traits() -> Dictionary:
 	return {"bump": clampf((wc - 0.045) / 0.02 - (wa - 0.045) / 0.04, -1.0, 1.0), "trac": clampf((wc - we) / 0.03, -1.0, 1.0)}
 
 
-## {dt: 초/랩, wear: 배율, err: 실수 배율, score: {susp, bbias, diff}}
+func _h01(sv: String) -> float:
+	var h := 2166136261
+	for ch in sv:
+		h = ((h ^ ch.unicode_at(0)) * 16777619) & 0x7fffffff
+	return float(h % 10000) / 10000.0
+
+
+## 숨은 최적값 (서킷·드라이버마다 고정)
+func setup_opt(c) -> Dictionary:
+	if not c.setup_opt.is_empty():
+		return c.setup_opt
+	var ct := circ_traits()
+	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
+	var tm: float = clampf((c.tyre_mgmt - 0.8) / 0.08, -1.0, 1.0)
+	var key: String = circ_key + "|" + c.name
+	var o := {}
+	o["susp"] = clampf(5.5 - 3.0 * ct["bump"] + 0.6 * ag + (_h01(key + "s") - 0.5) * 2.4, 1.0, 10.0)
+	o["bbias"] = clampf(57.0 - 2.2 * ag + 0.8 * ct["bump"] + (_h01(key + "b") - 0.5) * 3.0, 52.0, 62.0)
+	o["diff"] = clampf(50.0 + 18.0 * ct["trac"] - 6.0 * tm + (_h01(key + "d") - 0.5) * 16.0, 20.0, 80.0)
+	c.setup_opt = o
+	return o
+
+
+## 항목별 정규화 오차 (값 - 최적) / 범위폭. 부호: + = 값이 최적보다 큼
+func setup_err(c) -> Dictionary:
+	var o := setup_opt(c)
+	var out := {}
+	for k in SETUP_RANGE:
+		var r: Array = SETUP_RANGE[k]
+		out[k] = (float(c.get(k)) - float(o[k])) / (float(r[1]) - float(r[0]))
+	return out
+
+
+## {dt: 초/랩, wear: 배율, err: 실수 배율}
 func setup_extra(c) -> Dictionary:
-	var ctr := circ_traits()
-	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
-	var sc_s := 0.0
-	var sc_b := 0.0
-	var sc_d := 0.0
-	var wear := 1.0
-	var err := 1.0
-	match c.susp:
-		"soft":
-			sc_s = ctr["bump"]
-			wear *= 0.96
-		"stiff":
-			sc_s = -ctr["bump"]
-			wear *= 1.04
-			err *= 1.08
-	match c.bbias:
-		"fwd":
-			sc_b = -ag * 0.8 - 0.2
-			err *= 0.9
-		"rear":
-			sc_b = ag * 0.8 + 0.1
-			err *= 1.12
-	match c.diff:
-		"open":
-			sc_d = -ctr["trac"]
-			wear *= 0.96
-		"locked":
-			sc_d = ctr["trac"]
-			wear *= 1.05
-	var dt: float = -SETUP_K * (sc_s + sc_b + sc_d) * (1.0 - 0.5 * wet)
-	return {"dt": dt * wsc(), "wear": wear, "err": err, "score": {"susp": sc_s, "bbias": sc_b, "diff": sc_d}}
+	var e := setup_err(c)
+	var dt := 0.0
+	for k in e:
+		var q: float = clampf(1.0 - absf(float(e[k])) / 0.3, -0.5, 1.0)
+		dt -= SETUP_K * q
+	# 물리적 대가 (최적과 무관): 단단할수록·잠글수록 마모↑, 브레이크를 뒤로 보낼수록 잠김 실수↑
+	var wear: float = (1.0 + (c.susp - 5.5) * 0.01) * (1.0 + (c.diff - 50.0) * 0.0012)
+	var err: float = 1.0 + (57.0 - c.bbias) * 0.025
+	return {"dt": dt * (1.0 - 0.5 * wet) * wsc(), "wear": wear, "err": maxf(0.7, err)}
 
 
-## 드라이버 피드백: 가장 손해 보는 세부 셋업 하나를 짚어 준다 (정답을 그대로 말하진 않음)
+## 드라이버 피드백: 가장 많이 벗어난 항목의 방향을 말해 준다
 func setup_tip(c) -> String:
-	var ctr := circ_traits()
-	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
-	var cand: Array = []
-	# [손해 정도, 말]
-	var best_s: float = absf(ctr["bump"])
-	var cur_s: float = setup_extra(c)["score"]["susp"]
-	if best_s - cur_s > 0.35:
-		cand.append([best_s - cur_s, "연석에서 차가 튀고 저속 코너에서 잘 안 붙어요" if ctr["bump"] > 0.0 else "고속 코너에서 차가 출렁여요. 더 단단해야 할 것 같아요"])
-	var best_d: float = absf(ctr["trac"])
-	var cur_d: float = setup_extra(c)["score"]["diff"]
-	if best_d - cur_d > 0.35:
-		cand.append([best_d - cur_d, "코너 탈출에서 뒷바퀴가 헛돌아요" if ctr["trac"] > 0.0 else "고속 코너에서 뒤가 끌리는 느낌이에요"])
-	var best_b: float = maxf(-ag * 0.8 - 0.2, ag * 0.8 + 0.1)
-	var cur_b: float = setup_extra(c)["score"]["bbias"]
-	if best_b - cur_b > 0.35:
-		cand.append([best_b - cur_b, "브레이킹 때 차가 안 돌아요. 뒤쪽으로 좀 보내주세요" if ag > 0.0 else "브레이킹 때 뒤가 불안해요"])
-	if cand.is_empty():
-		return ""
-	cand.sort_custom(func(a, b): return a[0] > b[0])
-	return cand[0][1]
+	var e := setup_err(c)
+	var worst := ""
+	var wv := 0.0
+	for k in e:
+		if absf(float(e[k])) > absf(wv):
+			wv = float(e[k])
+			worst = k
+	if absf(wv) < 0.05:
+		return "세부 셋업은 거의 완벽해요"
+	var strong: bool = absf(wv) > 0.18
+	match worst:
+		"susp":
+			if wv > 0.0:
+				return "연석에서 차가 튀어요. 서스펜션을 %s 부드럽게" % ("많이" if strong else "조금")
+			return "고속 코너에서 차가 출렁여요. 서스펜션을 %s 단단하게" % ("많이" if strong else "조금")
+		"bbias":
+			if wv > 0.0:
+				return "브레이킹 때 앞이 밀려요. 밸런스를 %s 뒤로" % ("많이" if strong else "조금")
+			return "브레이킹 때 뒤가 불안해요. 밸런스를 %s 앞으로" % ("많이" if strong else "조금")
+		_:
+			if wv > 0.0:
+				return "코너 중간에 차가 안 돌아요. 디퍼렌셜을 %s 풀어주세요" % ("많이" if strong else "조금")
+			return "탈출에서 뒷바퀴가 헛돌아요. 디퍼렌셜을 %s 잠가주세요" % ("많이" if strong else "조금")
+
+
+## 엔지니어 실력(q 0~1)만큼 최적값 근처로 맞춘 셋업 (AI 팀, 주말 없이 바로 레이스할 때 내 차)
+func engineer_setup(c, q: float) -> void:
+	var o := setup_opt(c)
+	var sd: float = 0.04 + 0.16 * (1.0 - clampf(q, 0.0, 1.0))
+	for k in SETUP_RANGE:
+		var r: Array = SETUP_RANGE[k]
+		var span: float = float(r[1]) - float(r[0])
+		c.set(k, clampf(float(o[k]) + gauss(sd) * span, float(r[0]), float(r[1])))
 
 
 func press_straight(pr: String) -> float:
@@ -595,7 +640,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	if not is_launch:
 		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * (1.5 if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
 	# 트랙 리밋: 연석 공략이 과하면 경고, 세 번째부터 5초 페널티 (F1, 그린 상황에서만)
-	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if c.instr == "attack" else 1.0) * (1.25 if c.susp == "stiff" else 1.0):
+	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if c.instr == "attack" else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
 		c.tl_warn += 1
 		if c.tl_warn >= 3:
 			add_penalty(c, 5.0, "트랙 리밋 위반 %d회" % c.tl_warn)
@@ -912,6 +957,17 @@ func plan_ai_strategy(c, fixed_start: String) -> void:
 	var pk: Variant = ai_choose(c, cands, true)
 	if pk == null:
 		return
+	# 두 대 전략 나누기: 반응형·공격형 팀과 일부 균형형 팀은 두 번째 차를 다른 스톱 수로 (근소한 후보가 있을 때만)
+	if team_split.has(c.team) and int(team_split[c.team]) == pk["cuts"].size():
+		var split_k: float = 0.75 if c.strat_style in ["reactive", "aggressive"] else (0.35 if c.strat_style == "balanced" else 0.1)
+		if rnd() < split_k:
+			_tally("전략분리")
+			for x in cands:
+				if x["cuts"].size() != pk["cuts"].size() and float(x["cost"]) <= float(cands[0]["cost"]) + 4.0 + (1.0 - c.strategy) * 4.0:
+					pk = x
+					break
+	if not team_split.has(c.team):
+		team_split[c.team] = pk["cuts"].size()
 	var stops = []
 	for i in pk["cuts"].size():
 		var jit = int(round(gauss(0.5 + (1.0 - c.strategy) * 1.2)))
@@ -1048,12 +1104,48 @@ func pit_decision(c) -> Variant:
 			c.crew_out = true
 			c.covering = true
 			return {"comp": fin_comp, "tyres": true}
+	var tact: float = clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1)
+	if not c.weather_pit and ns != null and not sc and left > 4 and SLICK.has(c.comp):
+		var to_stop: int = int(ns["lap"]) - cur
+		var front: Variant = _front_same_class(c)
+		var gf: float = gap_seconds(c, front) if front != null else 99.0
+		# 언더컷: 앞차가 1.8초 안이고 계획 스톱이 3랩 안이면 먼저 들어가서 새 타이어로 앞지르기
+		if front != null and gf < 1.8 and to_stop >= 1 and to_stop <= 3 and front.pit_phase == 0 and not front.crew_out and c.wear > 0.3 and c.undercut_try != c.stops_done:
+			c.undercut_try = c.stops_done
+			var um: float = 1.3 if c.strat_style == "aggressive" else (0.6 if c.strat_style == "conservative" else 1.0)
+			# 마지막 스톱이면 새 타이어로 끝까지 갈 수 있을 때만 (괜히 스톱이 늘지 않게)
+			var nc: String = ns["comp"]
+			var last_stop: bool = c.stops_done >= c.plan["stops"].size() - 1
+			var ok_fin: bool = not last_stop or left * ai_nom_rate(nc, c) <= ai_lim(nc) - 0.03
+			if ok_fin and rnd() < tact * 0.3 * um:
+				_tally("언더컷")
+				c.stops_done += 1
+				c.crew_out = true
+				return {"comp": _pick_ai_slick(c, ns["comp"], left), "tyres": true}
+		# 오버컷: 앞차가 방금 피트했고 내 타이어가 버티면 1~2랩 더 끌어서 깨끗한 공기에서 시간 벌기
+		if front != null and to_stop <= 0 and (front.pit_lap or front.pit_phase == 2) and c.wear < ai_lim(c.comp) - 0.15 and c.overcut_try != c.stops_done:
+			c.overcut_try = c.stops_done
+			if rnd() < tact * 0.4:
+				var ext: int = 1 + int(rnd() < 0.5)
+				_tally("오버컷")
+				ns["lap"] = mini(laps - 1, int(ns["lap"]) + ext)
+				return null
+		# 트래픽 판단: 감각 좋은 팀은 복귀 지점에 차가 몰려 있으면 한 랩 미룬다 (낮은 팀은 그냥 들어감)
+		if to_stop <= 0 and tact >= 0.82 and c.wear < ai_lim(c.comp) - 0.1 and c.traffic_try != c.stops_done:
+			c.traffic_try = c.stops_done
+			var pr: Variant = predict_pit(c)
+			if pr != null and pr["ahead"] != null and float(pr["ahead"][1]) < 1.0:
+				_tally("트래픽회피")
+				ns["lap"] = mini(laps - 1, int(ns["lap"]) + 1)
+				return null
 	if not c.weather_pit and ns != null:
 		if not sc and (cur >= ns["lap"] or c.wear >= 0.80):
 			c.stops_done += 1
 			c.crew_out = true
 			return {"comp": _pick_ai_slick(c, ns["comp"], left) if want == "slick" else want, "tyres": true}
-		if sc and cur > 2 and c.wear >= 0.35 and (cur >= ns["lap"] or (c.sc_early and ns["lap"] - cur <= 4) or c.wear >= 0.50) and left > 2:
+		# SC: 대부분 들어가지만, 일부는 트랙 포지션 도박(스테이 아웃), 감각 낮은 팀은 기회를 놓치기도
+		var sc_skip: bool = (c.sc_stay and c.wear < 0.55) or (tact < 0.7 and c.sc_miss)
+		if sc and not sc_skip and cur > 2 and c.wear >= 0.35 and (cur >= ns["lap"] or (c.sc_early and ns["lap"] - cur <= 4) or c.wear >= 0.50) and left > 2:
 			c.stops_done += 1
 			c.crew_out = true
 			return {"comp": _pick_ai_slick(c, ns["comp"], left) if want == "slick" else want, "tyres": true}
@@ -1070,6 +1162,43 @@ func pit_decision(c) -> Variant:
 		c.crew_out = true
 		return {"comp": _alt_slick(c.comp), "tyres": true}
 	return null
+
+
+## 피트 크루 실수: 느린 정차(휠건·잭 문제)와 드물게 휠너트 문제. 크루 실력이 낮을수록 잦다.
+func _tally(k: String) -> void:
+	tally[k] = int(tally.get(k, 0)) + 1
+
+
+func _crew_error(c) -> float:
+	var skill: float = clampf(1.3 - c.crew, 0.3, 0.8)
+	if rnd() < 0.012 * skill:
+		event("%s 휠너트 문제! 정차가 크게 늦어졌어요" % name_of(c), "bad")
+		_tally("휠너트")
+		return uni(7.0, 14.0)
+	if rnd() < 0.08 * skill:
+		_tally("느린정차")
+		if c.mine:
+			say(c, "피트 크루 실수, 정차가 늦었어요")
+		return uni(1.5, 4.5)
+	return 0.0
+
+
+## 바로 앞 차 (같은 클래스): 방금 지난 경계를 나보다 먼저, 가장 늦게 지난 차
+## (order() 는 경계를 막 지난 순간 정렬이 어긋나서 쓰지 않는다)
+func _front_same_class(c) -> Variant:
+	var k: int = c.cross.size() - 1
+	if k < 0:
+		return null
+	var best: Variant = null
+	var bt := -INF
+	for o in cars:
+		if o == c or o.cls != c.cls or o.dnf != "" or o.cross.size() <= k:
+			continue
+		var ot: float = float(o.cross[k])
+		if ot < float(c.cross[k]) and ot > bt:
+			bt = ot
+			best = o
+	return best
 
 
 func _wec_burn(c, m: String) -> float:
@@ -1133,7 +1262,9 @@ func ai_control(c, gap_ahead, gap_behind) -> void:
 			c.fuel_mode = "lean"
 		else:
 			c.fuel_mode = "rich" if st == "push" else ("lean" if st == "save" else "std")
+		_ai_tactics(c, gap_ahead, gap_behind)
 		return
+	_ai_tactics(c, gap_ahead, gap_behind)
 	if c.ers < 0.2:
 		c.ers_mode = "harvest"
 	elif gap_ahead != null and gap_ahead < 1.0 and c.ers > 0.35:
@@ -1143,6 +1274,53 @@ func ai_control(c, gap_ahead, gap_behind) -> void:
 	else:
 		c.ers_mode = "balance"
 	c.fuel_mode = "lean" if c.fuel < (laps - c.lap) * FPL * 0.97 else "std"
+
+
+## AI 주행 전술: 페이스(공격·표준·세이브)와 상황 지시(추월·방어·연비)를 상황에 맞게.
+## 전술 감각 = 팀 전략 능력 + 난이도. 감각이 낮은 팀은 기계 과열·타이어 관리 대응이 늦고 공격 타이밍도 무디다.
+func _ai_tactics(c, gap_ahead, gap_behind) -> void:
+	if sc or not c.started:
+		c.pace = "standard"
+		c.instr = "free"
+		return
+	var tact: float = clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1)
+	var st: String = c.strat_style
+	var left: int = laps - c.lap
+	var ns: Variant = next_stop(c)
+	var to_stop: int = (int(ns["lap"]) - (c.lap + 1)) if ns != null else left
+	var lim: float = ai_lim(c.comp) if SLICK.has(c.comp) else 0.9
+	# 1) 기계 과열: 감각이 좋을수록 일찍 식힌다
+	if c.mech_trouble != "" or c.mech_stress > 0.5 + (1.0 - tact) * 0.35:
+		c.instr = "lift"
+		c.pace = "save"
+		return
+	if c.instr == "lift" and c.mech_stress > 0.3:
+		return
+	var pace := "standard"
+	var instr := "free"
+	# 2) 페이스: 피트 직전 인랩·직후 아웃랩은 푸시(언더컷), 타이어가 한계에 가까운데 스톱이 멀면 세이브
+	var in_lap: bool = c.crew_out or (ns != null and to_stop <= 0)
+	var out_lap: bool = c.stint_laps <= 1 and c.pits > 0
+	if tact >= 0.62 and (in_lap or out_lap) and c.wear < lim and wet < 0.15:
+		pace = "attack"
+	elif SLICK.has(c.comp) and c.wear > lim - 0.12 and to_stop > 1:
+		pace = "save"
+	elif st == "conservative" and to_stop > 4 and c.wear > 0.35:
+		pace = "save"
+	elif left <= 2 and c.wear < lim - 0.05 and wet < 0.2:
+		pace = "attack" # 막판 스퍼트
+	# 3) 지시: 바로 앞차가 1초 안이면 추월 시도(공격적인 드라이버·팀일수록), 뒤에 붙으면 방어
+	var push_k: float = c.aggr + (0.12 if st == "aggressive" else (-0.1 if st == "conservative" else 0.0))
+	if gap_ahead != null and float(gap_ahead) < 0.6 and c.wear < lim - 0.05 and push_k > 0.62 and wet < 0.2:
+		instr = "attack"
+	elif gap_behind != null and float(gap_behind) < 0.5 and c.def_ > 0.8:
+		instr = "defend"
+	elif pace == "save" and tact >= 0.7 and c.wear > lim - 0.08:
+		instr = "hold"
+	if is_wec():
+		pace = "standard" # WEC 는 연료 모드로 페이스를 조절 (공격 페이스는 연비 계산을 흐트러뜨림)
+	c.pace = pace
+	c.instr = instr
 
 
 # ═════════ 결승선·섹터 경계 통과 ═════════
@@ -1232,6 +1410,7 @@ func on_cross(c, t: float) -> void:
 					c.pit_total = wec_stop_time(c, d["tyres"], d.get("driver", false), d.get("fuel", true))
 				else:
 					c.pit_total = pit_loss() + gauss(0.6) - (c.crew - 0.85) * 8.0
+					c.pit_total += _crew_error(c)
 	c.started = true
 	schedule_next(c, t)
 
@@ -1399,7 +1578,13 @@ func schedule_next(c, t: float) -> void:
 			var diff: float = ahead_dur - dur
 			var mate: bool = ahead.team == c.team and ahead.cls == c.cls
 			var hold_mate: bool = mate and c.mine and team_order == "hold"
-			if mate and c.mine and swap_req and gap != null and gap < 2.5:
+			var ai_swap: bool = mate and not c.mine and not ahead.mine and gap != null and gap < 1.2 and diff > 0.25 and c.strat_style != "aggressive" and laps - c.lap > 2 and rnd() < 0.35 * c.strategy
+			if ai_swap:
+				_tally("팀오더")
+				dur = maxf(0.4, ahead.sec_end - t - 0.1)
+				ahead.sec_end += 0.6
+				event("팀 오더: %s → %s 순서 교체" % [ahead.code if not is_wec() else ahead.label, c.code if not is_wec() else c.label])
+			elif mate and c.mine and swap_req and gap != null and gap < 2.5:
 				swap_req = false
 				dur = maxf(0.4, ahead.sec_end - t - 0.1)
 				ahead.sec_end += 0.9
@@ -2206,6 +2391,7 @@ func resolve_radio(idx: int) -> void:
 ## 시간 페널티: 체커기 때 기록에 더한다
 func add_penalty(c, secs: float, why: String) -> void:
 	c.time_pen += secs
+	_tally("페널티")
 	event("🟨 %s %d초 페널티 (%s)" % [name_of(c), int(secs), why], "bad")
 	if c.mine:
 		say(c, "%d초 페널티 받았어요 (%s). 앞차와 간격을 더 벌려야 해요" % [int(secs), why])
@@ -2368,6 +2554,8 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 			c.tyre_every = 2 if rnd() < float(t["strategy"]) - 0.3 else 1
 			c.driver_every = 2
 			c.sc_early = rnd() < 0.7
+			c.sc_stay = rnd() < 0.15
+			c.sc_miss = rnd() < 0.3
 			c.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
 			c.comp = "M" if rnd() < 0.7 else "H"
 		_finish_wec_car(c, stall_keys)
@@ -2396,6 +2584,8 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c2.tyre_every = 2 if rnd() < 0.5 else 1
 		c2.driver_every = 2
 		c2.sc_early = rnd() < 0.7
+		c2.sc_stay = rnd() < 0.15
+		c2.sc_miss = rnd() < 0.3
 		c2.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
 		c2.comp = "M" if rnd() < 0.6 else "H"
 		_finish_wec_car(c2, stall_keys)
@@ -2455,6 +2645,8 @@ func _build_wec_entries(entries: Array, opts: Dictionary, start_comps: Array) ->
 			c.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
 			c.tyre_every = 2 if rnd() < c.strategy - 0.3 else 1
 			c.sc_early = rnd() < 0.7
+			c.sc_stay = rnd() < 0.15
+			c.sc_miss = rnd() < 0.3
 			c.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
 			c.comp = "M" if rnd() < 0.65 else "H"
 		_finish_wec_car(c, stall_keys)

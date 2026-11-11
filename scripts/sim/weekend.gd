@@ -11,7 +11,7 @@ const QPUSH_KO := {"safe": "안전하게", "std": "표준", "limit": "한계까�
 const QTRAFFIC := {"early": [0.05, 0.12, "즉시 출주"], "clean": [-0.12, 0.04, "클린 에어 대기"], "late": [-0.28, 0.28, "막판 릴리즈"]}
 const PRESS_KO := {"low": "낮게", "std": "표준", "high": "높게"}
 const FUEL_LOAD_KO := {"light": "가볍게", "std": "표준", "heavy": "넉넉하게"}
-const PRACTICE_LAPS := 8
+const PRACTICE_LAPS := 16
 
 var sim                      # race_sim.gd
 var sets: Array = []         # 내 차별 주말 타이어 세트 [{S, M, H}, {…}] (예선·레이스 공유)
@@ -20,13 +20,15 @@ var wear_est := {}           # {err, runs, bias}
 var practice_left: Array = [PRACTICE_LAPS, PRACTICE_LAPS]
 var practice_runs: Array = []
 var last_feedback := ""
+var eng_q := 0.5             # 엔지니어 실력 0~1 (추천 범위 폭)
+var bands: Array = []        # 내 차별 엔지니어 추천 범위 {key: {c: 중심, hw: 반폭}}
 var Q := {}                  # 예선 상태
 var done_quali := false
 var _q_soft_used := {}
 
 
 ## sim 은 new_race 까지 끝난 상태여야 한다. obligation_laps: 스폰서 행사로 줄어드는 연습 랩 수.
-func setup(sim_, obligation_laps: int = 0) -> void:
+func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	sim = sim_
 	# 주말 타이어: F1 S2·M2·H1 / WEC S1·M2·H2 (예선 세션이 2개라 새 소프트가 1세트뿐)
 	if sim.is_wec():
@@ -34,9 +36,12 @@ func setup(sim_, obligation_laps: int = 0) -> void:
 	else:
 		sets = [{"S": 2, "M": 2, "H": 1}, {"S": 2, "M": 2, "H": 1}]
 	setups = []
+	bands = []
 	for c in my_cars():
 		setups.append({"wing": c.wing, "press": c.press, "fuel_load": c.fuel_load})
 		c.tyre_sets = sets[c.slot]
+		eng_q = eng_quality if eng_quality >= 0.0 else sim.team_eng_q(c)
+		bands.append(_make_band(c))
 	var bias := {}
 	for k in ["S", "M", "H"]:
 		bias[k] = sim.uni(-0.24, 0.24)
@@ -75,16 +80,12 @@ func set_press(slot: int, p: String) -> void:
 	setups[slot]["press"] = p
 
 
-func set_detail(slot: int, key: String, v: String) -> void:
+func set_detail(slot: int, key: String, v: float) -> void:
 	var c = my_cars()[slot]
-	match key:
-		"susp":
-			c.susp = v
-		"bbias":
-			c.bbias = v
-		"diff":
-			c.diff = v
-	setups[slot][key] = v
+	var r: Array = RS.SETUP_RANGE[key]
+	var val: float = snappedf(clampf(v, float(r[0]), float(r[1])), 0.1 if key == "susp" else (0.5 if key == "bbias" else 1.0))
+	c.set(key, val)
+	setups[slot][key] = val
 
 
 func set_fuel_load(slot: int, f: String) -> void:
@@ -92,6 +93,62 @@ func set_fuel_load(slot: int, f: String) -> void:
 	c.fuel_load = f
 	setups[slot]["fuel_load"] = f
 	c.fuel = sim.laps * RS.FPL * (1.0 + float(RS.FUEL_LOAD[f]))
+
+
+# ═════════ 세부 셋업 · 엔지니어 추천 범위 ═════════
+const WING_RANGE := [1.0, 5.0]
+
+
+func _span(key: String) -> Array:
+	return WING_RANGE if key == "wing" else RS.SETUP_RANGE[key]
+
+
+func _opt(c, key: String) -> float:
+	return sim.wing_opt(0.0, c) if key == "wing" else float(sim.setup_opt(c)[key])
+
+
+## 엔지니어 실력이 좋을수록 좁고 정확한 범위. 정답은 범위 안 어딘가 (가운데가 정답은 아님)
+func _make_band(c) -> Dictionary:
+	var b := {}
+	for key in ["wing", "susp", "bbias", "diff"]:
+		var r: Array = _span(key)
+		var span: float = float(r[1]) - float(r[0])
+		var hw: float = (0.08 + 0.22 * (1.0 - eng_q)) * span
+		var ctr: float = _opt(c, key) + sim.uni(-0.6, 0.6) * hw
+		b[key] = {"c": ctr, "hw": hw}
+	return b
+
+
+func band_lohi(slot: int, key: String) -> Array:
+	var bd: Dictionary = bands[slot][key]
+	var r: Array = _span(key)
+	return [maxf(float(r[0]), float(bd["c"]) - float(bd["hw"])), minf(float(r[1]), float(bd["c"]) + float(bd["hw"]))]
+
+
+## 테스트 주행 데이터가 쌓이면 범위가 좁아지고 정답 쪽으로 다가간다
+func _refine_band(slot: int, laps_run: int) -> void:
+	var c = my_cars()[slot]
+	var k: float = pow(0.9, laps_run / 3.0)
+	for key in bands[slot]:
+		var bd: Dictionary = bands[slot][key]
+		var r: Array = _span(key)
+		var span: float = float(r[1]) - float(r[0])
+		var o := _opt(c, key)
+		bd["hw"] = maxf(0.03 * span, float(bd["hw"]) * k)
+		bd["c"] = o + (float(bd["c"]) - o) * k
+		# 범위가 정답을 벗어나지 않게
+		if absf(float(bd["c"]) - o) > float(bd["hw"]) * 0.8:
+			bd["c"] = o + signf(float(bd["c"]) - o) * float(bd["hw"]) * 0.8
+
+
+## 엔지니어에게 맡기기: 추천 범위 한가운데로
+func engineer_apply(slot: int) -> void:
+	for key in ["wing", "susp", "bbias", "diff"]:
+		var v: float = float(bands[slot][key]["c"])
+		if key == "wing":
+			set_wing(slot, v)
+		else:
+			set_detail(slot, key, v)
 
 
 # ═════════ 타이어 마모 추정 (연습 롱런으로 오차가 줄어든다) ═════════
@@ -157,10 +214,11 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	for x in res:
 		tot += x
 	practice_left[slot] -= n
+	_refine_band(slot, n)
 	if kind == "long":
 		wear_est["runs"] = int(wear_est["runs"]) + 1
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "%s/%s/%s" % [{"soft": "소프트", "std": "표준", "stiff": "하드"}[c.susp], {"fwd": "앞", "std": "중", "rear": "뒤"}[c.bbias], {"open": "열림", "std": "표준", "locked": "잠김"}[c.diff]]}
+	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
 	practice_runs.push_front(r)
 	last_feedback = "%s: %s" % [c.name, feedback(c)]
 	if kind == "long":
@@ -171,10 +229,12 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 ## 남은 연습을 자동으로: 롱런 1회 + 셋업 테스트
 func auto_practice() -> void:
 	for slot in my_cars().size():
+		engineer_apply(slot)
 		if practice_left[slot] >= 5:
 			practice_run(slot, "long")
 		while practice_left[slot] >= 3:
 			practice_run(slot, "short")
+		engineer_apply(slot)
 
 
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
@@ -387,6 +447,7 @@ func finish_quali() -> void:
 			c.q3_locked = true
 			c.used_set_pen = 0.45 if r["used"] else 0.0
 			c.wear = 0.14 if r["used"] else 0.05
+	sim.team_split = {}
 	for c in sim.cars:
 		if not c.mine:
 			if not sim.is_wec():

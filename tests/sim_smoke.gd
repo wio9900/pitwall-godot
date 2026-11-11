@@ -32,6 +32,7 @@ func _init() -> void:
 			if not ok:
 				fails += 1
 			print("%-12s #%d %s | 완주=%s 우승=%s(%s) | 스톱=%s 출발=%s DNF=%d | 계획 %dms" % [key, n, "비" if n == 2 else "맑음", ok, winner.code, winner.team, stops, starts, dnf, plan_ms])
+			print("    AI 전술·실수: %s" % sim.tally)
 	# 자동 전략: 내 차 두 대를 자동(A·B)에 맡겨 완주 + 컴파운드 규정 위반 없는지
 	for key in ["monza", "silverstone", "singapore", "interlagos"]:
 		for n in 2:
@@ -51,7 +52,7 @@ func _init() -> void:
 			for c in mc:
 				var pos: int = sim.order().find(c) + 1
 				txt += "%s P%d 피트%d 페널티%d  " % [c.code, pos, c.pits, int(c.penalty)]
-				if c.penalty > 0 and c.dnf == "" and not sim.ever_wet:
+				if c.used_slicks() < 2 and c.dnf == "" and not sim.ever_wet:
 					print("  ! 자동 전략인데 두 컴파운드 페널티")
 					fails += 1
 			if not sim.done:
@@ -62,9 +63,9 @@ func _init() -> void:
 		var sim = RaceSimS.new()
 		sim.new_race(key, 6, 15, "dry", ["M", "M"], 4100)
 		var mc: Array = sim.my_cars()
-		mc[0].susp = "soft"
-		mc[0].diff = "locked"
-		mc[1].bbias = "rear"
+		mc[0].susp = 2.0
+		mc[0].diff = 75.0
+		mc[1].bbias = 53.0
 		var ev: Dictionary = sim.eval_plan(mc[0], [{"lap": 5, "comp": "H"}, {"lap": 10, "comp": "S"}])
 		sim.set_custom_plans(mc[0], {"A": [{"lap": 5, "comp": "H"}, {"lap": 10, "comp": "S"}], "B": [{"lap": 8, "comp": "H"}]})
 		sim.set_custom_plans(mc[1], {"A": [{"lap": 8, "comp": "H"}], "B": []})

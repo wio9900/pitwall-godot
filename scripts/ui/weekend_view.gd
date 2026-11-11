@@ -185,19 +185,8 @@ func _render_practice() -> void:
 	var tr = K.rtl(14)
 	tr.text = _trait(c)
 	card.add_child(tr)
-	# 윙
-	var wl = K.rtl(15)
-	wl.text = "윙 각도 [b]W %.1f[/b] · %s" % [c.wing, _wing_desc(c.wing)]
-	card.add_child(wl)
-	var sl = HSlider.new()
-	sl.min_value = 1.0
-	sl.max_value = 5.0
-	sl.step = 0.1
-	sl.value = c.wing
-	sl.editable = anim == null
-	sl.custom_minimum_size = Vector2(0, 28)
-	sl.value_changed.connect(_on_wing.bind(wl))
-	card.add_child(sl)
+	var ed: bool = anim == null
+	_setup_slider(card, c, "wing", ed)
 	card.add_child(K.label("타이어 공기압", 14, K.DIM))
 	K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, anim == null)
 	card.add_child(K.label("연료 탑재", 14, K.DIM))
@@ -212,21 +201,13 @@ func _render_practice() -> void:
 	var dh = K.rtl(13)
 	dh.text = "[color=#8b98a5]세부 셋업 · 서킷: %s[/color]" % " · ".join(hint)
 	card.add_child(dh)
-	var ed: bool = anim == null
-	var r1 = K.hbox(4)
-	card.add_child(r1)
-	r1.add_child(_small_lab("서스펜션"))
-	_seg_into(r1, [["soft", "부드럽게"], ["std", "표준"], ["stiff", "단단하게"]], c.susp, _on_detail.bind("susp", sel), ed)
-	var r2 = K.hbox(4)
-	card.add_child(r2)
-	r2.add_child(_small_lab("브레이크"))
-	_seg_into(r2, [["fwd", "앞쪽"], ["std", "표준"], ["rear", "뒤쪽"]], c.bbias, _on_detail.bind("bbias", sel), ed)
-	var r3 = K.hbox(4)
-	card.add_child(r3)
-	r3.add_child(_small_lab("디퍼렌셜"))
-	_seg_into(r3, [["open", "열림"], ["std", "표준"], ["locked", "잠김"]], c.diff, _on_detail.bind("diff", sel), ed)
+	for key in ["susp", "bbias", "diff"]:
+		_setup_slider(card, c, key, ed)
+	var eb = K.btn("🔧 엔지니어 추천값으로 맞추기 (%s)" % _eng_grade(), 14, _on_engineer)
+	eb.disabled = not ed
+	card.add_child(eb)
 	var dx = K.rtl(12)
-	dx.text = "[color=#8b98a5]서스펜션: 부드러우면 연석·저속에 강하고 타이어를 아껴요, 단단하면 고속 코너에 강하지만 마모·실수↑. 브레이크: 뒤쪽은 회전이 좋지만 잠김 실수↑, 앞쪽은 안정적. 디퍼렌셜: 잠그면 탈출 트랙션↑·마모↑, 열면 타이어를 아껴요. 맞추면 랩당 최대 약 0.08초씩 빨라져요. 드라이버 피드백을 들어보세요.[/color]"
+	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 정답은 띠 안 어딘가에 있어요 — 가운데가 정답은 아니에요. 테스트를 달릴수록 띠가 좁아지고, 드라이버 피드백이 방향을 알려줘요. 항목마다 딱 맞으면 랩당 약 0.09초 빨라져요. 서스펜션을 단단하게·디퍼렌셜을 잠글수록 타이어 마모가 늘고, 브레이크를 뒤로 보낼수록 실수가 늘어요.[/color]"
 	card.add_child(dx)
 	var left: int = wk.practice_left[sel]
 	var h = K.hbox(6)
@@ -261,7 +242,7 @@ func _render_practice() -> void:
 		tc.add_child(rr)
 	var b2 = K.hbox(6)
 	_side.add_child(b2)
-	b2.add_child(K.btn("⚡ 연습 자동 진행", 15, _on_auto_practice))
+	b2.add_child(K.btn("⚡ 엔지니어에게 맡기기 (자동)", 15, _on_auto_practice))
 	b2.add_child(K.btn("셋업 확정 · 예선으로 ▶", 17, _on_to_quali))
 	_side.add_child(K.btn("◀ 뒤로", 14, _on_back))
 
@@ -408,6 +389,91 @@ func _on_press(v, slot: int) -> void:
 	refresh()
 
 
+## 셋업 슬라이더 한 줄: 이름·값 + 추천 범위 띠 + 슬라이더
+const SET_FMT := {"wing": "W %.1f", "susp": "%.1f", "bbias": "앞 %.1f%%", "diff": "%d%%"}
+const SET_END := {"wing": ["눕힘 (직선)", "세움 (코너)"], "susp": ["부드럽게", "단단하게"], "bbias": ["뒤쪽", "앞쪽"], "diff": ["열림", "잠김"]}
+
+
+func _setup_val(c, key: String) -> float:
+	return float(c.wing) if key == "wing" else float(c.get(key))
+
+
+func _setup_label(c, key: String) -> String:
+	var lh: Array = wk.band_lohi(c.slot, key)
+	var v: float = _setup_val(c, key)
+	var vs: String = SET_FMT[key] % (int(v) if key == "diff" else v)
+	var ls: String = SET_FMT[key] % (int(lh[0]) if key == "diff" else float(lh[0]))
+	var hs: String = SET_FMT[key] % (int(lh[1]) if key == "diff" else float(lh[1]))
+	var extra: String = (" · " + _wing_desc(v)) if key == "wing" else ""
+	return "[b]%s[/b] %s%s   [color=#ffc53d]추천 %s ~ %s[/color]" % [RS.SETUP_KO[key], vs, extra, ls, hs]
+
+
+func _setup_slider(card: VBoxContainer, c, key: String, ed: bool) -> void:
+	var lab = K.rtl(14)
+	lab.text = _setup_label(c, key)
+	card.add_child(lab)
+	var r: Array = wk._span(key)
+	var bar = BandBar.new()
+	var lh: Array = wk.band_lohi(c.slot, key)
+	bar.lo = (float(lh[0]) - float(r[0])) / (float(r[1]) - float(r[0]))
+	bar.hi = (float(lh[1]) - float(r[0])) / (float(r[1]) - float(r[0]))
+	card.add_child(bar)
+	var sl = HSlider.new()
+	sl.min_value = float(r[0])
+	sl.max_value = float(r[1])
+	sl.step = {"wing": 0.1, "susp": 0.1, "bbias": 0.5, "diff": 1.0}[key]
+	sl.value = _setup_val(c, key)
+	sl.editable = ed
+	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sl.custom_minimum_size = Vector2(0, 28)
+	sl.value_changed.connect(_on_setup_val.bind(key, lab))
+	card.add_child(sl)
+	# 양 끝 설명 (띠·슬라이더와 같은 폭이 되도록 슬라이더 아래 한 줄로)
+	var row = K.hbox(6)
+	card.add_child(row)
+	var l0 = K.label(SET_END[key][0], 12, K.DIM)
+	l0.autowrap_mode = TextServer.AUTOWRAP_OFF
+	l0.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(l0)
+	var l1 = K.label(SET_END[key][1], 12, K.DIM)
+	l1.autowrap_mode = TextServer.AUTOWRAP_OFF
+	l1.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(l1)
+
+
+func _on_setup_val(v: float, key: String, lab) -> void:
+	if key == "wing":
+		wk.set_wing(sel, v)
+	else:
+		wk.set_detail(sel, key, v)
+	lab.text = _setup_label(_my(sel), key)
+
+
+func _eng_grade() -> String:
+	var q: float = wk.eng_q
+	return "엔지니어 S급" if q >= 0.9 else ("A급" if q >= 0.65 else ("B급" if q >= 0.4 else "C급"))
+
+
+func _on_engineer() -> void:
+	if anim == null:
+		wk.engineer_apply(sel)
+		refresh()
+
+
+## 추천 범위 띠 (슬라이더 바로 위)
+class BandBar extends Control:
+	var lo := 0.0
+	var hi := 1.0
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(0, 6)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color("#1b232d"))
+		draw_rect(Rect2(size.x * lo, 0, size.x * (hi - lo), size.y), Color(1.0, 0.77, 0.24, 0.75))
+
+
 func _small_lab(t: String) -> Label:
 	var l = K.label(t, 13, K.DIM)
 	l.custom_minimum_size = Vector2(64, 0)
@@ -427,7 +493,7 @@ func _seg_into(row: HBoxContainer, items: Array, cur: String, cb: Callable, enab
 
 
 func _on_detail(v, key: String, slot: int) -> void:
-	wk.set_detail(slot, key, String(v))
+	wk.set_detail(slot, key, float(v))
 	refresh()
 
 

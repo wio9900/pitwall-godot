@@ -740,7 +740,7 @@ func _start_weekend_career() -> void:
 	var opts: Dictionary = career.race_opts()
 	sim.new_race(career.next_circuit(), career.race_my_index(), career.race_laps(), "auto", ["M", "M"], 0, opts)
 	wk = WeekendS.new()
-	wk.setup(sim, career.duty_laps())
+	wk.setup(sim, career.duty_laps(), career.eng_quality())
 	_show_only(wk_view)
 	wk_view.open(sim, wk)
 
@@ -792,6 +792,8 @@ func _start_race() -> void:
 	sim = RaceSimS.new()
 	var s = last_settings
 	sim.new_race(s["circ"], s["team"], s["laps"], s["wx"], s["start"], 0, {"difficulty": s["diff"]})
+	for c in sim.my_cars():
+		sim.engineer_setup(c, sim.team_eng_q(c)) # 주말 없이 바로 달리면 엔지니어가 맞춘 셋업으로
 	sim.prepare_start()
 	_launch_race()
 

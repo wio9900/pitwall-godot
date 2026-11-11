@@ -1346,6 +1346,18 @@ func terminate_contract(cat: String) -> bool:
 
 
 ## 스폰서 의무(드라이버 홍보 행사)로 줄어드는 연습 랩 수 (차당)
+## 수석 엔지니어 실력 0~1 (S급 1 · A급 0.75 · B급 0.5 · C급 0.25 평균) → 연습 셋업 추천 범위 폭
+func eng_quality() -> float:
+	var tot := 0.0
+	var n := 0
+	for k in ["aero", "power", "chassis"]:
+		var ce: Dictionary = hq.get("chief", {}).get(k, {})
+		var t: String = String(ce.get("tier", "B급"))
+		tot += {"S": 1.0, "A": 0.75, "B": 0.5, "C": 0.25}.get(t.substr(0, 1), 0.5)
+		n += 1
+	return tot / maxf(1.0, n)
+
+
 func duty_laps() -> int:
 	var n := 0
 	for c in hq["contracts"]:
