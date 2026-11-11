@@ -16,6 +16,7 @@ const GREEN := Color("#3ecf8e")
 const PURPLE := Color("#a855f7")
 const LABEL := Color("#7d8796")
 const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
+const BANNER_H := 34.0 # 화면 아래 안내 띠 높이
 const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같게)
 
 var sim: Variant = null
@@ -73,7 +74,9 @@ func show_banner(text: String, kind: String) -> void:
 func _update_camera(delta: float) -> void:
 	var T = sim.T
 	var bb: Rect2 = T.bbox.grow(34.0)
-	var fit_s: float = minf(size.x / bb.size.x, size.y / bb.size.y)
+	# 아래쪽 BANNER_H 만큼은 안내 띠 자리로 비워 둔다
+	var avail := Vector2(size.x, size.y - BANNER_H)
+	var fit_s: float = minf(avail.x / bb.size.x, avail.y / bb.size.y)
 	var want_center: Vector2 = bb.get_center()
 	var want_zoom = 1.0
 	if follow_slot >= 0:
@@ -88,7 +91,7 @@ func _update_camera(delta: float) -> void:
 	_cam_center = _cam_center.lerp(want_center, k)
 	_cam_zoom = lerpf(_cam_zoom, want_zoom, k)
 	_s = fit_s * _cam_zoom
-	_off = size / 2.0 - _cam_center * _s
+	_off = avail / 2.0 - _cam_center * _s
 
 
 # ═════════ 차량 위치: 실제 순서보다 앞서 그리지 않고, 부드럽게 보간 ═════════
@@ -465,7 +468,7 @@ func _draw_my_labels(font) -> void:
 			if txt.length() > 26:
 				txt = txt.substr(0, 25) + "…"
 			var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
-			var bp := Vector2(clampf(q.x - tsz.x / 2, 10, size.x - tsz.x - 18), clampf(q.y - 40 * sc, 54, size.y - 30))
+			var bp := Vector2(clampf(q.x - tsz.x / 2, 10, size.x - tsz.x - 18), clampf(q.y - 40 * sc, 24, size.y - BANNER_H - 12))
 			var box := Rect2(bp - Vector2(8, 18), tsz + Vector2(16, 10))
 			draw_rect(box, Color(0.08, 0.1, 0.13, 0.88 * a))
 			draw_rect(box, Color(AMBER, 0.8 * a), false, 1.5)
@@ -512,7 +515,7 @@ func _draw_rain(wet: float) -> void:
 
 
 func _draw_banner(font) -> void:
-	# 상단 이벤트 띠: 세이프티카는 상시, 그 외 레이스 컨트롤 메시지는 5초
+	# 하단 안내 띠(트랙을 가리지 않게 아래에): 세이프티카는 상시, 그 외 메시지는 5초
 	var text := ""
 	var col := Color(0.12, 0.15, 0.2, 0.92)
 	var fg := Color.WHITE
@@ -534,10 +537,10 @@ func _draw_banner(font) -> void:
 			col = Color(0.08, 0.45, 0.25, 0.92)
 	if text == "":
 		return
-	var h := 32.0
-	var top := -h + h * slide
+	var h := BANNER_H
+	var top := size.y - h * slide
 	draw_rect(Rect2(0, top, size.x, h), col)
-	draw_string(font, Vector2(14, top + 22), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 28, 17, fg)
+	draw_string(font, Vector2(14, top + 23), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 28, 17, fg)
 
 
 func _draw_lights(font) -> void:
