@@ -17,7 +17,7 @@ const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const SPEEDS := [0, 1, 2, 4, 8, 16]
 
-var sim = null
+var sim: Variant = null
 var speed_x := 4
 var ui_timer := 0.0
 var last_settings := {}
@@ -362,7 +362,7 @@ func _set_cam(slot: int) -> void:
 	_press_only(cam_btns, slot + 1)
 
 
-func _my(slot: int):
+func _my(slot: int) -> Variant:
 	if sim == null:
 		return null
 	var mc: Array = sim.my_cars()
@@ -370,27 +370,27 @@ func _my(slot: int):
 
 
 func _on_box(comp: String, slot: int) -> void:
-	var c = _my(slot)
+	var c: Variant = _my(slot)
 	if c != null:
 		sim.request_pit(c, comp)
 		_refresh_ui()
 
 
 func _on_cancel(slot: int) -> void:
-	var c = _my(slot)
+	var c: Variant = _my(slot)
 	if c != null:
 		sim.cancel_pit(c)
 		_refresh_ui()
 
 
 func _on_pace(p: String, slot: int) -> void:
-	var c = _my(slot)
+	var c: Variant = _my(slot)
 	if c != null:
 		sim.set_pace(c, p)
 
 
 func _on_ers(m: String, slot: int) -> void:
-	var c = _my(slot)
+	var c: Variant = _my(slot)
 	if c != null:
 		sim.set_ers(c, m)
 
@@ -453,8 +453,8 @@ func _refresh_ui() -> void:
 		else:
 			var wear_col = "#22c55e" if c.wear < 0.45 else ("#facc15" if c.wear < 0.65 else "#ef4444")
 			st = "%s %s [color=%s]마모 %d%%[/color] · %d랩째" % [_tyre_bb(c.comp), RaceSimS.TYRE_KO[c.comp], wear_col, int(round(c.wear * 100)), c.stint_laps]
-			var ahead = ord[pos - 2] if pos >= 2 else null
-			var behind = ord[pos] if pos < ord.size() else null
+			var ahead: Variant = ord[pos - 2] if pos >= 2 else null
+			var behind: Variant = ord[pos] if pos < ord.size() else null
 			var gtxt = ""
 			if ahead != null and ahead.dnf == "":
 				gtxt += "앞 %s %s" % [ahead.code, sim.gap_to(c, ahead).replace("+", "-")]

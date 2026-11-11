@@ -14,7 +14,7 @@ const AMBER := Color("#ffc53d")
 const DRS_COL := Color(0.25, 0.85, 0.45, 0.35)
 const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
 
-var sim = null
+var sim: Variant = null
 var follow_slot := -1   # -1 = 전체 화면, 0/1 = 내 차 추적
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0

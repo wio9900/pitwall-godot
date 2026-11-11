@@ -65,7 +65,7 @@ var stall_idx := 0
 # 피트
 var pits := 0
 var pit_req := ""       # 플레이어 박스 지시 (원하는 컴파운드), "" = 없음
-var boxing = null       # 피트 진입 확정: {comp, tyres}
+var boxing: Variant = null       # 피트 진입 확정: {comp, tyres}
 var pit_phase := 0
 var pit_total := 0.0
 var pit_lap := false

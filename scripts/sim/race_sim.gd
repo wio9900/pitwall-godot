@@ -35,7 +35,7 @@ const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
 const STRAT_KO := {"aggressive": "공격형", "balanced": "균형형", "conservative": "보수형", "reactive": "반응형"}
 
 var rng := RandomNumberGenerator.new()
-var T            # 트랙 (track.gd)
+var T: Variant            # 트랙 (track.gd)
 var CIRC: Dictionary = {}
 var circ_key := ""
 var laps := 15
@@ -47,8 +47,8 @@ var true_mult: Dictionary = {"S": 1.0, "M": 1.0, "H": 1.0}
 var clock := 0.0
 var wet := 0.0
 var track_evo := 0.15
-var rain = null # {start, end, level}
-var fc = null   # 예보 {lo, hi, p}
+var rain: Variant = null # {start, end, level}
+var fc: Variant = null   # 예보 {lo, hi, p}
 var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
@@ -291,7 +291,7 @@ func lap_base(c) -> float:
 	return float(CIRC["base"]) * car_factor(c)
 
 
-func next_stop(c):
+func next_stop(c) -> Variant:
 	var stops: Array = c.plan["stops"]
 	if c.stops_done < stops.size():
 		return stops[c.stops_done]
@@ -449,7 +449,7 @@ func deploy(kind: String) -> void:
 	var n = int(round(uni(3, 4))) if kind == "SC" else 2
 	sc_end_lap = leader_lap + n
 	if kind == "SC":
-		var lead = leader_car()
+		var lead: Variant = leader_car()
 		sc_dist = (car_dist(lead) + T.L * 0.035) if lead != null else 0.0
 		event("세이프티카 출동! 대열이 압축됩니다 (%d랩 종료 예정)" % sc_end_lap, "sc")
 	else:
@@ -562,7 +562,7 @@ func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionar
 			if cnt["S"] > sets["S"] or cnt["M"] > sets["M"] or cnt["H"] > sets["H"]:
 				continue
 			var best_cost = INF
-			var best_cut = null
+			var best_cut: Variant = null
 			for cu in cuts:
 				var t = ns * pit_cost
 				var prev = 0
@@ -580,7 +580,7 @@ func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionar
 	return out
 
 
-func ai_choose(c, cands: Array, is_start: bool):
+func ai_choose(c, cands: Array, is_start: bool) -> Variant:
 	if cands.is_empty():
 		return null
 	var st: String = c.strat_style
@@ -592,7 +592,7 @@ func ai_choose(c, cands: Array, is_start: bool):
 	var back: bool = is_start and c.grid >= 12
 	var front: bool = is_start and c.grid <= 3
 	var main_start: String = cands[0]["seq"][0]
-	var pick = null
+	var pick: Variant = null
 	var pv = INF
 	for x in cands:
 		if x["cost"] > best + tol:
@@ -623,7 +623,7 @@ func plan_ai_strategy(c, fixed_start: String) -> void:
 	c.strat_style = team_style(c.team)
 	c.est_err = clampf(1.0 + gauss((1.0 - c.strategy) * 0.45), 0.7, 1.35)
 	var cands = ai_optimize(laps, fixed_start, c.wear, ai_rates(c, 1.0), pit_loss() + 3.0, {}, {"S": 1, "M": 2, "H": 1}, 3 if laps >= 12 else 2)
-	var pk = ai_choose(c, cands, true)
+	var pk: Variant = ai_choose(c, cands, true)
 	if pk == null:
 		return
 	var stops = []
@@ -654,7 +654,7 @@ func ai_replan(c) -> void:
 	if left < 2:
 		return
 	var cands = ai_optimize(left, c.comp, c.wear, ai_rates(c, scale), pit_loss() + 3.0, c.used, c.ai_sets, 2)
-	var pk = ai_choose(c, cands, false)
+	var pk: Variant = ai_choose(c, cands, false)
 	if pk == null:
 		return
 	var base: int = c.lap
@@ -699,7 +699,7 @@ func _alt_slick(comp: String) -> String:
 
 
 ## 피트 판단: 마지막 섹터에 들어설 때(피트 입구 전) 호출. 플레이어 차는 박스 지시가 있을 때만 들어온다.
-func pit_decision(c):
+func pit_decision(c) -> Variant:
 	var cur: int = c.lap + 1
 	var left: int = laps - cur
 	var want = ideal_tyre(wet)
@@ -709,14 +709,14 @@ func pit_decision(c):
 		var comp: String = c.pit_req
 		c.pit_req = ""
 		c.crew_out = true
-		var ns0 = next_stop(c)
+		var ns0: Variant = next_stop(c)
 		if ns0 != null:
 			c.stops_done += 1
 		return {"comp": comp, "tyres": true}
 	if c.mine:
 		return null
 	ai_replan(c)
-	var ns = next_stop(c)
+	var ns: Variant = next_stop(c)
 	var have = kind_of(c.comp)
 	if want != have:
 		var nw = ("M" if left > 8 else "S") if want == "slick" else want
@@ -734,8 +734,8 @@ func pit_decision(c):
 				ord.append(o)
 		var idx = ord.find(c)
 		var k: int = c.cross.size() - 1
-		var behind = ord[idx + 1] if idx + 1 < ord.size() else null
-		var ahead = ord[idx - 1] if idx >= 1 else null
+		var behind: Variant = ord[idx + 1] if idx + 1 < ord.size() else null
+		var ahead: Variant = ord[idx - 1] if idx >= 1 else null
 		var gap_b = 99.0
 		var gap_a = 99.0
 		if behind != null and k >= 0 and behind.cross.size() > k:
@@ -823,7 +823,7 @@ func on_cross(c, t: float) -> void:
 		if c.crew_cooldown > 0:
 			c.crew_cooldown -= 1
 		if not c.mine and c.boxing == null:
-			var ns = next_stop(c)
+			var ns: Variant = next_stop(c)
 			c.crew_out = (ns != null and c.lap + 1 == ns["lap"]) or c.wear > 0.78
 		c.pit_lap = false
 		c.lap_start_t = t
@@ -854,7 +854,7 @@ func on_cross(c, t: float) -> void:
 		c.sec += 1
 		c.pit_phase = 0
 		if c.sec == NS - 1 and c.boxing == null:
-			var d = pit_decision(c)
+			var d: Variant = pit_decision(c)
 			if d != null:
 				c.boxing = d
 				c.pit_total = pit_loss() + gauss(0.6)
@@ -884,7 +884,7 @@ func apply_pit(c) -> void:
 
 
 func _same_class_ahead(c, k: int, t: float) -> Array:
-	var ahead = null
+	var ahead: Variant = null
 	var ahead_t = -INF
 	for o in cars:
 		if o == c or o.dnf != "":
@@ -907,7 +907,7 @@ func schedule_next(c, t: float) -> void:
 	var r0 = _same_class_ahead(c, k, t)
 	var ahead = r0[0]
 	var ahead_t: float = r0[1]
-	var behind_gap = null
+	var behind_gap: Variant = null
 	if k > 0:
 		for o in cars:
 			if o == c or o.dnf != "" or o.cross.size() <= k - 1:
@@ -915,14 +915,14 @@ func schedule_next(c, t: float) -> void:
 			var g: float = o.cross[k - 1] - c.cross[k - 1]
 			if g > 0 and (behind_gap == null or g < behind_gap):
 				behind_gap = g
-	var gap = (t - ahead_t) if ahead != null else null
+	var gap: Variant = (t - ahead_t) if ahead != null else null
 	ai_control(c, gap, behind_gap)
 	c.drs = false
 	var dur = 0.0
 	var pitting = is_pitting(c)
 	if sc:
 		var sh: float = T.share[c.sec]
-		var car_in_front = null
+		var car_in_front: Variant = null
 		var best_cross = -INF
 		var best_next = -INF
 		for o in cars:
@@ -1008,7 +1008,7 @@ func schedule_next(c, t: float) -> void:
 	c.sec_end = t + dur
 
 
-func leader_car():
+func leader_car() -> Variant:
 	for c in order():
 		if c.is_running() and c.started and c.pit_phase == 0 and not (c.boxing != null and c.sec == NS - 1):
 			return c
@@ -1112,7 +1112,7 @@ func advance(dt: float) -> void:
 		return
 	var target = clock + dt
 	for _guard in 2000:
-		var next = null
+		var next: Variant = null
 		var nt = INF
 		for c in cars:
 			if not c.is_running():
@@ -1143,7 +1143,7 @@ func advance(dt: float) -> void:
 			c.sec_end = clock + d
 	# 세이프티카 위치: 항상 선두차 바로 앞에서 대열을 이끈다
 	if sc and sc_kind == "SC" and sc_dist >= 0.0:
-		var lead = leader_car()
+		var lead: Variant = leader_car()
 		var v_sc: float = T.L / (float(CIRC["base"]) * 1.56)
 		if lead != null:
 			var target_d: float = car_dist(lead) + T.L * 0.022
