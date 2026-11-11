@@ -556,7 +556,114 @@ func _roster_crew(names: Array) -> Array:
 func race_opts(sprint: bool = false) -> Dictionary:
 	var o: Dictionary = _race_opts(sprint)
 	o["difficulty"] = int(hq.get("difficulty", 1))
+	var em: Dictionary = hq.get("next_mods", {})
+	if not em.is_empty():
+		var e2: Dictionary = em.duplicate(true)
+		if sprint:
+			e2.erase("grid_pen") # 그리드 강등은 피처(본선)에만
+		o["event_mods"] = e2
 	return o
+
+
+# ═════════ 커리어 이벤트 (레이스 사이 선택) ═════════
+## hq["event"] = {kind, title, msg, opts:[{label, fx}]} · fx 는 resolve_event 에서 적용.
+## 효과 중 다음 레이스에만 걸리는 것은 hq["next_mods"] {focus:[#1,#2], rel, grid_pen:[#1,#2], practice} 에 쌓는다.
+func _slot_name(slot: int) -> String:
+	if is_wec():
+		var cr: Array = my_crew(slot)
+		return "#%d 차 %s" % [slot + 1, cr[0]["name"] if not cr.is_empty() else ""]
+	return "#%d %s" % [slot + 1, my_driver(slot)["name"]]
+
+
+func _maybe_event() -> void:
+	if hq.has("event") and hq["event"] != null:
+		return
+	if rnd() > 0.38:
+		return
+	var kinds: Array = ["unhappy", "rumor", "sponsor", "media", "test"]
+	if not is_wec() and not is_spec_tier():
+		kinds.append("pu")
+	var k: String = kinds[int(rnd() * kinds.size()) % kinds.size()]
+	var slot: int = 0 if rnd() < 0.5 else 1
+	var who := _slot_name(slot)
+	var ev := {}
+	match k:
+		"unhappy":
+			ev = {"title": "😠 %s 불만" % who, "msg": "“차가 생각만큼 안 따라와요. 팀이 저를 믿고 있는지 모르겠어요.” 드라이버가 면담을 요청했어요.",
+				"opts": [{"label": "면담 + 사기 보너스 (0.30M)", "fx": {"cash": -0.30, "focus": [slot, 10]}}, {"label": "결과로 보여달라고 한다", "fx": {"focus": [slot, -10], "pop": -0.01}}]}
+		"rumor":
+			ev = {"title": "📰 이적 루머: %s" % who, "msg": "라이벌 팀이 우리 드라이버에게 관심을 보인다는 기사가 났어요. 드라이버도 흔들리는 눈치예요.",
+				"opts": [{"label": "공개 신임 + 보너스 (0.50M)", "fx": {"cash": -0.50, "focus": [slot, 6], "pop": 0.01}}, {"label": "무시한다", "fx": {"focus": [slot, -6], "speed": [slot, -0.004]}}]}
+		"sponsor":
+			ev = {"title": "🤝 스폰서 추가 홍보 요청", "msg": "메인 스폰서가 다음 주말에 팬 행사를 하자고 해요. 돈은 되지만 연습 시간이 줄어요.",
+				"opts": [{"label": "수락 (+0.45M, 연습 2랩 감소)", "fx": {"cash": 0.45, "practice": 2}}, {"label": "정중히 거절 (평판 -1%)", "fx": {"pop": -0.01}}]}
+		"media":
+			ev = {"title": "🎤 언론 인터뷰", "msg": "다음 레이스 전 기자회견. 목표를 어떻게 말할까요?",
+				"opts": [{"label": "\"우승을 노린다\" (평판 +3%, 압박에 집중력 -5)", "fx": {"pop": 0.03, "focus": [-1, -5]}}, {"label": "\"한 경기씩 차분히\" (집중력 +4)", "fx": {"focus": [-1, 4]}}]}
+		"test":
+			ev = {"title": "🧪 타이어 공급사 테스트 초청", "msg": "공급사가 개발 테스트에 차를 빌려달라고 해요. 데이터와 돈을 주지만 정비 부담이 생겨요.",
+				"opts": [{"label": "참가 (+0.35M, 다음 레이스 신뢰성 소폭 하락)", "fx": {"cash": 0.35, "rel": -0.02}}, {"label": "거절", "fx": {}}]}
+		"pu":
+			ev = {"title": "⚙️ 파워유닛 이상 징후 (%s)" % who, "msg": "텔레메트리에서 엔진 진동이 커졌어요. 새 파워유닛으로 바꾸면 그리드 5계단 강등, 그대로 쓰면 고장 위험이 올라가요.",
+				"opts": [{"label": "새 PU 교체 (그리드 -5)", "fx": {"grid_pen": [slot, 5]}}, {"label": "그대로 달린다 (신뢰성 크게 하락)", "fx": {"rel": -0.08}}]}
+	ev["kind"] = k
+	hq["event"] = ev
+	news("이벤트: %s" % ev["title"])
+
+
+func _add_mod(key: String, slot: int, v: float) -> void:
+	if not hq.has("next_mods"):
+		hq["next_mods"] = {}
+	var nm: Dictionary = hq["next_mods"]
+	if key == "focus" or key == "grid_pen":
+		var arr: Array = nm.get(key, [0, 0])
+		for s in [0, 1]:
+			if slot < 0 or s == slot:
+				arr[s] = arr[s] + v
+		nm[key] = arr
+	else:
+		nm[key] = float(nm.get(key, 0.0)) + v
+
+
+func resolve_event(i: int) -> String:
+	var ev: Variant = hq.get("event")
+	if ev == null:
+		return ""
+	var opts: Array = ev["opts"]
+	i = clampi(i, 0, opts.size() - 1)
+	var fx: Dictionary = opts[i]["fx"]
+	if fx.has("cash"):
+		var cv: float = float(fx["cash"])
+		hq["cash"] = r2(float(hq["cash"]) + cv)
+		if cv < 0.0:
+			book("staff", -cv)
+		else:
+			book("spon", cv)
+	if fx.has("pop"):
+		hq["pop"] = clampf(r2(float(hq["pop"]) + float(fx["pop"])), 0.15, 0.98)
+	if fx.has("focus"):
+		_add_mod("focus", int(fx["focus"][0]), float(fx["focus"][1]))
+	if fx.has("grid_pen"):
+		_add_mod("grid_pen", int(fx["grid_pen"][0]), float(fx["grid_pen"][1]))
+	if fx.has("rel"):
+		_add_mod("rel", -1, float(fx["rel"]))
+	if fx.has("practice"):
+		_add_mod("practice", -1, float(fx["practice"]))
+	if fx.has("speed") and not is_wec():
+		var d := my_driver(int(fx["speed"][0]))
+		d["speed"] = maxf(0.6, float(d["speed"]) + float(fx["speed"][1]))
+	var lab: String = opts[i]["label"]
+	news("%s → %s" % [ev["title"], lab])
+	hq["event"] = null
+	save()
+	return lab
+
+
+## 주말 시작까지 고르지 않으면 마지막(무난한) 선택지로 처리
+func resolve_event_default() -> void:
+	var ev: Variant = hq.get("event")
+	if ev != null:
+		resolve_event((ev["opts"] as Array).size() - 1)
 
 
 func _race_opts(sprint: bool) -> Dictionary:
@@ -1243,6 +1350,7 @@ func duty_laps() -> int:
 	var n := 0
 	for c in hq["contracts"]:
 		n += int(c.get("duty", 0))
+	n += int(float(hq.get("next_mods", {}).get("practice", 0.0)))
 	return mini(5, n)
 
 
@@ -1461,6 +1569,7 @@ func driver_salary(d: Dictionary) -> float:
 ## 레이스가 끝난 sim 을 받아 포인트·경제·성장·시즌 전환을 처리한다. 화면용 요약을 돌려준다.
 func after_race(sim) -> Dictionary:
 	var notes: Array = []
+	hq["next_mods"] = {}
 	var ord: Array = sim.order()
 	var classified: Array = []
 	var mcls := my_class()
@@ -1512,6 +1621,8 @@ func after_race(sim) -> Dictionary:
 		_season_end(notes)
 		hq["last_season"]["notes"] = notes.duplicate()
 		ec["season_end"] = true
+	else:
+		_maybe_event()
 	ec["notes"] = notes
 	ec["total"] = total
 	save()

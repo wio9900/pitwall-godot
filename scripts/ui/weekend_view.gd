@@ -19,6 +19,7 @@ var q_push := "std"
 var q_traffic := "clean"
 var q_comp := "S"
 var anim: Variant = null  # {kind, t, dur, res, car}
+var plan_edit := {}       # slot → {"A": [stops], "B": [stops], "key": "A", "opt": 최적 비용, "edited": bool}
 
 var _box: BoxContainer
 var _view
@@ -34,6 +35,7 @@ func open(sim_, wk_) -> void:
 	phase = "practice"
 	sel = 0
 	anim = null
+	plan_edit = {}
 	q_comp = "S"
 	if _view == null:
 		_build_shell()
@@ -200,6 +202,32 @@ func _render_practice() -> void:
 	K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, anim == null)
 	card.add_child(K.label("연료 탑재", 14, K.DIM))
 	K.seg(card, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, anim == null)
+	# 세부 셋업
+	var ct: Dictionary = sim.circ_traits()
+	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
+	var hint := []
+	hint.append("연석·저속 코너가 많아요" if ct["bump"] > 0.3 else ("고속 코너 위주의 매끈한 노면" if ct["bump"] < -0.3 else "노면·코너 성격은 중간"))
+	hint.append("코너 탈출 트랙션이 중요해요" if ct["trac"] > 0.3 else ("긴 직선·고속 구간 위주" if ct["trac"] < -0.3 else "트랙션 비중 보통"))
+	hint.append("%s는 브레이킹이 공격적이에요" % c.name if ag > 0.3 else ("%s는 부드럽게 브레이킹해요" % c.name if ag < -0.3 else "%s의 브레이킹은 무난해요" % c.name))
+	var dh = K.rtl(13)
+	dh.text = "[color=#8b98a5]세부 셋업 · 서킷: %s[/color]" % " · ".join(hint)
+	card.add_child(dh)
+	var ed: bool = anim == null
+	var r1 = K.hbox(4)
+	card.add_child(r1)
+	r1.add_child(_small_lab("서스펜션"))
+	_seg_into(r1, [["soft", "부드럽게"], ["std", "표준"], ["stiff", "단단하게"]], c.susp, _on_detail.bind("susp", sel), ed)
+	var r2 = K.hbox(4)
+	card.add_child(r2)
+	r2.add_child(_small_lab("브레이크"))
+	_seg_into(r2, [["fwd", "앞쪽"], ["std", "표준"], ["rear", "뒤쪽"]], c.bbias, _on_detail.bind("bbias", sel), ed)
+	var r3 = K.hbox(4)
+	card.add_child(r3)
+	r3.add_child(_small_lab("디퍼렌셜"))
+	_seg_into(r3, [["open", "열림"], ["std", "표준"], ["locked", "잠김"]], c.diff, _on_detail.bind("diff", sel), ed)
+	var dx = K.rtl(12)
+	dx.text = "[color=#8b98a5]서스펜션: 부드러우면 연석·저속에 강하고 타이어를 아껴요, 단단하면 고속 코너에 강하지만 마모·실수↑. 브레이크: 뒤쪽은 회전이 좋지만 잠김 실수↑, 앞쪽은 안정적. 디퍼렌셜: 잠그면 탈출 트랙션↑·마모↑, 열면 타이어를 아껴요. 맞추면 랩당 최대 약 0.08초씩 빨라져요. 드라이버 피드백을 들어보세요.[/color]"
+	card.add_child(dx)
 	var left: int = wk.practice_left[sel]
 	var h = K.hbox(6)
 	card.add_child(h)
@@ -227,7 +255,7 @@ func _render_practice() -> void:
 		var t := ""
 		for r in wk.practice_runs:
 			var col := "#a855f7" if r["best"] == best else "#e6edf3"
-			t += "%s  W%.1f %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], WK.PRESS_KO[r["press"]], "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
+			t += "%s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], WK.PRESS_KO[r["press"]], r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
 		var rr = K.rtl(14)
 		rr.text = t
 		tc.add_child(rr)
@@ -357,6 +385,8 @@ func _render_grid() -> void:
 		K.seg(card, [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]], c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
 		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
+		if not sim.is_wec() and not sim.rules.get("no_pits", false):
+			_plan_editor(card, c)
 	_render_q_table()
 	_live.text = "[b]예선 종료[/b] · 폴 포지션 [color=#a855f7]%s[/color]" % sim.cars[0].code
 	_side.add_child(K.btn("레이스 시작 ▶", 20, _on_start_race))
@@ -375,6 +405,29 @@ func _on_wing(v: float, wl) -> void:
 
 func _on_press(v, slot: int) -> void:
 	wk.set_press(slot, v)
+	refresh()
+
+
+func _small_lab(t: String) -> Label:
+	var l = K.label(t, 13, K.DIM)
+	l.custom_minimum_size = Vector2(64, 0)
+	return l
+
+
+func _seg_into(row: HBoxContainer, items: Array, cur: String, cb: Callable, enabled: bool) -> void:
+	var grp = ButtonGroup.new()
+	for it in items:
+		var b = K.btn(String(it[1]), 13)
+		b.toggle_mode = true
+		b.button_group = grp
+		b.button_pressed = String(it[0]) == cur
+		b.disabled = not enabled
+		b.pressed.connect(cb.bind(it[0]))
+		row.add_child(b)
+
+
+func _on_detail(v, key: String, slot: int) -> void:
+	wk.set_detail(slot, key, String(v))
 	refresh()
 
 
@@ -400,6 +453,8 @@ func _on_qtrf(v) -> void:
 
 func _on_start_comp(v, slot: int) -> void:
 	wk.set_start_comp(slot, v)
+	if plan_edit.has(slot) and not plan_edit[slot]["edited"]:
+		plan_edit.erase(slot)
 	refresh()
 
 
@@ -429,7 +484,119 @@ func _on_back() -> void:
 
 
 func _on_start_race() -> void:
+	for slot in plan_edit:
+		var pe: Dictionary = plan_edit[slot]
+		if pe["edited"]:
+			var c = _my(int(slot))
+			c.active_plan = pe["key"]
+			sim.set_custom_plans(c, {"A": pe["A"], "B": pe["B"]})
 	start_race.emit()
+
+
+# ── 전략 플랜 편집 (그리드) ──
+func _init_plans(c) -> void:
+	sim.make_plans(c)
+	var pe := {"A": [], "B": [], "key": "A", "opt": 0.0, "edited": false}
+	for key in ["A", "B"]:
+		if c.plans.has(key):
+			pe[key] = (c.plans[key]["stops"] as Array).duplicate(true)
+	if c.plans.has("A"):
+		pe["opt"] = float(c.plans["A"]["cost"])
+	plan_edit[c.slot] = pe
+
+
+func _plan_editor(card: VBoxContainer, c) -> void:
+	if not plan_edit.has(c.slot):
+		_init_plans(c)
+	var pe: Dictionary = plan_edit[c.slot]
+	var slot: int = c.slot
+	var key: String = pe["key"]
+	var stops: Array = pe[key]
+	card.add_child(HSeparator.new())
+	var hh = K.hbox(6)
+	card.add_child(hh)
+	var hl = K.label("전략 플랜 직접 설계", 15, K.AMBER)
+	hl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hh.add_child(hl)
+	hh.add_child(K.sbtn("최적 계획 불러오기", _on_plan_reset.bind(slot), true, K.GOOD))
+	K.seg(card, [["A", "플랜 A (출발 계획)"], ["B", "플랜 B (예비)"]], key, _on_plan_key.bind(slot), 14)
+	var sr = K.hbox(4)
+	card.add_child(sr)
+	sr.add_child(_small_lab("스톱 수"))
+	_seg_into(sr, [["1", "1스톱"], ["2", "2스톱"], ["3", "3스톱"]], str(stops.size()), _on_plan_n.bind(slot), true)
+	for i in stops.size():
+		var st: Dictionary = stops[i]
+		var row = K.hbox(4)
+		card.add_child(row)
+		row.add_child(_small_lab("%d번째" % (i + 1)))
+		row.add_child(K.sbtn("−", _on_plan_lap.bind(slot, i, -1), int(st["lap"]) > 2))
+		var ll = K.label("L%d" % int(st["lap"]), 15, K.INK)
+		ll.custom_minimum_size = Vector2(44, 0)
+		ll.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		row.add_child(ll)
+		row.add_child(K.sbtn("+", _on_plan_lap.bind(slot, i, 1), int(st["lap"]) < sim.laps - 1))
+		_seg_into(row, [["S", "S"], ["M", "M"], ["H", "H"]], String(st["comp"]), _on_plan_comp.bind(slot, i), true)
+	var ev: Dictionary = sim.eval_plan(c, stops)
+	var t := ""
+	var parts: Array = []
+	for sti in ev["stints"]:
+		parts.append("[color=%s]%s[/color] L%d-%d [color=%s](끝 %d%%)[/color]" % [RS.TYRE_HEX[sti["comp"]], sti["comp"], int(sti["from"]), int(sti["to"]), "#ef4444" if sti["cliff"] else "#8b98a5", int(round(float(sti["end_wear"]) * 100))])
+	t += " → ".join(parts)
+	var diff: float = float(ev["cost"]) - float(pe["opt"])
+	t += "\n예상 손실 [b]%.1f초[/b] · 최적 대비 %s" % [float(ev["cost"]), ("[color=#22c55e]%+.1f초[/color]" % diff) if diff <= 1.0 else ("[color=#f59e0b]%+.1f초[/color]" % diff)]
+	for w in ev["warn"]:
+		t += "\n[color=#ef4444]⚠ %s[/color]" % w
+	t += "\n[color=#8b98a5]마모는 연습에서 잰 추정치 기준이에요 (오차 ±%d%%). 레이스 중 '피트' 탭에서 A·B를 바꾸거나 자동 피트를 켤 수 있어요.[/color]" % int(round(float(wk.wear_est["err"]) * 100.0))
+	var r = K.rtl(13)
+	r.text = t
+	card.add_child(r)
+
+
+func _plan_stops(slot: int) -> Array:
+	var pe: Dictionary = plan_edit[slot]
+	pe["edited"] = true
+	return pe[pe["key"]]
+
+
+func _on_plan_reset(slot: int) -> void:
+	_init_plans(_my(slot))
+	refresh()
+
+
+func _on_plan_key(v, slot: int) -> void:
+	plan_edit[slot]["key"] = String(v)
+	plan_edit[slot]["edited"] = true
+	refresh()
+
+
+func _on_plan_n(v, slot: int) -> void:
+	var st: Array = _plan_stops(slot)
+	var n := int(v)
+	var L: int = sim.laps
+	while st.size() < n:
+		var last: int = int(st[-1]["lap"]) if not st.is_empty() else 0
+		var comp: String = "H" if st.is_empty() or String(st[-1]["comp"]) != "H" else "M"
+		st.append({"lap": mini(L - 1, last + maxi(2, int((L - last) / 2.0))), "comp": comp})
+	while st.size() > n:
+		st.pop_back()
+	# 균등 분할로 다시 배치
+	for i in st.size():
+		st[i]["lap"] = clampi(int(round(L * (i + 1) / float(n + 1))), 2, L - 1)
+	refresh()
+
+
+func _on_plan_lap(slot: int, i: int, d: int) -> void:
+	var st: Array = _plan_stops(slot)
+	var lo: int = (int(st[i - 1]["lap"]) + 1) if i > 0 else 2
+	var hi: int = (int(st[i + 1]["lap"]) - 1) if i + 1 < st.size() else sim.laps - 1
+	st[i]["lap"] = clampi(int(st[i]["lap"]) + d, lo, hi)
+	refresh()
+
+
+func _on_plan_comp(v, slot: int, i: int) -> void:
+	var st: Array = _plan_stops(slot)
+	st[i]["comp"] = String(v)
+	refresh()
 
 
 # ═════════ 애니메이션 ═════════

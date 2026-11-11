@@ -137,6 +137,34 @@ func _txt(parent: Control, bb: String, fsize := 14) -> RichTextLabel:
 # ═════════ 개요 ═════════
 func _tab_home() -> void:
 	var h := _h()
+	var ev: Variant = h.get("event")
+	if ev != null:
+		var ce = K.card(_body, ev["title"], K.AMBER)
+		_txt(ce, "%s\n[color=#8b98a5]고르지 않고 주말로 가면 마지막 선택지로 처리돼요.[/color]" % ev["msg"], 15)
+		var eh = K.hbox(6)
+		ce.add_child(eh)
+		var opts: Array = ev["opts"]
+		for oi in opts.size():
+			var b = K.btn(String(opts[oi]["label"]), 14, _on_event.bind(oi))
+			b.custom_minimum_size = Vector2(0, 42)
+			eh.add_child(b)
+	var nmods: Dictionary = h.get("next_mods", {})
+	if not nmods.is_empty():
+		var parts: Array = []
+		var fl: Array = nmods.get("focus", [0, 0])
+		for sl in 2:
+			if int(fl[sl]) != 0:
+				parts.append("#%d 집중력 %+d" % [sl + 1, int(fl[sl])])
+		var gl: Array = nmods.get("grid_pen", [0, 0])
+		for sl in 2:
+			if int(gl[sl]) > 0:
+				parts.append("#%d 그리드 -%d" % [sl + 1, int(gl[sl])])
+		if float(nmods.get("rel", 0.0)) != 0.0:
+			parts.append("신뢰성 %+d%%" % int(round(float(nmods["rel"]) * 100)))
+		if float(nmods.get("practice", 0.0)) > 0.0:
+			parts.append("연습 -%d랩" % int(nmods["practice"]))
+		if not parts.is_empty():
+			_txt(_body, "[color=#ffc53d]다음 레이스 효과:[/color] %s" % " · ".join(parts), 14)
 	var top = K.hbox(10)
 	_body.add_child(top)
 	# 차량 상태
@@ -208,6 +236,11 @@ func _tab_home() -> void:
 func _on_diff(v) -> void:
 	_h()["difficulty"] = int(v)
 	_act(true)
+
+
+func _on_event(i) -> void:
+	cr.resolve_event(int(i))
+	refresh()
 
 
 func _min_drive_txt() -> String:

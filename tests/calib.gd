@@ -5,6 +5,7 @@ extends SceneTree
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const WeekendS = preload("res://scripts/sim/weekend.gd")
 const DB = preload("res://scripts/data/game_db.gd")
+var pen_n := 0
 const CIRCS = ["melbourne", "bahrain", "monaco", "silverstone", "monza", "suzuka", "singapore", "interlagos"]
 
 
@@ -27,6 +28,9 @@ func _race(team: int, mode: String, key: String, seed_v: int, diff: int = 1) -> 
 				if c.is_running() and c.boxing == null and c.pit_req == "" and sim.wet < 0.2 and c.wear > 0.58 and c.lap < sim.laps - 2:
 					sim.request_pit(c, "H" if c.comp != "H" else "M")
 	var ord: Array = sim.order()
+	for c0 in sim.cars:
+		if c0.time_pen > 0.0:
+			pen_n += 1
 	var pts := {}
 	var pos := {}
 	var cls = 0
@@ -58,12 +62,13 @@ func _init() -> void:
 	for diff in RaceSimS.DIFF_KO.size():
 		var tp = 0.0
 		var nn = 0
+		pen_n = 0
 		for ci in CIRCS.size():
-			for s in 2:
+			for s in 4:
 				var r2 = _race(6, "bot_wk", CIRCS[ci], 9500 + ci * 10 + s, diff)
 				tp += r2["pos"].get(6, 22.0)
 				nn += 1
-		print("난이도 %s: 윌리엄스 봇(주말) 평균 순위 %.1f (%d판)" % [RaceSimS.DIFF_KO[diff], tp / nn, nn])
+		print("난이도 %s: 윌리엄스 봇(주말) 평균 순위 %.1f (%d판) · 레이스당 페널티 %.2f건" % [RaceSimS.DIFF_KO[diff], tp / nn, nn, pen_n / float(nn)])
 	# 팀별 레이스당 포인트 (AI만)
 	var agg := {}
 	var n2 = 0

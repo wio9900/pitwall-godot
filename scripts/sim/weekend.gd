@@ -75,6 +75,18 @@ func set_press(slot: int, p: String) -> void:
 	setups[slot]["press"] = p
 
 
+func set_detail(slot: int, key: String, v: String) -> void:
+	var c = my_cars()[slot]
+	match key:
+		"susp":
+			c.susp = v
+		"bbias":
+			c.bbias = v
+		"diff":
+			c.diff = v
+	setups[slot][key] = v
+
+
 func set_fuel_load(slot: int, f: String) -> void:
 	var c = my_cars()[slot]
 	c.fuel_load = f
@@ -114,7 +126,8 @@ func feedback(c) -> String:
 		b = "그립과 예열은 좋은데 직선이 무겁고, 롱런에선 과열이 걱정돼요"
 	elif c.press == "high":
 		b = "직선은 잘 뻗지만 예열이 느리고 연석에서 튀어요"
-	return a + (". " + b if b != "" else "")
+	var tip: String = sim.setup_tip(c)
+	return a + (". " + b if b != "" else "") + (". " + tip if tip != "" else "")
 
 
 # ═════════ 연습 주행 ═════════
@@ -129,10 +142,10 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
 	var CIRC: Dictionary = sim.CIRC
 	var ws: float = sim.wsc()
-	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * float(RS.PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate
+	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * float(RS.PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c)["wear"])
 	var res: Array = []
 	for i in n:
-		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press)
+		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + float(sim.setup_extra(c)["dt"])
 		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * 0.03) * ws + sim.gauss(0.25)
 		if c.press == "low" and wear > 0.5:
 			t += 0.3 * float(RS.PRESS_FX["low"]["heat"])
@@ -147,7 +160,7 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	if kind == "long":
 		wear_est["runs"] = int(wear_est["runs"]) + 1
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press}
+	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "%s/%s/%s" % [{"soft": "소프트", "std": "표준", "stiff": "하드"}[c.susp], {"fwd": "앞", "std": "중", "rear": "뒤"}[c.bbias], {"open": "열림", "std": "표준", "locked": "잠김"}[c.diff]]}
 	practice_runs.push_front(r)
 	last_feedback = "%s: %s" % [c.name, feedback(c)]
 	if kind == "long":
@@ -193,7 +206,7 @@ func q_lap(c, push: String, traffic: String, stage: int, comp: String, used_set:
 	for s in NS:
 		var sh: float = sim.T.share[s]
 		var t: float = float(CIRC["base"]) * sh * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"]) * spd)
-		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
+		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + float(sim.setup_extra(c)["dt"]) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
 		t += sim.gauss(0.10 * sqrt(sh) * sqrt(ws))
 		if sim.rnd() < trf_risk * sh * 1.6:
 			var loss: float = sim.uni(0.22, 0.68)

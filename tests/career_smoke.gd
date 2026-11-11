@@ -46,7 +46,14 @@ func _bot_preseason(cr) -> void:
 		cr.wec_set_starter(0, 1)
 
 
+var events := {}
+
+
 func _bot_round(cr) -> void:
+	var ev: Variant = cr.hq.get("event")
+	if ev != null:
+		events[ev["kind"]] = int(events.get(ev["kind"], 0)) + 1
+		cr.resolve_event(randi() % (ev["opts"] as Array).size())
 	var cash: float = cr.hq["cash"]
 	for k in ["wind", "rig", "bench", "factory", "sim", "pit"]:
 		if cash > 7.0 and cr.projected_spend() + cr.fac_cost(k) / 4.0 < float(cr.hq["cost_cap_limit"]) - 1.0:
@@ -142,5 +149,6 @@ func _init() -> void:
 			fails += 1
 	CareerS.delete_save()
 	print("F2 스프린트 %d회: 내 팀 %d점, 전체 피트 %.1f회/경기 · F3 %d경기: 전체 피트 %.1f회/경기" % [sprint_n, sprint_pts, sprint_stops / maxf(1.0, sprint_n), f3_n, f3_stops / maxf(1.0, f3_n)])
+	print("커리어 이벤트 발생: %s" % events)
 	print("커리어 테스트 실패 %d" % fails)
 	quit(1 if fails > 0 else 0)

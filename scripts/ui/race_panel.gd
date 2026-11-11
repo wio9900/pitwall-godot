@@ -58,6 +58,7 @@ var _cancel: Button
 var _plan_box: VBoxContainer
 var _plan_btns: Array = []
 var _auto: Button
+var _replan: Button
 var _plan_line: RichTextLabel
 var _p_radio: RichTextLabel
 # ERS·연료
@@ -318,6 +319,8 @@ func _build_pit(pg: VBoxContainer) -> void:
 	_auto.toggle_mode = true
 	_auto.toggled.connect(_on_auto)
 	pr.add_child(_auto)
+	_replan = K.sbtn("최적 재계산", _on_replan, true, K.GOOD)
+	pr.add_child(_replan)
 	_plan_line = _rt(_plan_box, 13)
 	_p_radio = _rt(pg, 14)
 
@@ -440,6 +443,10 @@ func refresh() -> void:
 		var line2: String = c.dnf if c.dnf != "" else "%s %s [color=%s]●[/color] %s" % [RS.TYRE_KO[c.comp], _pct(c.wear), temp_col, extra]
 		if c.mech_trouble != "":
 			line2 += " [color=#ef4444]⚠%s[/color]" % c.mech_trouble
+		if c.time_pen > 0.0:
+			line2 += " [color=#ef4444]+%d초[/color]" % int(c.time_pen)
+		elif c.tl_warn > 0 and c.dnf == "":
+			line2 += " [color=#f59e0b]TL %d/2[/color]" % c.tl_warn
 		var code: String = ("#%d %s" % [c.slot + 1, c.code]) if wec else c.code
 		_chip_txt[i].text = "[font_size=24][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]" % [pos, code, badge, line2]
 	var c = car()
@@ -570,7 +577,8 @@ func _refresh_pit(c) -> void:
 		var pa: String = sim.plan_text(c, "A")
 		var pb: String = sim.plan_text(c, "B")
 		var nxt: String = ("권장 박스 [b]L%d → %s[/b]" % [int(ns["lap"]), RS.TYRE_KO[ns["comp"]]]) if ns != null else "남은 권장 스톱 없음"
-		_plan_line.text = "%s\n[color=#8b98a5]A: %s   B: %s%s[/color]" % [nxt, pa if pa != "" else "-", pb if pb != "" else "-", ("\n[color=#38bdf8]자동 피트 켜짐: 계획 랩에 알아서 박스하고 노면 변화에도 대응해요[/color]" if c.auto_plan else "")]
+		_replan.visible = c.custom_plans
+		_plan_line.text = "%s%s\n[color=#8b98a5]A: %s   B: %s%s[/color]" % [nxt, "  [color=#a855f7](직접 설계한 계획)[/color]" if c.custom_plans else "", pa if pa != "" else "-", pb if pb != "" else "-", ("\n[color=#38bdf8]자동 피트 켜짐: 계획 랩에 알아서 박스하고 노면 변화에도 대응해요[/color]" if c.auto_plan else "")]
 	_p_radio.text = _radio_line(c)
 
 
@@ -735,6 +743,13 @@ func _on_auto(on: bool) -> void:
 	var c = car()
 	if c != null:
 		sim.set_auto(c, on)
+		refresh()
+
+
+func _on_replan() -> void:
+	var c = car()
+	if c != null:
+		sim.reset_plans(c)
 		refresh()
 
 

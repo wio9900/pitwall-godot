@@ -14,6 +14,10 @@ const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 const SeasonViewS = preload("res://scripts/ui/season_view.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RacePanelS = preload("res://scripts/ui/race_panel.gd")
+const DebriefS = preload("res://scripts/ui/debrief.gd")
+const RivalS = preload("res://scripts/ui/rival_card.gd")
+const ST = preload("res://scripts/ui/settings.gd")
+const SettingsViewS = preload("res://scripts/ui/settings_view.gd")
 
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
@@ -72,6 +76,10 @@ var settled := false
 var sprint_mode := false   # F2 스프린트 레이스 중
 var feature_sim = null     # 스프린트 뒤에 달릴 피처 레이스 (예선 그리드)
 var btn_feature: Button
+var btn_debrief: Button
+var rival
+var settings_view
+var debrief
 
 # 레이스
 var race_box: Control
@@ -107,6 +115,8 @@ var start_hold := 4.5
 
 func _ready() -> void:
 	DB.load_all()
+	ST.ensure()
+	ST.apply_audio()
 	for sl in range(CareerS.SLOTS, 0, -1):
 		if not CareerS.has_save(sl):
 			new_slot = sl
@@ -145,6 +155,8 @@ func _on_resize() -> void:
 	var ws: Vector2i = win.size
 	var want := 1 if ws.x > ws.y * 1.05 else 0
 	var base := Vector2i(1280, 720) if want == 1 else Vector2i(720, 1280)
+	var scl: float = 1.0 / clampf(float(ST.get_v("ui_scale")), 0.8, 1.3)
+	base = Vector2i(int(base.x * scl), int(base.y * scl))
 	if win.content_scale_size != base:
 		win.content_scale_size = base
 	var vs: Vector2 = get_viewport_rect().size
@@ -293,6 +305,10 @@ func _build_menu() -> void:
 	v.add_child(mrow)
 	mode_btns = KitS.seg(mrow, [["quick", "퀵 레이스"], ["career", "커리어"]], mode, _on_mode, 20)
 	mrow.add_child(KitS.help("시작 메뉴", HT.QUICK + "\n\n" + HT.CAREER))
+	var gear = KitS.btn("⚙", 18, _open_settings)
+	gear.size_flags_horizontal = Control.SIZE_SHRINK_END
+	gear.custom_minimum_size = Vector2(44, 0)
+	mrow.add_child(gear)
 	quick_left = KitS.vbox(12)
 	v.add_child(quick_left)
 	career_left = KitS.vbox(10)
@@ -427,6 +443,10 @@ func _show_menu() -> void:
 
 
 func _show_only(node: Control) -> void:
+	if debrief != null:
+		debrief.visible = false
+	if rival != null:
+		rival.close_card()
 	for n in [menu_box, race_box, result_box, hq_view, wk_view, season_view]:
 		if n != null:
 			n.visible = n == node
@@ -650,6 +670,27 @@ func _continue_career(sl: int = 1) -> void:
 		_open_hq()
 
 
+func _on_tower_click(meta) -> void:
+	if sim != null:
+		rival.show_car(sim, int(str(meta)))
+
+
+func _open_settings() -> void:
+	settings_view.open()
+
+
+func _apply_settings() -> void:
+	ST.apply_audio()
+	if sim != null:
+		sim.prompts_enabled = bool(ST.get_v("prompts"))
+	_on_resize()
+
+
+func _open_debrief() -> void:
+	if sim != null:
+		debrief.open(sim)
+
+
 func _on_result_hq() -> void:
 	if season_pending:
 		season_pending = false
@@ -694,6 +735,7 @@ func _start_weekend_quick() -> void:
 
 func _start_weekend_career() -> void:
 	mode = "career"
+	career.resolve_event_default()
 	sim = RaceSimS.new()
 	var opts: Dictionary = career.race_opts()
 	sim.new_race(career.next_circuit(), career.race_my_index(), career.race_laps(), "auto", ["M", "M"], 0, opts)
@@ -765,7 +807,8 @@ func _launch_race() -> void:
 	start_hold = 5.0 + randf_range(0.4, 1.1)
 	race_view.lights = 0
 	_show_only(race_box)
-	_set_speed(4)
+	_set_speed(int(ST.get_v("speed")))
+	sim.prompts_enabled = bool(ST.get_v("prompts"))
 	_set_cam(-1)
 	race_panel.reset_for(sim)
 	race_view.sel_slot = 0
@@ -833,6 +876,11 @@ func _build_race_ui() -> void:
 	mute_btn.pressed.connect(_on_mute)
 	sp.add_child(mute_btn)
 	sp.add_child(KitS.help("레이스", HT.RACE))
+	var gear2 = _btn("⚙", 16)
+	gear2.size_flags_horizontal = Control.SIZE_SHRINK_END
+	gear2.custom_minimum_size = Vector2(40, 0)
+	gear2.pressed.connect(_open_settings)
+	sp.add_child(gear2)
 	# 트랙
 	sfx = SfxS.new()
 	add_child(sfx)
@@ -852,10 +900,12 @@ func _build_race_ui() -> void:
 	var tw = VBoxContainer.new()
 	tw.name = "순위"
 	tabs.add_child(tw)
-	gap_btn = _btn("간격: 앞차 ⇄ 선두 ⇄ 랩타임", 13)
+	gap_btn = _btn("간격: 앞차 ⇄ 선두 ⇄ 랩타임  ·  이름을 누르면 라이벌 분석", 13)
 	gap_btn.pressed.connect(_on_gap_mode)
 	tw.add_child(gap_btn)
 	tower = _rtl(false)
+	tower.meta_underlined = false
+	tower.meta_clicked.connect(_on_tower_click)
 	tower.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_small_text(tower, 16)
 	tw.add_child(tower)
@@ -963,7 +1013,7 @@ func _on_select_car(slot: int) -> void:
 
 
 func _on_radio_prompt() -> void:
-	if speed_x > 1:
+	if speed_x > 1 and bool(ST.get_v("prompt_slow")):
 		_set_speed(1)
 	sfx.play("radio")
 
@@ -987,6 +1037,8 @@ func _process(delta: float) -> void:
 		lvl = 0.25
 	elif speed_x > 0 and not sim.done:
 		lvl = 0.45 + 0.1 * log(float(speed_x)) / log(2.0)
+	if not bool(ST.get_v("engine")):
+		lvl = 0.0
 	sfx.set_engine(lvl)
 	if starting:
 		_update_start(delta)
@@ -1066,6 +1118,7 @@ func _refresh_ui() -> void:
 	info_label.text = "[color=#8b98a5]%s · 노면 [b]%s[/b] · 강수확률 [b]%d%%[/b] · 수막 [b]%.1fmm[/b] · 그립 [b]%d%% (%.2fs)[/b]%s[/color]" % [
 		sim.CIRC["name"], sim.surface_ko(), sim.forecast_prob_at(lap_now), sim.wet_mm(sim.wet), int(round(sim.track_evo * 100)), evo_sec, fc_txt]
 	race_panel.refresh()
+	rival.refresh()
 	_refresh_tower(ord, leader)
 	_refresh_radio()
 
@@ -1108,6 +1161,8 @@ func _refresh_tower(ord: Array, leader) -> void:
 			gap = sim.gap_to(c, prev)
 		else:
 			gap = sim.gap_to(c, leader)
+		if c.time_pen > 0.0 and c.dnf == "":
+			gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
 		if c.boxing != null or c.pit_phase == 2:
 			gap += " [color=#ffc53d]PIT[/color]"
 		elif c.crew_out and c.dnf == "":
@@ -1119,8 +1174,8 @@ func _refresh_tower(ord: Array, leader) -> void:
 		var tyre = "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
 		if c.mine:
 			tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
-			pos, _hex(c.color), name_col, c.code, c.team, gap, tyre, c.pits]
+		s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
+			pos, c.id, _hex(c.color), name_col, c.code, c.team, gap, tyre, c.pits]
 	s += "[/table]"
 	tower.text = s
 
@@ -1153,7 +1208,7 @@ func _refresh_tower_wec(ord: Array) -> void:
 			if c.mine:
 				tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
 			var nm: String = _short_team(c.team) + (" #%d" % (c.slot + 1))
-			s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [pos, _hex(c.color), name_col, nm, c.code, gap, tyre, c.pits]
+			s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [pos, c.id, _hex(c.color), name_col, nm, c.code, gap, tyre, c.pits]
 	s += "[/table]"
 	tower.text = s
 
@@ -1214,6 +1269,18 @@ func _build_result() -> void:
 	btn_feature = _btn("피처 레이스 ▶", 22)
 	btn_feature.pressed.connect(_start_feature)
 	h.add_child(btn_feature)
+	btn_debrief = _btn("📊 전략 복기", 18)
+	btn_debrief.pressed.connect(_open_debrief)
+	v.add_child(btn_debrief)
+	v.move_child(btn_debrief, v.get_child_count() - 2)
+	debrief = DebriefS.new()
+	debrief.visible = false
+	add_child(debrief)
+	rival = RivalS.new()
+	add_child(rival)
+	settings_view = SettingsViewS.new()
+	settings_view.changed.connect(_apply_settings)
+	add_child(settings_view)
 
 
 func _career_summary(ec: Dictionary) -> String:
@@ -1260,7 +1327,7 @@ func _show_result() -> void:
 				last = hrec["comp"]
 		for i in seq.size():
 			strat += _tyre_bb(seq[i]) + (" " if i < seq.size() - 1 else "")
-		var pen = " [color=#ef4444]+30s[/color]" if c.penalty > 0 else ""
+		var pen = (" [color=#ef4444]+%ds[/color]" % int(c.penalty)) if c.penalty > 0 else ""
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			r["pos"], _hex(c.color), name_col, (_short_team(c.team) + " #%d" % (c.slot + 1)) if sim.is_wec() else c.code, c.code if sim.is_wec() else c.team, r["gap"], pen, strat, r["points"]]
 	s += "[/table]"

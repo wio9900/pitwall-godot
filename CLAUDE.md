@@ -30,4 +30,5 @@
 5. 하위 리그 (완료): F2 스프린트+피처, F3 피트 없음·성장 ×2, WEC LMGT3(브론즈 25%)·LMP2(실버 20%)
 6. WEC 모드 (완료): race_sim.gd 의 is_wec() 분기, data/wec.json · circuits_wec.json
 7. 편의·콘텐츠 (완료): 난이도 4단계(race_sim DIFF_PACE/DIFF_STRAT, 보통 = 원작), 레이스 지시·전략 A/B·자동 피트(make_plans/_my_auto_decision), 인터·웻 박스 버튼, WEC FA 시장·라인업, F2/F3 로스터 능력치(이름 해시), 시즌 결산 화면(season_view.gd·트로피), 저장 슬롯 3개(1번 = 예전 파일), "?" 도움말(help.gd·help_text.gd), 비·SC·우승 연출
+8. 레이스 화면·전략 깊이 (완료): race_panel.gd(칩·탭·엔지니어 제안·팀 오더), 세부 셋업(race_sim setup_extra — 표준이면 0), 그리드 플랜 직접 설계(eval_plan/set_custom_plans), 복기(debrief.gd), 라이벌 카드(rival_card.gd), 페널티(add_penalty), 커리어 이벤트(career _maybe_event/resolve_event, next_mods), 설정(settings.gd)
 - 참고: 보통 난이도에서 단순 봇이 AI보다 레이스당 약 2계단(예선 포함 3.5계단) 앞선다 (tests/calib.gd 난이도별 출력으로 비교).

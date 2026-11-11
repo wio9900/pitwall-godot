@@ -89,6 +89,12 @@ func _process(_delta: float) -> bool:
 			step = 46
 		46:
 			_shot("race_tab_laps")
+			main._on_tower_click(str(main.sim.order()[0].id))
+			wait = 3
+			step = 48
+		48:
+			_shot("rival_card")
+			main.rival.close_card()
 			main.race_panel._on_tab("drive")
 			main._on_gap_mode()
 			main.race_view._rain_t = main.race_view._now - 0.5
@@ -140,6 +146,12 @@ func _process(_delta: float) -> bool:
 				step = 9
 		9:
 			_shot("result")
+			main._open_debrief()
+			wait = 4
+			step = 47
+		47:
+			_shot("debrief")
+			main.debrief._on_close()
 			_race("singapore", "rain", 720, 1280)
 			main._update_start(10.0)
 			step = 10
@@ -159,6 +171,12 @@ func _process(_delta: float) -> bool:
 			step = 12
 		12:
 			_shot("menu_career")
+			main._open_settings()
+			wait = 3
+			step = 49
+		49:
+			_shot("settings")
+			main.settings_view._on_close()
 			main.new_entry = "create"
 			main._render_career_menu()
 			wait = 3
@@ -205,6 +223,7 @@ func _process(_delta: float) -> bool:
 			step = 21
 		21:
 			_shot("wk_quali_lap")
+			main.wk_view.anim = null
 			main.wk_view._on_auto_quali()
 			wait = 3
 			step = 22

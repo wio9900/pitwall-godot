@@ -57,5 +57,28 @@ func _init() -> void:
 			if not sim.done:
 				fails += 1
 			print("자동전략 %-11s 난이도%d | 계획 %s | %s" % [key, n * 2, plan0, txt])
+	# 직접 짠 계획 + 세부 셋업: 계획대로 피트하는지
+	for key in ["monza", "bahrain"]:
+		var sim = RaceSimS.new()
+		sim.new_race(key, 6, 15, "dry", ["M", "M"], 4100)
+		var mc: Array = sim.my_cars()
+		mc[0].susp = "soft"
+		mc[0].diff = "locked"
+		mc[1].bbias = "rear"
+		var ev: Dictionary = sim.eval_plan(mc[0], [{"lap": 5, "comp": "H"}, {"lap": 10, "comp": "S"}])
+		sim.set_custom_plans(mc[0], {"A": [{"lap": 5, "comp": "H"}, {"lap": 10, "comp": "S"}], "B": [{"lap": 8, "comp": "H"}]})
+		sim.set_custom_plans(mc[1], {"A": [{"lap": 8, "comp": "H"}], "B": []})
+		sim.prepare_start()
+		for c in mc:
+			sim.set_auto(c, true)
+		var guard = 0
+		while not sim.done and guard < 200000:
+			sim.advance(2.0)
+			guard += 1
+		var x0: Dictionary = sim.setup_extra(mc[0])
+		print("직접 계획 %s | 평가 손실 %.1f초 경고 %s | #1 피트%d(계획 2) #2 피트%d(계획 1) | 세부셋업 dt %.3f 마모×%.2f · tip '%s'" % [key, float(ev["cost"]), ev["warn"], mc[0].pits, mc[1].pits, float(x0["dt"]), float(x0["wear"]), sim.setup_tip(mc[1])])
+		if not sim.ever_wet and (mc[0].dnf == "" and mc[0].pits != 2 or mc[1].dnf == "" and mc[1].pits != 1):
+			print("  ! 직접 계획대로 피트하지 않음")
+			fails += 1
 	print("총 %dms, 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

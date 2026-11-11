@@ -73,9 +73,14 @@ func _process(_delta: float) -> bool:
 				rp.refresh()
 				rp._on_prompt(1)
 			rp._on_tab("pit")
+			main._on_tower_click(str(main.sim.order()[1].id))
+			main.rival.refresh()
+			main.rival.close_card()
 		return frames > 60000
 	main._refresh_ui()
 	main._show_result()
+	main._open_debrief()
+	main.debrief._on_close()
 	races += 1
 	if races <= configs.size():
 		print("완주: %s 우승 %s" % [main.sim.CIRC["name"], main.sim.results()[0]["car"].code])
@@ -119,5 +124,15 @@ func _process(_delta: float) -> bool:
 		names.append(d["name"])
 	print("WEC 인력 탭 · 라인업: #1 차 %s · 난이도 %d" % [names, int(main.career.hq["difficulty"])])
 	main.CareerS.delete_save(main.career.save_slot)
+	main._open_settings()
+	main.settings_view._on_scale("1.1")
+	main.settings_view._on_prompts("off")
+	main.settings_view._on_engine("off")
+	main.settings_view._on_speed("8")
+	main.settings_view._on_scale("1.0")
+	main.settings_view._on_prompts("on")
+	main.settings_view._on_engine("on")
+	main.settings_view._on_speed("4")
+	main.settings_view._on_close()
 	print("UI 테스트 통과 (%d프레임)" % frames)
 	return true
