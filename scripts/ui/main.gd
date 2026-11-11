@@ -13,6 +13,7 @@ const HqViewS = preload("res://scripts/ui/hq_view.gd")
 const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 const SeasonViewS = preload("res://scripts/ui/season_view.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
+const RacePanelS = preload("res://scripts/ui/race_panel.gd")
 
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
@@ -76,7 +77,10 @@ var btn_feature: Button
 var race_box: Control
 var top_label: RichTextLabel
 var race_view
-var car_panels: Array = [] # [{head, status, pace_btns, ers_btns, box_btns}]
+var race_panel            # 내 차 지시판 (race_panel.gd)
+var info_label: RichTextLabel
+var gap_mode := 0         # 순위표: 0 앞차 간격 / 1 선두와 차이 / 2 직전 랩타임
+var gap_btn: Button
 var tower: RichTextLabel
 var radio: RichTextLabel
 var result_box: Control
@@ -763,19 +767,8 @@ func _launch_race() -> void:
 	_show_only(race_box)
 	_set_speed(4)
 	_set_cam(-1)
-	var wec: bool = sim.is_wec()
-	for i in 2:
-		var cp: Dictionary = car_panels[i]
-		_press_only(cp["pace"], 1)
-		_press_only(cp["ers"], 1)
-		_press_only(cp["fuel"], 1)
-		_press_only(cp["instr"], 0)
-		cp["auto"].set_pressed_no_signal(false)
-		cp["box_row"].visible = not wec
-		cp["plan_row"].visible = not wec and not sim.rules.get("no_pits", false)
-		cp["ers_row"].visible = not wec
-		cp["wec_row"].visible = wec
-		cp["fuel_row"].visible = wec
+	race_panel.reset_for(sim)
+	race_view.sel_slot = 0
 	_refresh_ui()
 
 
@@ -813,6 +806,9 @@ func _build_race_ui() -> void:
 	hud_top = top
 	top_label = _rtl()
 	top.add_child(top_label)
+	info_label = _rtl()
+	_small_text(info_label, 14)
+	top.add_child(info_label)
 	var sp = HBoxContainer.new()
 	sp.add_theme_constant_override("separation", 5)
 	top.add_child(sp)
@@ -845,20 +841,24 @@ func _build_race_ui() -> void:
 	race_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	race_view.size_flags_stretch_ratio = 1.6
 	race_view.clip_contents = true
-	# 내 차 패널 2개
-	var h = HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	panels_box = h
-	car_panels.clear()
-	for i in 2:
-		car_panels.append(_build_car_panel(h, i))
+	# 내 차 지시판 (칩 · 탭 · 엔지니어 제안 · 팀 오더)
+	race_panel = RacePanelS.new()
+	race_panel.select_car.connect(_on_select_car)
+	race_panel.radio_prompt.connect(_on_radio_prompt)
+	panels_box = race_panel
 	# 순위 / 무전
 	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var tw = VBoxContainer.new()
+	tw.name = "순위"
+	tabs.add_child(tw)
+	gap_btn = _btn("간격: 앞차 ⇄ 선두 ⇄ 랩타임", 13)
+	gap_btn.pressed.connect(_on_gap_mode)
+	tw.add_child(gap_btn)
 	tower = _rtl(false)
-	tower.name = "순위"
+	tower.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_small_text(tower, 16)
-	tabs.add_child(tower)
+	tw.add_child(tower)
 	radio = _rtl(false)
 	radio.name = "무전"
 	_small_text(radio, 16)
@@ -868,106 +868,6 @@ func _build_race_ui() -> void:
 func _small_text(r: RichTextLabel, fsize: int) -> void:
 	for k in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size", "mono_font_size"]:
 		r.add_theme_font_size_override(k, fsize)
-
-
-func _build_car_panel(parent: Control, slot: int) -> Dictionary:
-	var pc = PanelContainer.new()
-	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(pc)
-	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 5)
-	pc.add_child(v)
-	var head = _rtl()
-	_small_text(head, 18)
-	v.add_child(head)
-	var status = _rtl()
-	_small_text(status, 15)
-	v.add_child(status)
-	var box_row = HBoxContainer.new()
-	box_row.add_theme_constant_override("separation", 4)
-	v.add_child(box_row)
-	box_row.add_child(_label("박스", 16, DIM))
-	var box_btns = []
-	for comp in ["S", "M", "H", "I", "W"]:
-		var b = _btn(comp, 16)
-		b.add_theme_color_override("font_color", Color(RaceSimS.TYRE_HEX[comp]))
-		b.pressed.connect(_on_box.bind(comp, slot))
-		box_row.add_child(b)
-		box_btns.append(b)
-	var cancel = _btn("✕", 16)
-	cancel.tooltip_text = "박스 취소"
-	cancel.pressed.connect(_on_cancel.bind(slot))
-	box_row.add_child(cancel)
-	# WEC 박스: 타이어 선택(또는 유지) + 급유 + 드라이버 교대
-	var wrow = HBoxContainer.new()
-	wrow.add_theme_constant_override("separation", 4)
-	v.add_child(wrow)
-	wrow.add_child(_label("박스", 16, DIM))
-	var wbtns = []
-	for comp in ["S", "M", "H", "I", "W"]:
-		var wb = _btn(comp, 16)
-		wb.add_theme_color_override("font_color", Color(RaceSimS.TYRE_HEX[comp]))
-		wb.pressed.connect(_on_wec_box.bind(comp, slot))
-		wrow.add_child(wb)
-		wbtns.append(wb)
-	var fuel_only = _btn("급유만", 14)
-	fuel_only.pressed.connect(_on_wec_box.bind("keep", slot))
-	wrow.add_child(fuel_only)
-	wbtns.append(fuel_only)
-	var drv_t = _btn("교대", 14)
-	drv_t.toggle_mode = true
-	wrow.add_child(drv_t)
-	var wcancel = _btn("취소", 14)
-	wcancel.pressed.connect(_on_cancel.bind(slot))
-	wrow.add_child(wcancel)
-	# 전략 계획 A/B + 자동 피트 (F1)
-	var prow = HBoxContainer.new()
-	prow.add_theme_constant_override("separation", 4)
-	v.add_child(prow)
-	var pl = _label("전략", 15, DIM)
-	pl.custom_minimum_size = Vector2(44, 0)
-	prow.add_child(pl)
-	var pgrp = ButtonGroup.new()
-	var plan_btns: Array = []
-	for key in ["A", "B"]:
-		var pb = _btn(key, 14)
-		pb.toggle_mode = true
-		pb.button_group = pgrp
-		pb.clip_text = true
-		pb.size_flags_stretch_ratio = 3.0
-		pb.pressed.connect(_on_plan.bind(key, slot))
-		prow.add_child(pb)
-		plan_btns.append(pb)
-	var auto_b = _btn("자동", 14)
-	auto_b.toggle_mode = true
-	auto_b.toggled.connect(_on_auto.bind(slot))
-	prow.add_child(auto_b)
-	var instr = _toggle_row(v, "지시", [["free", "자유"], ["attack", "추월"], ["defend", "방어"], ["hold", "유지"], ["lift", "연비"]], _on_instr.bind(slot))
-	var pace = _toggle_row(v, "페이스", [["save", "세이브"], ["standard", "표준"], ["attack", "공격"]], _on_pace.bind(slot))
-	var ers = _toggle_row(v, "ERS", [["harvest", "충전"], ["balance", "밸런스"], ["deploy", "오버"]], _on_ers.bind(slot))
-	var fuel = _toggle_row(v, "연료", [["lean", "세이브"], ["std", "표준"], ["rich", "리치"]], _on_fuel_mode.bind(slot))
-	return {"panel": pc, "head": head, "status": status, "box": box_btns, "cancel": cancel, "pace": pace, "ers": ers,
-		"plan_row": prow, "plan_btns": plan_btns, "auto": auto_b, "instr": instr,
-		"box_row": box_row, "wec_row": wrow, "wec_btns": wbtns, "drv": drv_t, "wcancel": wcancel, "fuel": fuel, "ers_row": ers[0].get_parent(), "fuel_row": fuel[0].get_parent()}
-
-
-func _toggle_row(parent: Control, title: String, items: Array, cb: Callable) -> Array:
-	var row = HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	parent.add_child(row)
-	var l = _label(title, 15, DIM)
-	l.custom_minimum_size = Vector2(44, 0)
-	row.add_child(l)
-	var grp = ButtonGroup.new()
-	var btns = []
-	for it in items:
-		var b = _btn(it[1], 14)
-		b.toggle_mode = true
-		b.button_group = grp
-		b.pressed.connect(cb.bind(it[0]))
-		row.add_child(b)
-		btns.append(b)
-	return btns
 
 
 func _press_only(btns: Array, idx: int) -> void:
@@ -1037,12 +937,10 @@ func _on_wec_box(comp: String, slot: int) -> void:
 	var c: Variant = _my(slot)
 	if c == null:
 		return
-	var drv: bool = car_panels[slot]["drv"].button_pressed
 	if comp == "keep":
-		sim.request_pit_wec(c, c.comp, false, true, drv)
+		sim.request_pit_wec(c, c.comp, false, true, false)
 	else:
-		sim.request_pit_wec(c, comp, true, true, drv)
-	car_panels[slot]["drv"].set_pressed_no_signal(false)
+		sim.request_pit_wec(c, comp, true, true, false)
 	_refresh_ui()
 
 
@@ -1056,6 +954,25 @@ func _on_ers(m: String, slot: int) -> void:
 	var c: Variant = _my(slot)
 	if c != null:
 		sim.set_ers(c, m)
+
+
+func _on_select_car(slot: int) -> void:
+	race_view.sel_slot = slot
+	if race_view.follow_slot >= 0:
+		_set_cam(slot)
+
+
+func _on_radio_prompt() -> void:
+	if speed_x > 1:
+		_set_speed(1)
+	sfx.play("radio")
+
+
+func _on_gap_mode() -> void:
+	gap_mode = (gap_mode + 1) % 3
+	gap_btn.text = ["간격: 앞차 기준", "간격: 선두 기준", "직전 랩타임"][gap_mode] + "  ⇄"
+	if sim != null:
+		_refresh_ui()
 
 
 # ═════════ 진행 ═════════
@@ -1090,7 +1007,7 @@ func _update_start(delta: float) -> void:
 		if n != race_view.lights:
 			race_view.lights = n
 			sfx.play("beep")
-			top_label.text = "[b]%s[/b]  [color=#ef4444]스타트 시그널 점등 중… (%d/5)[/color]" % [sim.CIRC["name"], n]
+			top_label.text = "[font_size=28][b]%s[/b][/font_size]   [color=#ef4444]스타트 시그널 점등 중… (%d/5)[/color]" % [sim.CIRC["name"], n]
 		return
 	starting = false
 	race_view.lights = -1
@@ -1108,108 +1025,47 @@ func _tyre_bb(comp: String) -> String:
 	return "[color=%s][b]%s[/b][/color]" % [RaceSimS.TYRE_HEX[comp], comp]
 
 
+func _chip(text: String, bg: String, fg: String = "#0b0f14") -> String:
+	return "[bgcolor=%s][color=%s][b] %s [/b][/color][/bgcolor]" % [bg, fg, text]
+
+
 func _refresh_ui() -> void:
 	if sim == null:
 		return
 	var ord: Array = sim.order()
 	var leader = ord[0]
 	var lap_now = mini(sim.laps, leader.lap + 1)
-	var wx = "맑음"
-	if sim.wet >= 0.65:
-		wx = "폭우 (웻)"
-	elif sim.wet >= 0.22:
-		wx = "젖음 (인터)"
-	elif sim.wet > 0.04:
-		wx = "약한 비"
-	var fc_txt = ""
-	if sim.fc != null and sim.leader_lap < sim.fc["lo"]:
-		fc_txt = " · 예보 L%d-%d 비 %d%%" % [sim.fc["lo"], sim.fc["hi"], sim.fc["p"]]
-	var sc_txt = ""
+	# 상단: 큰 랩 숫자 + 상태 칩
+	var chips := ""
 	if sim.sc:
-		sc_txt = " · [color=#f59e0b][b]%s[/b][/color]" % sim.sc_kind
+		chips += _chip(sim.sc_kind, "#f59e0b") + " "
+	elif sim.finishing:
+		chips += _chip("🏁 체커기", "#e6edf3") + " "
+	else:
+		chips += _chip("GREEN", "#22c55e") + " "
+	if sim.drs_on() and not sim.sc:
+		chips += _chip("DRS", "#0b0f14", "#22c55e") + " "
+	if sim.wet >= 0.22:
+		chips += _chip("WET", "#3b82f6", "#ffffff") + " "
+	if sim.night:
+		chips += _chip("NIGHT", "#312e81", "#ffffff") + " "
 	var fmt_tag := ""
 	if mode == "career" and career != null and career.has_sprint():
-		fmt_tag = "[color=#a855f7]스프린트[/color] " if sprint_mode else "[color=#a855f7]피처[/color] "
+		fmt_tag = _chip("스프린트" if sprint_mode else "피처", "#a855f7", "#ffffff") + " "
 	elif mode == "career" and career != null and career.race_format() == "f3":
-		fmt_tag = "[color=#a855f7]F3[/color] "
+		fmt_tag = _chip("F3", "#a855f7", "#ffffff") + " "
 	if not starting:
-		top_label.text = fmt_tag + "[b]%s[/b]  [color=#ffc53d]L%d/%d[/color]  · %s%s%s%s" % [sim.CIRC["name"], lap_now, sim.laps, wx, fc_txt, sc_txt, " · 야간" if sim.night else ""]
-	# 내 차
-	var mine: Array = sim.my_cars()
-	for i in 2:
-		var cp: Dictionary = car_panels[i]
-		if i >= mine.size():
-			cp["panel"].visible = false
-			continue
-		cp["panel"].visible = true
-		var c = mine[i]
-		var pos = ord.find(c) + 1
-		var head_col = _hex(c.color)
-		if sim.is_wec():
-			cp["head"].text = "[color=%s]■[/color] [b]HY P%d  #%d[/b]  [color=#8b98a5]%s · %s[/color]" % [head_col, sim.class_pos(c), c.slot + 1, c.name, "등급 " + String(c.drivers[c.drv].get("grade", "-"))]
-		else:
-			cp["head"].text = "[color=%s]■[/color] [b]P%d  %s[/b]  [color=#8b98a5]%s[/color]" % [head_col, pos, c.code, c.name]
-		var st = ""
-		if c.dnf != "":
-			st = "[color=#ef4444]리타이어 (%s)[/color]" % c.dnf
-		elif c.finished:
-			st = "[color=#22c55e]완주[/color]%s" % (" [color=#ef4444]+30초 페널티[/color]" if c.penalty > 0 else "")
-		else:
-			var wear_col = "#22c55e" if c.wear < 0.45 else ("#facc15" if c.wear < 0.65 else "#ef4444")
-			st = "%s %s [color=%s]마모 %d%%[/color] · %d랩째" % [_tyre_bb(c.comp), RaceSimS.TYRE_KO[c.comp], wear_col, int(round(c.wear * 100)), c.stint_laps]
-			var ahead: Variant = ord[pos - 2] if pos >= 2 else null
-			var behind: Variant = ord[pos] if pos < ord.size() else null
-			var gtxt = ""
-			if ahead != null and ahead.dnf == "":
-				gtxt += "앞 %s %s" % [ahead.code, sim.gap_to(c, ahead).replace("+", "-")]
-			if behind != null and behind.dnf == "" and behind.is_running():
-				gtxt += ("  " if gtxt != "" else "") + "뒤 %s %s" % [behind.code, sim.gap_to(behind, c)]
-			if sim.is_wec():
-				gtxt = _wec_gaps(c)
-			st += "\n[color=#8b98a5]%s[/color]" % gtxt
-			if sim.is_wec():
-				var fl: float = sim.fuel_laps(c)
-				var fcol := "#ef4444" if fl < 1.5 else ("#facc15" if fl < 2.5 else "#8b98a5")
-				st += "\n[color=%s]연료 %.1f랩분[/color] [color=#8b98a5]· 타이어 %d스틴트째 · %s %d스틴트째%s · 피트 %d회[/color]" % [fcol, fl, c.stint_tyre + 1, c.name, c.stint_drv + 1, " [color=#ef4444](피로)[/color]" if c.stint_drv >= 2 else "", c.pits]
-				if sim.min_drive != null:
-					var short: int = sim.min_drive_short(c)
-					var gk: String = RaceSimS.GRADE_KO.get(sim.min_drive["grade"], "")
-					st += ("\n[color=#22c55e]%s 최소 주행 충족[/color]" % gk) if short <= 0 else ("\n[color=#f59e0b]%s 드라이버가 %d랩 더 달려야 해요 (미달 시 60초)[/color]" % [gk, short])
-			else:
-				st += "\n[color=#8b98a5]ERS %d%% · 연료 %.1f랩분 · 피트 %d회[/color]" % [int(c.ers * 100), c.fuel / RaceSimS.FPL, c.pits]
-			if c.boxing != null:
-				st += "\n[color=#ffc53d][b]▶ 피트 진입 중 → %s[/b][/color]" % RaceSimS.TYRE_KO[c.boxing["comp"]]
-			elif c.pit_req != "":
-				var what: String = RaceSimS.TYRE_KO[c.pit_req]
-				if c.wec_req != null:
-					what = ("%s 교체" % what if c.wec_req["tyres"] else "타이어 유지") + (" + 급유" if c.wec_req["fuel"] else "") + (" + 교대" if c.wec_req["driver"] else "")
-				st += "\n[color=#ffc53d]박스 예약: %s (피트 입구 전까지 취소 가능)[/color]" % what
-			if sim.need_two() and c.used_slicks() < 2:
-				st += "\n[color=#f59e0b]두 번째 컴파운드 미사용[/color]"
-			if c.auto_plan and not sim.is_wec():
-				var ns: Variant = sim.next_stop(c)
-				st += "\n[color=#38bdf8]자동 전략 %s · %s[/color]" % [c.active_plan, ("다음 박스 L%d %s" % [int(ns["lap"]), ns["comp"]]) if ns != null else "남은 계획 스톱 없음 (날씨 변화엔 대응)"]
-		cp["status"].text = st
-		var can_box: bool = c.is_running() and c.boxing == null
-		for bi in cp["box"].size():
-			var b: Button = cp["box"][bi]
-			b.disabled = not can_box
-			var comp: String = ["S", "M", "H", "I", "W"][bi]
-			b.text = comp if c.tyre_sets == null or not c.tyre_sets.has(comp) else "%s 새%d" % [comp, int(c.tyre_sets[comp])]
-		cp["cancel"].disabled = c.pit_req == "" or c.boxing != null
-		for wb in cp["wec_btns"]:
-			wb.disabled = not can_box
-		cp["wcancel"].disabled = c.pit_req == "" or c.boxing != null
-		if cp["plan_row"].visible:
-			for pi in 2:
-				var key: String = ["A", "B"][pi]
-				var pb: Button = cp["plan_btns"][pi]
-				var has: bool = c.plans.has(key)
-				pb.disabled = not has
-				pb.set_pressed_no_signal(has and c.active_plan == key)
-				pb.text = "%s %s" % [key, sim.plan_text(c, key)] if has else key
-				pb.tooltip_text = pb.text
-			cp["auto"].set_pressed_no_signal(c.auto_plan)
+		top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
+	# 날씨 줄: 서킷 · 노면 · 강수 확률 · 수막 · 그립 · 예보
+	var evo_sec: float = -0.65 * sim.track_evo * (1.0 - sim.wet)
+	var fc_txt := ""
+	if sim.fc != null and sim.leader_lap < int(sim.fc["hi"]):
+		fc_txt = " · 예보: L%d-%d 비 확률 %d%%" % [int(sim.fc["lo"]), int(sim.fc["hi"]), int(sim.fc["p"])]
+	elif sim.fc == null:
+		fc_txt = " · 예보: 맑음 유지"
+	info_label.text = "[color=#8b98a5]%s · 노면 [b]%s[/b] · 강수확률 [b]%d%%[/b] · 수막 [b]%.1fmm[/b] · 그립 [b]%d%% (%.2fs)[/b]%s[/color]" % [
+		sim.CIRC["name"], sim.surface_ko(), sim.forecast_prob_at(lap_now), sim.wet_mm(sim.wet), int(round(sim.track_evo * 100)), evo_sec, fc_txt]
+	race_panel.refresh()
 	_refresh_tower(ord, leader)
 	_refresh_radio()
 
@@ -1233,22 +1089,32 @@ func _refresh_tower(ord: Array, leader) -> void:
 		_refresh_tower_wec(ord)
 		return
 	var s = "[table=5]"
-	s += "[cell][color=#8b98a5]P[/color][/cell][cell][color=#8b98a5]드라이버[/color][/cell][cell][color=#8b98a5]간격[/color][/cell][cell][color=#8b98a5]타이어[/color][/cell][cell][color=#8b98a5]피트[/color][/cell]"
+	s += "[cell][color=#8b98a5]P[/color][/cell][cell][color=#8b98a5]드라이버[/color][/cell][cell][color=#8b98a5]%s[/color][/cell][cell][color=#8b98a5]타이어[/color][/cell][cell][color=#8b98a5]피트[/color][/cell]" % ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
 	var pos = 0
+	var prev: Variant = null
 	for c in ord:
 		pos += 1
 		var name_col = "#ffc53d" if c.mine else "#e6edf3"
 		var gap = ""
 		if c.dnf != "":
 			gap = "[color=#ef4444]DNF[/color]"
+		elif gap_mode == 2:
+			gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
+			if c.id == sim.fastest_id:
+				gap = "[color=#a855f7]%s[/color]" % gap
 		elif c == leader:
-			gap = "선두"
+			gap = "[color=#a855f7]◆[/color] 선두"
+		elif gap_mode == 0 and prev != null:
+			gap = sim.gap_to(c, prev)
 		else:
 			gap = sim.gap_to(c, leader)
 		if c.boxing != null or c.pit_phase == 2:
 			gap += " [color=#ffc53d]PIT[/color]"
+		elif c.crew_out and c.dnf == "":
+			gap += " [bgcolor=#ef4444][color=#ffffff] CREW [/color][/bgcolor]"
 		elif c.drs and not sim.sc:
 			gap += " [color=#22c55e]DRS[/color]"
+		prev = c
 		# 라이벌 타이어 마모는 숨기고 스틴트 나이만 공개 (관측 가능한 정보)
 		var tyre = "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
 		if c.mine:

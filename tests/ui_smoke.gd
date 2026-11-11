@@ -52,6 +52,27 @@ func _process(_delta: float) -> bool:
 				main._on_wec_box("keep", 1)
 			else:
 				main._on_box("H", 0)
+			# 지시판 탭·버튼·엔지니어 제안·팀 오더·순위표 모드
+			var rp = main.race_panel
+			for t in ["drive", "pit", "power", "laps"]:
+				rp._on_tab(t)
+			rp._on_chip(1)
+			rp._on_draft_comp("W")
+			rp._on_w_tyres("no")
+			rp._on_w_tyres("yes")
+			rp._on_confirm()
+			rp._on_cancel()
+			rp._on_chip(0)
+			rp._on_order("hold")
+			rp._on_swap()
+			rp._on_order("free")
+			main._on_gap_mode()
+			var mc = main.sim.my_cars()[0]
+			if mc.is_running():
+				main.sim.trigger_radio(mc, "WORN")
+				rp.refresh()
+				rp._on_prompt(1)
+			rp._on_tab("pit")
 		return frames > 60000
 	main._refresh_ui()
 	main._show_result()

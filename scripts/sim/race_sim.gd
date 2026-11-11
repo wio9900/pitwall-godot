@@ -85,6 +85,11 @@ var ever_wet := false
 var night := false
 var n_stalls := 11
 var radio_log: Array = [] # {lap, who, color, msg, kind}
+var team_order := "free"   # 팀 오더: free 자유 경쟁 / hold 순서 유지
+var swap_req := false      # 팀 오더: 다음 기회에 앞 팀메이트가 양보
+var active_radio: Variant = null  # 엔지니어 제안 {slot, title, msg, opts:[{label, act, comp}]}
+var radio_seq := 0         # 새 제안이 뜰 때마다 +1 (UI가 감속·표시에 사용)
+var iradio_done := {}      # "차id:종류" → true (같은 제안은 한 번만)
 
 var _cuts_cache: Dictionary = {}
 
@@ -260,6 +265,10 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 			plan_ai_strategy(c, "")
 	# 날씨
 	rain = null
+	team_order = "free"
+	swap_req = false
+	active_radio = null
+	iradio_done = {}
 	var want_rain: bool = wx_opt == "rain" or (wx_opt == "auto" and rnd() < float(CIRC["rain"]))
 	if want_rain:
 		var st = maxi(2, int(round(uni(0.2, 0.55) * laps)))
@@ -520,6 +529,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 			c.mech_trouble = "브레이크 과열" if rnd() < 0.5 else "기어박스 유압 경고"
 			if c.mine:
 				say(c, "엔지니어 경고: %s! 페이스를 '세이브'로 낮춰 식혀주세요" % c.mech_trouble)
+				trigger_radio(c, "MECH")
 		if c.mech_trouble != "":
 			t += (0.85 + c.mech_stress * 0.6) * sh
 	if crash != "":
@@ -627,6 +637,11 @@ func deploy(kind: String) -> void:
 		event("세이프티카 출동! 대열이 압축됩니다 (%d랩 종료 예정)" % sc_end_lap, "sc")
 	else:
 		event("%s 발령! 간격 유지, 피트 손실 감소" % ("풀 코스 옐로" if kind == "FCY" else "버추얼 세이프티카"), "sc")
+	if leader_lap >= 2:
+		for mc in my_cars():
+			if mc.is_running() and mc.wear >= 0.32 and mc.boxing == null and mc.pit_req == "" and not mc.auto_plan:
+				trigger_radio(mc, "SC")
+				break
 
 
 # ═════════ AI 전략가 ═════════
@@ -1266,8 +1281,17 @@ func schedule_next(c, t: float) -> void:
 		if ahead != null and ahead.cross.size() == k + 1 and not ahead.finished and not ahead_pitting and not pitting:
 			var ahead_dur: float = ahead.sec_end - ahead_t
 			var diff: float = ahead_dur - dur
-			if c.instr == "hold":
-				dur = maxf(dur, (ahead.sec_end - t) + 1.0)
+			var mate: bool = ahead.team == c.team and ahead.cls == c.cls
+			var hold_mate: bool = mate and c.mine and team_order == "hold"
+			if mate and c.mine and swap_req and gap != null and gap < 2.5:
+				swap_req = false
+				dur = maxf(0.4, ahead.sec_end - t - 0.1)
+				ahead.sec_end += 0.9
+				say(c, "%s이(가) 길을 비켜줬어요" % ahead.code)
+				say(ahead, "팀 오더 확인, %s에게 양보했어요" % c.code)
+				event("팀 오더: %s → %s 순서 교체" % [ahead.code, c.code])
+			elif c.instr == "hold" or hold_mate:
+				dur = maxf(dur, (ahead.sec_end - t) + (0.5 if hold_mate else 1.0))
 			elif gap - diff < K["ot_gap"] and diff > 0:
 				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
 					+ (0.15 if c.drs else 0.0) + (0.06 if (not is_wec() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
@@ -1405,10 +1429,14 @@ func on_leader_lap() -> void:
 		var it = ideal_tyre(wet)
 		if kind_of(c.comp) != (it if it != "slick" else "slick"):
 			say(c, "라인이 말랐어요. 슬릭으로 바꿔야 해요" if it == "slick" else "노면이 젖었어요. %s 필요해요" % TYRE_KO[it])
+			if not c.auto_plan:
+				trigger_radio(c, "WET")
 		elif not is_wec() and c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) - FPL * 0.2 and left > 0:
 			say(c, "연료가 부족해요. 세이브 필요")
 		elif c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF):
 			say(c, "타이어가 다 됐어요 (%d%%)" % int(round(c.wear * 100)))
+			if not c.auto_plan and c.pit_req == "" and c.boxing == null:
+				trigger_radio(c, "WORN")
 		elif c.tt > 0.82:
 			say(c, "타이어가 과열됐어요. 페이스 좀 낮출게요?")
 		elif is_wec() and c.stint_drv >= 2:
@@ -1867,6 +1895,181 @@ func _my_auto_decision(c, cur: int, left: int, want: String) -> Variant:
 		say(c, "자동 전략 %s: 박스 → %s%s" % [c.active_plan, TYRE_KO[ns["comp"]], " (SC 활용)" if sc and cur < int(ns["lap"]) else ""])
 		return {"comp": ns["comp"], "tyres": true}
 	return null
+
+
+# ═════════ 엔지니어 제안 (선택형 무전) ═════════
+func trigger_radio(c, kind: String) -> void:
+	if done or not c.mine or not c.is_running() or active_radio != null:
+		return
+	var key := "%d:%s" % [c.id, kind]
+	if iradio_done.has(key):
+		return
+	iradio_done[key] = true
+	var who: String = ("#%d %s" % [c.slot + 1, c.code]) if is_wec() else c.code
+	var it: String = ideal_tyre(wet)
+	var rec: String = "M" if it == "slick" else it
+	var pr: Variant = null
+	if kind == "WET":
+		pr = {"title": "📻 [%s 무전] 노면 변화 감지" % who, "msg": "“노면이 급변했어요! 지금 %s 타이어로 박스할까요, 트랙에서 버틸까요?”" % TYRE_KO[rec],
+			"opts": [{"label": "이번 랩 %s 박스" % TYRE_KO[rec], "act": "BOX", "comp": rec}, {"label": "세이브하며 버티기", "act": "SAVE"}, {"label": "페이스 강행", "act": "PUSH"}]}
+	elif kind == "WORN":
+		var rw: String = ("H" if laps - c.lap > 7 else "M") if it == "slick" else it
+		pr = {"title": "📻 [%s 무전] 타이어 한계 (%d%%)" % [who, int(round(c.wear * 100))], "msg": "“그립이 거의 다 떨어졌어요! 새 %s로 바꿀까요, 아끼면서 버틸까요?”" % TYRE_KO[rw],
+			"opts": [{"label": "이번 랩 %s 박스" % TYRE_KO[rw], "act": "BOX", "comp": rw}, {"label": "타이어 세이브", "act": "SAVE"}, {"label": "그대로 버텨", "act": "IGNORE"}]}
+	elif kind == "SC":
+		pr = {"title": "📻 [%s 엔지니어 제안] %s 피트 찬스" % [who, sc_kind], "msg": "“%s 중이라 피트 손실이 크게 줄어요! 지금 %s 타이어로 갈아낄까요?”" % [sc_kind, TYRE_KO[rec]],
+			"opts": [{"label": "즉시 박스 (%s)" % TYRE_KO[rec], "act": "BOX", "comp": rec}, {"label": "트랙 포지션 유지", "act": "IGNORE"}]}
+	elif kind == "MECH":
+		pr = {"title": "📻 [%s 긴급 무전] %s" % [who, c.mech_trouble], "msg": "“%s 수치가 위험해요! 리프트 앤 코스트로 식힐까요?”" % c.mech_trouble,
+			"opts": [{"label": "리프트 앤 코스트", "act": "LIFT"}, {"label": "페이스 세이브", "act": "SAVE"}, {"label": "무시하고 푸시", "act": "PUSH"}]}
+	if pr == null:
+		return
+	pr["slot"] = c.slot
+	pr["car_id"] = c.id
+	active_radio = pr
+	radio_seq += 1
+
+
+func resolve_radio(idx: int) -> void:
+	if active_radio == null:
+		return
+	var pr: Dictionary = active_radio
+	active_radio = null
+	var c: Variant = null
+	for m in my_cars():
+		if m.id == int(pr["car_id"]):
+			c = m
+	var opts: Array = pr["opts"]
+	if c == null or idx < 0 or idx >= opts.size() or not c.is_running():
+		return
+	var o: Dictionary = opts[idx]
+	match String(o["act"]):
+		"BOX":
+			var comp: String = o["comp"]
+			if c.boxing != null:
+				c.boxing["comp"] = comp
+				c.boxing["tyres"] = true
+				say(c, "이미 박스 예약됨 → 타이어만 %s로 변경" % TYRE_KO[comp])
+			elif is_wec():
+				request_pit_wec(c, comp, true, true, false)
+			else:
+				request_pit(c, comp)
+			c.focus = clampf(c.focus + 5.0, 30.0, 100.0)
+		"SAVE":
+			c.pace = "save"
+			say(c, "카피, 타이어와 온도를 아끼면서 버텨볼게요")
+		"LIFT":
+			c.instr = "lift"
+			c.pace = "save"
+			say(c, "리프트 앤 코스트 시작. 브레이크·변속기 온도를 식힐게요")
+		"PUSH":
+			c.pace = "attack"
+			c.focus = clampf(c.focus + 4.0, 30.0, 100.0)
+			say(c, "알겠어요! 끝까지 밀어붙입니다")
+		_:
+			say(c, "카피, 지금 상태 그대로 갈게요")
+
+
+# ═════════ 팀 오더 ═════════
+func set_team_order(v: String) -> void:
+	team_order = v
+	event("팀 오더: 서로 싸우지 말고 순서 유지" if v == "hold" else "팀 오더 해제: 자유 경쟁")
+
+
+func request_swap() -> void:
+	swap_req = true
+	event("팀 오더: 다음 기회에 앞차가 팀메이트에게 양보")
+
+
+# ═════════ 기상 예보 · 피트 예측 (UI용) ═════════
+func forecast_wet_at(target_lap: int) -> float:
+	if rain == null:
+		return wet
+	var w := wet
+	for l in range(leader_lap + 1, target_lap + 1):
+		var tgt := 0.0
+		if l >= int(rain["start"]) and l < int(rain["end"]):
+			tgt = float(rain["level"])
+		w = clampf(w + (tgt - w) * (0.35 if tgt > w else 0.15), 0.0, 1.0)
+	return w
+
+
+func forecast_prob_at(target_lap: int) -> int:
+	if rain != null and target_lap >= int(rain["start"]) and target_lap < int(rain["end"]):
+		return mini(95, int(round(55.0 + float(rain["level"]) * 40.0)))
+	if fc != null and target_lap >= int(fc["lo"]) and target_lap <= int(fc["hi"]):
+		return int(fc["p"])
+	return 25 if wet > 0.1 else 5
+
+
+## 노면 수막(mm): 0(건조) ~ 1.2(인터 교차) ~ 3.5(웻 교차) ~ 5.5(폭우)
+func wet_mm(w: float) -> float:
+	return w * 5.5
+
+
+func surface_ko() -> String:
+	return "건조" if wet < 0.05 else ("약간 젖음" if wet < 0.25 else ("젖음" if wet < 0.65 else "흠뻑 젖음"))
+
+
+## 지금 박스하면 몇 위로 복귀하는지 예측 {pos, ahead:[code, 초], behind:[code, 초], loss, under:{code, net}}
+func predict_pit(c) -> Variant:
+	if not c.is_running() or not c.started:
+		return null
+	var k: int = c.cross.size() - 1
+	if k < 0:
+		return null
+	var loss: float = pit_loss() + 1.0
+	if is_wec():
+		var rq: Variant = c.wec_req if c.wec_req != null else c.boxing
+		var tyres := true
+		var drv := false
+		var fuel := true
+		if rq != null:
+			tyres = bool(rq.get("tyres", true))
+			drv = bool(rq.get("driver", false))
+			fuel = bool(rq.get("fuel", true))
+		loss = wec_stop_time(c, tyres, drv, fuel) + 1.0
+	var ord: Array = []
+	for o in order():
+		if o.dnf == "" and o.cls == c.cls:
+			ord.append(o)
+	var best_a: Variant = null
+	var best_b: Variant = null
+	var n_ahead := 0
+	for o in ord:
+		if o == c:
+			continue
+		var d: float
+		if o.cross.size() > k and float(o.cross[k]) <= float(c.cross[k]):
+			d = float(c.cross[k]) - float(o.cross[k])
+		else:
+			var j: int = o.cross.size() - 1
+			if j < 0 or j >= c.cross.size():
+				continue
+			d = -(float(o.cross[j]) - float(c.cross[j]))
+		var after: float = d + loss
+		if after > 0.0:
+			n_ahead += 1
+			if best_a == null or after < float(best_a[1]):
+				best_a = [o, after]
+		elif best_b == null or after > float(best_b[1]):
+			best_b = [o, after]
+	var under: Variant = null
+	var i := ord.find(c)
+	if not is_wec() and i > 0 and SLICK.has(c.comp):
+		var front = ord[i - 1]
+		if front.pit_phase == 0 and SLICK.has(front.comp) and front.cross.size() > k:
+			var ns: Variant = next_stop(c)
+			var nc: String = c.pit_req if c.pit_req != "" else (String(ns["comp"]) if ns != null else "M")
+			if not SLICK.has(nc):
+				nc = "M"
+			var wr: float = float(COMP[front.comp][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85
+			var fw: float = minf(1.0, front.stint_laps * wr)
+			var gain_lap: float = c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + float(COMP[c.comp][0]) - float(COMP[nc][0])
+			var front_lap: float = fw * fw * float(COMP[front.comp][2])
+			var gp: float = float(c.cross[k]) - float(front.cross[k])
+			under = {"code": front.code, "net": (gain_lap + front_lap * 0.5) * 2.0 - 1.0 - gp}
+	return {"pos": n_ahead + 1, "ahead": best_a, "behind": best_b, "loss": loss, "under": under}
 
 
 ## WEC 엔트리: 하이퍼카(HY) 팀별 1~2대 + LMGT3(GT) 9팀 × 2대. 팀·크루는 data/wec.json (HTML WEC_FIELD 그대로).

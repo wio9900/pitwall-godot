@@ -67,6 +67,30 @@ func _process(_delta: float) -> bool:
 				step = 3
 		3:
 			_shot("race_full")
+			main.race_panel._on_tab("pit")
+			main.sim.trigger_radio(_my0(), "WORN")
+			main._refresh_ui()
+			wait = 3
+			step = 44
+		44:
+			_shot("race_tab_pit")
+			main.sim.resolve_radio(1)
+			main.race_panel._on_tab("power")
+			main._on_gap_mode()
+			main._refresh_ui()
+			wait = 3
+			step = 45
+		45:
+			_shot("race_tab_power")
+			main.race_panel._on_tab("laps")
+			main._on_gap_mode()
+			main._refresh_ui()
+			wait = 3
+			step = 46
+		46:
+			_shot("race_tab_laps")
+			main.race_panel._on_tab("drive")
+			main._on_gap_mode()
 			main.race_view._rain_t = main.race_view._now - 0.5
 			main.race_view._celebrate(1)
 			wait = 20
