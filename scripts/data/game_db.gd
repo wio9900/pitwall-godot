@@ -35,7 +35,7 @@ static func _read_json(path: String) -> Variant:
 	return data
 
 
-static func track(key: String):
+static func track(key: String) -> Variant:
 	if not _tracks.has(key):
 		var tr = TrackS.new()
 		tr.build(key, circuits[key])
