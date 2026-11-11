@@ -1,0 +1,64 @@
+name: apk
+on:
+  push:
+    branches: [main, "build/**"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Godot + 내보내기 템플릿 받기
+        run: |
+          V=4.7.2
+          curl -sSL -o g.zip https://github.com/godotengine/godot-builds/releases/download/${V}-stable/Godot_v${V}-stable_linux.x86_64.zip
+          unzip -q g.zip && mv Godot_v${V}-stable_linux.x86_64 godot && chmod +x godot
+          curl -sSL -o t.tpz https://github.com/godotengine/godot-builds/releases/download/${V}-stable/Godot_v${V}-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/${V}.stable
+          unzip -q t.tpz -d tpl && mv tpl/templates/* ~/.local/share/godot/export_templates/${V}.stable/
+          ls ~/.local/share/godot/export_templates/${V}.stable/ | grep -i android
+      - name: 디버그 서명 키 · 에디터 설정
+        run: |
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 9999 -deststoretype pkcs12
+          SDK=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
+          JAVA=${JAVA_HOME_17_X64:-$JAVA_HOME}
+          echo "SDK=$SDK JAVA=$JAVA"
+          ls $SDK/build-tools | tail -3
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.tres editor_settings-4.7.tres; do
+          cat > ~/.config/godot/$f <<EOT
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$SDK"
+          export/android/java_sdk_path = "$JAVA"
+          export/android/debug_keystore = "$PWD/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOT
+          sed -i 's/^          //' ~/.config/godot/$f
+          done
+          cat ~/.config/godot/editor_settings-4.7.tres
+      - name: 임포트
+        run: timeout 300 ./godot --headless --path . --import 2>&1 | tail -5
+      - name: APK 내보내기
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p build
+          timeout 600 ./godot --headless --path . --export-debug "Android" build/PitWall.apk 2>&1 | tail -40
+          ls -la build
+          test -f build/PitWall.apk
+      - name: APK를 apk 브랜치에 올리기
+        run: |
+          mkdir out && cp build/PitWall.apk out/ && cd out
+          git init -q -b apk
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git add -A
+          git commit -qm "apk ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk
