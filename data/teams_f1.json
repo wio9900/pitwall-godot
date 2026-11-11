@@ -23,7 +23,8 @@
      "tyreMgmt": 0.89,
      "aggr": 0.75,
      "def": 0.9,
-     "wet": 0.98
+     "wet": 0.98,
+     "age": 29
     },
     {
      "name": "S. Pérez",
@@ -32,7 +33,8 @@
      "tyreMgmt": 0.85,
      "aggr": 0.5,
      "def": 0.78,
-     "wet": 0.8
+     "wet": 0.8,
+     "age": 36
     }
    ]
   },
@@ -52,7 +54,8 @@
      "tyreMgmt": 0.83,
      "aggr": 0.65,
      "def": 0.86,
-     "wet": 0.91
+     "wet": 0.91,
+     "age": 29
     },
     {
      "name": "L. Hamilton",
@@ -61,7 +64,8 @@
      "tyreMgmt": 0.88,
      "aggr": 0.55,
      "def": 0.89,
-     "wet": 0.96
+     "wet": 0.96,
+     "age": 41
     }
    ]
   },
@@ -81,7 +85,8 @@
      "tyreMgmt": 0.86,
      "aggr": 0.6,
      "def": 0.87,
-     "wet": 0.88
+     "wet": 0.88,
+     "age": 27
     },
     {
      "name": "O. Piastri",
@@ -90,7 +95,8 @@
      "tyreMgmt": 0.87,
      "aggr": 0.5,
      "def": 0.85,
-     "wet": 0.86
+     "wet": 0.86,
+     "age": 25
     }
    ]
   },
@@ -110,7 +116,8 @@
      "tyreMgmt": 0.85,
      "aggr": 0.55,
      "def": 0.86,
-     "wet": 0.89
+     "wet": 0.89,
+     "age": 28
     },
     {
      "name": "K. Antonelli",
@@ -119,7 +126,8 @@
      "tyreMgmt": 0.84,
      "aggr": 0.6,
      "def": 0.8,
-     "wet": 0.85
+     "wet": 0.85,
+     "age": 20
     }
    ]
   },
@@ -139,7 +147,8 @@
      "tyreMgmt": 0.9,
      "aggr": 0.65,
      "def": 0.91,
-     "wet": 0.94
+     "wet": 0.94,
+     "age": 45
     },
     {
      "name": "L. Stroll",
@@ -148,7 +157,8 @@
      "tyreMgmt": 0.81,
      "aggr": 0.45,
      "def": 0.74,
-     "wet": 0.78
+     "wet": 0.78,
+     "age": 28
     }
    ]
   },
@@ -168,7 +178,8 @@
      "tyreMgmt": 0.83,
      "aggr": 0.5,
      "def": 0.8,
-     "wet": 0.85
+     "wet": 0.85,
+     "age": 30
     },
     {
      "name": "J. Doohan",
@@ -177,7 +188,8 @@
      "tyreMgmt": 0.8,
      "aggr": 0.5,
      "def": 0.72,
-     "wet": 0.76
+     "wet": 0.76,
+     "age": 23
     }
    ]
   },
@@ -197,7 +209,8 @@
      "tyreMgmt": 0.86,
      "aggr": 0.5,
      "def": 0.84,
-     "wet": 0.87
+     "wet": 0.87,
+     "age": 30
     },
     {
      "name": "C. Sainz",
@@ -206,7 +219,8 @@
      "tyreMgmt": 0.88,
      "aggr": 0.55,
      "def": 0.88,
-     "wet": 0.9
+     "wet": 0.9,
+     "age": 32
     }
    ]
   },
@@ -226,7 +240,8 @@
      "tyreMgmt": 0.81,
      "aggr": 0.65,
      "def": 0.79,
-     "wet": 0.82
+     "wet": 0.82,
+     "age": 26
     },
     {
      "name": "L. Lawson",
@@ -235,7 +250,8 @@
      "tyreMgmt": 0.82,
      "aggr": 0.6,
      "def": 0.78,
-     "wet": 0.8
+     "wet": 0.8,
+     "age": 24
     }
    ]
   },
@@ -255,7 +271,8 @@
      "tyreMgmt": 0.84,
      "aggr": 0.6,
      "def": 0.82,
-     "wet": 0.85
+     "wet": 0.85,
+     "age": 30
     },
     {
      "name": "O. Bearman",
@@ -264,7 +281,8 @@
      "tyreMgmt": 0.82,
      "aggr": 0.55,
      "def": 0.76,
-     "wet": 0.8
+     "wet": 0.8,
+     "age": 21
     }
    ]
   },
@@ -284,7 +302,8 @@
      "tyreMgmt": 0.88,
      "aggr": 0.45,
      "def": 0.85,
-     "wet": 0.88
+     "wet": 0.88,
+     "age": 39
     },
     {
      "name": "G. Bortoleto",
@@ -293,7 +312,8 @@
      "tyreMgmt": 0.8,
      "aggr": 0.5,
      "def": 0.74,
-     "wet": 0.78
+     "wet": 0.78,
+     "age": 22
     }
    ]
   },
@@ -313,7 +333,8 @@
      "tyreMgmt": 0.86,
      "aggr": 0.4,
      "def": 0.8,
-     "wet": 0.85
+     "wet": 0.85,
+     "age": 37
     },
     {
      "name": "F. Drugovich",
@@ -322,7 +343,8 @@
      "tyreMgmt": 0.79,
      "aggr": 0.45,
      "def": 0.72,
-     "wet": 0.76
+     "wet": 0.76,
+     "age": 26
     }
    ]
   }

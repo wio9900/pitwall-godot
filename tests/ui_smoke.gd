@@ -47,9 +47,28 @@ func _process(_delta: float) -> bool:
 	main._refresh_ui()
 	main._show_result()
 	races += 1
-	print("완주: %s 우승 %s" % [main.sim.CIRC["name"], main.sim.results()[0]["car"].code])
+	if races <= configs.size():
+		print("완주: %s 우승 %s" % [main.sim.CIRC["name"], main.sim.results()[0]["car"].code])
 	if races < configs.size():
 		_start(races)
 		return false
+	if races == configs.size():
+		# 커리어 흐름: 새 커리어 → 주말 → 결승 → 정산 → HQ
+		root.size = Vector2i(1280, 720)
+		main._on_resize()
+		main.new_entry = "create"
+		main._new_career()
+		main._start_weekend_career()
+		main.wk.auto_practice()
+		main.wk.start_quali()
+		main.wk.auto_quali()
+		main._begin_race()
+		print("커리어 레이스 시작: %s (%s)" % [main.sim.CIRC["name"], main.career.tier_meta()["short"]])
+		return false
+	print("커리어 정산 후 자금 %.2fM · 레이스 %d" % [float(main.career.hq["cash"]), int(main.career.hq["race_count"])])
+	main._open_hq()
+	for t in ["home", "rnd", "base", "staff", "spon", "league"]:
+		main.hq_view._on_tab(t)
+	main.CareerS.delete_save()
 	print("UI 테스트 통과 (%d프레임)" % frames)
 	return true

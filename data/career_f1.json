@@ -1,0 +1,1164 @@
+{
+ "calendar": [
+  "melbourne",
+  "shanghai",
+  "suzuka",
+  "bahrain",
+  "miami",
+  "monaco",
+  "barcelona",
+  "silverstone",
+  "spa_f1",
+  "zandvoort",
+  "monza",
+  "singapore",
+  "yeongam",
+  "cota_f1",
+  "interlagos",
+  "lasvegas",
+  "abudhabi"
+ ],
+ "tiers": {
+  "1": {
+   "name": "FIA F3 챔피언십 (3부 하위)",
+   "short": "F3 (3부)",
+   "cap": 10,
+   "fee": 2.5,
+   "reqRank": 3,
+   "reqPts": 24,
+   "prizeM": 0.4
+  },
+  "2": {
+   "name": "FIA F2 챔피언십 (2부 중위)",
+   "short": "F2 (2부)",
+   "cap": 14,
+   "fee": 4,
+   "reqRank": 3,
+   "reqPts": 32,
+   "prizeM": 0.6
+  },
+  "3": {
+   "name": "FIA F1 월드 챔피언십 (1부 최상위)",
+   "short": "F1 (1부)",
+   "cap": 18,
+   "fee": 0,
+   "reqRank": 1,
+   "reqPts": 0,
+   "prizeM": 1
+  }
+ },
+ "rosters": {
+  "1": [
+   {
+    "name": "PREMA Racing (F3)",
+    "color": "#dc2626",
+    "engine": "Mecachrome",
+    "aero": 0.76,
+    "chassis": 0.76,
+    "rel": 0.86,
+    "rim": "#ffffff",
+    "drivers": [
+     {
+      "name": "G. Minì",
+      "speed": 0.8,
+      "cons": 0.79
+     },
+     {
+      "name": "A. Lindblad",
+      "speed": 0.79,
+      "cons": 0.78
+     }
+    ]
+   },
+   {
+    "name": "Trident (F3)",
+    "color": "#1d4ed8",
+    "engine": "Mecachrome",
+    "aero": 0.76,
+    "chassis": 0.75,
+    "rel": 0.86,
+    "rim": "#facc15",
+    "drivers": [
+     {
+      "name": "L. Fornaroli",
+      "speed": 0.81,
+      "cons": 0.82
+     },
+     {
+      "name": "S. Meguetounif",
+      "speed": 0.77,
+      "cons": 0.76
+     }
+    ]
+   },
+   {
+    "name": "ART Grand Prix (F3)",
+    "color": "#e2e8f0",
+    "engine": "Mecachrome",
+    "aero": 0.74,
+    "chassis": 0.75,
+    "rel": 0.85,
+    "rim": "#ef4444",
+    "drivers": [
+     {
+      "name": "C. Mansell",
+      "speed": 0.78,
+      "cons": 0.77
+     },
+     {
+      "name": "L. van Hoepen",
+      "speed": 0.76,
+      "cons": 0.76
+     }
+    ]
+   },
+   {
+    "name": "Campos Racing (F3)",
+    "color": "#f59e0b",
+    "engine": "Mecachrome",
+    "aero": 0.74,
+    "chassis": 0.74,
+    "rel": 0.84,
+    "rim": "#111827",
+    "drivers": [
+     {
+      "name": "O. Goethe",
+      "speed": 0.79,
+      "cons": 0.78
+     },
+     {
+      "name": "M. Boya",
+      "speed": 0.76,
+      "cons": 0.75
+     }
+    ]
+   },
+   {
+    "name": "Hitech Pulse-Eight (F3)",
+    "color": "#38bdf8",
+    "engine": "Mecachrome",
+    "aero": 0.73,
+    "chassis": 0.74,
+    "rel": 0.84,
+    "rim": "#1e293b",
+    "drivers": [
+     {
+      "name": "L. Browning",
+      "speed": 0.8,
+      "cons": 0.79
+     },
+     {
+      "name": "M. Stenshorne",
+      "speed": 0.76,
+      "cons": 0.75
+     }
+    ]
+   },
+   {
+    "name": "MP Motorsport (F3)",
+    "color": "#fb923c",
+    "engine": "Mecachrome",
+    "aero": 0.73,
+    "chassis": 0.73,
+    "rel": 0.84,
+    "rim": "#1e3a8a",
+    "drivers": [
+     {
+      "name": "T. Tramnitz",
+      "speed": 0.77,
+      "cons": 0.77
+     },
+     {
+      "name": "A. Dunne",
+      "speed": 0.76,
+      "cons": 0.74
+     }
+    ]
+   },
+   {
+    "name": "Van Amersfoort (F3)",
+    "color": "#f97316",
+    "engine": "Mecachrome",
+    "aero": 0.71,
+    "chassis": 0.72,
+    "rel": 0.83,
+    "rim": "#111827",
+    "drivers": [
+     {
+      "name": "N. León",
+      "speed": 0.76,
+      "cons": 0.75
+     },
+     {
+      "name": "S. Flörsch",
+      "speed": 0.73,
+      "cons": 0.74
+     }
+    ]
+   },
+   {
+    "name": "Rodin Motorsport (F3)",
+    "color": "#10b981",
+    "engine": "Mecachrome",
+    "aero": 0.71,
+    "chassis": 0.71,
+    "rel": 0.82,
+    "rim": "#ffffff",
+    "drivers": [
+     {
+      "name": "C. Voisin",
+      "speed": 0.76,
+      "cons": 0.75
+     },
+     {
+      "name": "J. Loake",
+      "speed": 0.74,
+      "cons": 0.73
+     }
+    ]
+   },
+   {
+    "name": "AIX Racing (F3)",
+    "color": "#84cc16",
+    "engine": "Mecachrome",
+    "aero": 0.7,
+    "chassis": 0.7,
+    "rel": 0.81,
+    "rim": "#1f2937",
+    "drivers": [
+     {
+      "name": "N. Tsolov",
+      "speed": 0.76,
+      "cons": 0.74
+     },
+     {
+      "name": "T. Inthraphuvasak",
+      "speed": 0.72,
+      "cons": 0.72
+     }
+    ]
+   },
+   {
+    "name": "Jenzer Motorsport (F3)",
+    "color": "#3b82f6",
+    "engine": "Mecachrome",
+    "aero": 0.69,
+    "chassis": 0.7,
+    "rel": 0.81,
+    "rim": "#f43f5e",
+    "drivers": [
+     {
+      "name": "M. Esterson",
+      "speed": 0.74,
+      "cons": 0.73
+     },
+     {
+      "name": "C. Wurz",
+      "speed": 0.73,
+      "cons": 0.73
+     }
+    ]
+   }
+  ],
+  "2": [
+   {
+    "name": "Invicta Racing (F2)",
+    "color": "#facc15",
+    "engine": "Mecachrome",
+    "aero": 0.83,
+    "chassis": 0.82,
+    "rel": 0.88,
+    "rim": "#111827",
+    "drivers": [
+     {
+      "name": "G. Bortoleto",
+      "speed": 0.85,
+      "cons": 0.84
+     },
+     {
+      "name": "K. Maini",
+      "speed": 0.81,
+      "cons": 0.8
+     }
+    ]
+   },
+   {
+    "name": "Campos Racing (F2)",
+    "color": "#eab308",
+    "engine": "Mecachrome",
+    "aero": 0.82,
+    "chassis": 0.82,
+    "rel": 0.87,
+    "rim": "#dc2626",
+    "drivers": [
+     {
+      "name": "I. Hadjar",
+      "speed": 0.85,
+      "cons": 0.82
+     },
+     {
+      "name": "J. Martí",
+      "speed": 0.8,
+      "cons": 0.79
+     }
+    ]
+   },
+   {
+    "name": "MP Motorsport (F2)",
+    "color": "#f97316",
+    "engine": "Mecachrome",
+    "aero": 0.82,
+    "chassis": 0.81,
+    "rel": 0.87,
+    "rim": "#1e3a8a",
+    "drivers": [
+     {
+      "name": "F. Colapinto",
+      "speed": 0.83,
+      "cons": 0.82
+     },
+     {
+      "name": "D. Hauger",
+      "speed": 0.82,
+      "cons": 0.81
+     }
+    ]
+   },
+   {
+    "name": "PREMA Racing (F2)",
+    "color": "#ef4444",
+    "engine": "Mecachrome",
+    "aero": 0.83,
+    "chassis": 0.83,
+    "rel": 0.88,
+    "rim": "#ffffff",
+    "drivers": [
+     {
+      "name": "O. Bearman",
+      "speed": 0.84,
+      "cons": 0.82
+     },
+     {
+      "name": "K. Antonelli",
+      "speed": 0.85,
+      "cons": 0.82
+     }
+    ]
+   },
+   {
+    "name": "Rodin Motorsport (F2)",
+    "color": "#14b8a6",
+    "engine": "Mecachrome",
+    "aero": 0.81,
+    "chassis": 0.8,
+    "rel": 0.86,
+    "rim": "#111827",
+    "drivers": [
+     {
+      "name": "Z. Maloney",
+      "speed": 0.83,
+      "cons": 0.82
+     },
+     {
+      "name": "R. Miyata",
+      "speed": 0.8,
+      "cons": 0.81
+     }
+    ]
+   },
+   {
+    "name": "Hitech Pulse-Eight (F2)",
+    "color": "#0284c7",
+    "engine": "Mecachrome",
+    "aero": 0.8,
+    "chassis": 0.8,
+    "rel": 0.86,
+    "rim": "#e2e8f0",
+    "drivers": [
+     {
+      "name": "P. Aron",
+      "speed": 0.84,
+      "cons": 0.83
+     },
+     {
+      "name": "A. Cordeel",
+      "speed": 0.76,
+      "cons": 0.75
+     }
+    ]
+   },
+   {
+    "name": "ART Grand Prix (F2)",
+    "color": "#f8fafc",
+    "engine": "Mecachrome",
+    "aero": 0.81,
+    "chassis": 0.81,
+    "rel": 0.86,
+    "rim": "#dc2626",
+    "drivers": [
+     {
+      "name": "V. Martins",
+      "speed": 0.83,
+      "cons": 0.8
+     },
+     {
+      "name": "Z. O'Sullivan",
+      "speed": 0.8,
+      "cons": 0.79
+     }
+    ]
+   },
+   {
+    "name": "DAMS Lucas Oil (F2)",
+    "color": "#38bdf8",
+    "engine": "Mecachrome",
+    "aero": 0.79,
+    "chassis": 0.79,
+    "rel": 0.85,
+    "rim": "#1e293b",
+    "drivers": [
+     {
+      "name": "J. Crawford",
+      "speed": 0.81,
+      "cons": 0.8
+     },
+     {
+      "name": "J. Correa",
+      "speed": 0.78,
+      "cons": 0.78
+     }
+    ]
+   },
+   {
+    "name": "virtuosi / Trident (F2)",
+    "color": "#2563eb",
+    "engine": "Mecachrome",
+    "aero": 0.78,
+    "chassis": 0.78,
+    "rel": 0.85,
+    "rim": "#fde047",
+    "drivers": [
+     {
+      "name": "R. Verschoor",
+      "speed": 0.81,
+      "cons": 0.81
+     },
+     {
+      "name": "R. Staněk",
+      "speed": 0.78,
+      "cons": 0.78
+     }
+    ]
+   },
+   {
+    "name": "Van Amersfoort (F2)",
+    "color": "#ea580c",
+    "engine": "Mecachrome",
+    "aero": 0.77,
+    "chassis": 0.77,
+    "rel": 0.84,
+    "rim": "#111827",
+    "drivers": [
+     {
+      "name": "E. Fittipaldi",
+      "speed": 0.8,
+      "cons": 0.79
+     },
+     {
+      "name": "R. Villagómez",
+      "speed": 0.76,
+      "cons": 0.75
+     }
+    ]
+   }
+  ]
+ },
+ "init_budget": {
+  "Ferrari": [
+   13.5,
+   0.88
+  ],
+  "Mercedes": [
+   13,
+   0.86
+  ],
+  "Red Bull": [
+   13,
+   0.88
+  ],
+  "McLaren": [
+   12.5,
+   0.85
+  ],
+  "Aston Martin": [
+   10.5,
+   0.72
+  ],
+  "Alpine": [
+   9.5,
+   0.65
+  ],
+  "Audi": [
+   9.5,
+   0.64
+  ],
+  "Williams": [
+   8.5,
+   0.62
+  ],
+  "Racing Bulls": [
+   8,
+   0.58
+  ],
+  "Cadillac": [
+   7.5,
+   0.52
+  ],
+  "Haas": [
+   6.8,
+   0.48
+  ],
+  "Red Bull Racing": [
+   13,
+   0.88
+  ],
+  "Audi Sauber": [
+   9.5,
+   0.64
+  ],
+  "Cadillac F1": [
+   7.5,
+   0.52
+  ]
+ },
+ "works": {
+  "Ferrari": "Ferrari",
+  "Mercedes": "Mercedes",
+  "Red Bull": "Red Bull Ford",
+  "Red Bull Racing": "Red Bull Ford",
+  "Audi": "Audi",
+  "Audi Sauber": "Audi"
+ },
+ "econ": {
+  "ops": {
+   "f1": 0.42,
+   "wec": 0.78
+  },
+  "overhead": {
+   "f1": 0.12,
+   "wec": 0.16
+  },
+  "prize": {
+   "f1": [
+    12,
+    10.8,
+    9.8,
+    9,
+    8.3,
+    7.7,
+    7.2,
+    6.8,
+    6.4,
+    6,
+    5.6,
+    5.2
+   ],
+   "wec": [
+    6.5,
+    5.8,
+    5.2,
+    4.7,
+    4.3,
+    4,
+    3.7,
+    3.4,
+    3.2,
+    3
+   ]
+  },
+  "carryPct": 0.0093,
+  "minorPct": 0.05,
+  "deprSeasons": 4,
+  "regCycle": 3,
+  "jokersPerCycle": 3,
+  "bopAbsorb": 0.4,
+  "repair": {
+   "crash": [
+    0.22,
+    0.42
+   ],
+   "mech": [
+    0.08,
+    0.16
+   ]
+  },
+  "topCap": {
+   "f1": 18,
+   "wec": 16
+  },
+  "owner": [
+   9,
+   8,
+   7,
+   5,
+   3
+  ]
+ },
+ "dev": {
+  "s": {
+   "cost": 1,
+   "gain": 0.01,
+   "lead": 2,
+   "sd": 0.22,
+   "ko": "소형 업데이트"
+  },
+  "l": {
+   "cost": 2.6,
+   "gain": 0.028,
+   "lead": 4,
+   "sd": 0.38,
+   "ko": "대형 패키지"
+  },
+  "fac": {
+   "aero": "wind",
+   "engine": "bench",
+   "chassis": "rig",
+   "rel": "bench"
+  },
+  "dept": {
+   "aero": "aero",
+   "engine": "power",
+   "chassis": "chassis",
+   "rel": "power"
+  },
+  "decay": 0.9
+ },
+ "fac_cost": {
+  "wind": 2.2,
+  "bench": 2.2,
+  "rig": 2,
+  "sim": 1.8,
+  "factory": 2,
+  "pit": 1.4
+ },
+ "fac_ko": {
+  "wind": "풍동",
+  "bench": "다이나모",
+  "rig": "섀시 리그",
+  "sim": "시뮬레이터",
+  "factory": "공장",
+  "pit": "피트 훈련센터"
+ },
+ "dev_ko": {
+  "aero": "공력",
+  "engine": "파워트레인",
+  "chassis": "섀시",
+  "rel": "신뢰성"
+ },
+ "dev_ko_full": {
+  "aero": "에어로다이내믹",
+  "engine": "파워트레인 · 하이브리드",
+  "chassis": "섀시 · 서스펜션",
+  "rel": "내구도 · 냉각"
+ },
+ "region_fx": {
+  "uk": [
+   0.01,
+   -0.004,
+   -0.004,
+   0
+  ],
+  "italy": [
+   -0.004,
+   0.01,
+   -0.004,
+   0
+  ],
+  "germany": [
+   -0.004,
+   -0.004,
+   0.006,
+   0.006
+  ],
+  "japan": [
+   -0.003,
+   0.003,
+   0.006,
+   -0.004
+  ]
+ },
+ "branch_fx": {
+  "downforce": [
+   0.01,
+   -0.008,
+   0.002
+  ],
+  "balanced": [
+   0,
+   0,
+   0
+  ],
+  "lowdrag": [
+   -0.008,
+   0.012,
+   -0.002
+  ]
+ },
+ "swatch_main": [
+  "#00d2be",
+  "#ff5500",
+  "#dc0000",
+  "#2563eb",
+  "#eab308",
+  "#10b981",
+  "#a855f7",
+  "#ec4899"
+ ],
+ "swatch_rim": [
+  "#ffffff",
+  "#fde047",
+  "#111827",
+  "#38bdf8",
+  "#ef4444",
+  "#a3e635"
+ ],
+ "surnames": [
+  "Albers",
+  "Brun",
+  "Castro",
+  "Dahl",
+  "Eriksen",
+  "Faure",
+  "Gallo",
+  "Hart",
+  "Ito",
+  "Jansen",
+  "Kovac",
+  "Lemaire",
+  "Mori",
+  "Nash",
+  "Olsen",
+  "Pires",
+  "Quint",
+  "Ruiz",
+  "Stahl",
+  "Tamura",
+  "Ueda",
+  "Vidal",
+  "Wolff",
+  "Yoon",
+  "Zeller",
+  "Baek",
+  "Conti",
+  "Duval",
+  "Engel",
+  "Frey",
+  "Grant",
+  "Holm",
+  "Imai",
+  "Jung",
+  "Krause",
+  "Lund",
+  "Marchetti",
+  "Novak",
+  "Oda",
+  "Park",
+  "Quiroga",
+  "Roux",
+  "Sato",
+  "Thiele",
+  "Urquhart",
+  "Vance",
+  "Weiss",
+  "Xavier",
+  "Yamada",
+  "Zanetti",
+  "Ahn",
+  "Bianchi",
+  "Costa",
+  "Dubois",
+  "Evans",
+  "Fischer",
+  "Garcia",
+  "Hoffmann",
+  "Ishikawa",
+  "Jensen",
+  "Kim",
+  "Laurent",
+  "Moreno",
+  "Nakamura",
+  "Ortiz",
+  "Petit",
+  "Ricci",
+  "Schulz",
+  "Tanaka",
+  "Vogel",
+  "Wagner",
+  "Becker",
+  "Coelho",
+  "Delgado",
+  "Esposito",
+  "Ferrand",
+  "Gomez",
+  "Hayashi",
+  "Iversen",
+  "Jakobsen",
+  "Kaiser",
+  "Lopez",
+  "Meyer",
+  "Nielsen",
+  "Ogawa",
+  "Perrin",
+  "Rossi",
+  "Sanchez",
+  "Torres",
+  "Ulrich",
+  "Varga",
+  "Walker",
+  "Young",
+  "Zimmer",
+  "Abe",
+  "Brandt",
+  "Cruz",
+  "Dumas",
+  "Ek",
+  "Fontana",
+  "Gill",
+  "Haas",
+  "Ikeda",
+  "Joly",
+  "Kerr",
+  "Lowe",
+  "Maas",
+  "Neri"
+ ],
+ "qpush": {
+  "safe": [
+   0.85,
+   0.5,
+   0
+  ],
+  "std": [
+   1,
+   1,
+   0.012
+  ],
+  "limit": [
+   1.15,
+   2,
+   0.07
+  ]
+ },
+ "qpush_ko": {
+  "safe": "안전하게",
+  "std": "표준",
+  "limit": "한계까지"
+ },
+ "qtraffic": {
+  "early": [
+   0.05,
+   0.12,
+   "즉시 출주"
+  ],
+  "clean": [
+   -0.12,
+   0.04,
+   "클린 에어 대기"
+  ],
+  "late": [
+   -0.28,
+   0.28,
+   "막판 릴리즈(에볼루션↑)"
+  ]
+ },
+ "fuel_load": {
+  "light": -0.03,
+  "std": 0.02,
+  "heavy": 0.06
+ },
+ "fuel_load_ko": {
+  "light": "가볍게",
+  "std": "표준",
+  "heavy": "넉넉하게"
+ },
+ "practice_laps": 8,
+ "hq_default": {
+  "driverAges": [
+   24,
+   27,
+   26,
+   31,
+   25,
+   29,
+   28,
+   35,
+   23,
+   27,
+   22,
+   33,
+   36,
+   24,
+   28,
+   30,
+   26,
+   34,
+   25,
+   23,
+   29,
+   32
+  ],
+  "juniors": [
+   {
+    "name": "P. Aron (F2 유망주)",
+    "age": 18,
+    "pot": 0.94,
+    "cur": 0.76,
+    "value": 1.5
+   },
+   {
+    "name": "I. Hadjar (F2 유망주)",
+    "age": 19,
+    "pot": 0.91,
+    "cur": 0.79,
+    "value": 2.2
+   }
+  ],
+  "reserveDriver": {
+   "name": "T. Pourchaire (리저브)",
+   "age": 21,
+   "speed": 0.82,
+   "cons": 0.83,
+   "tyre": 0.81,
+   "aggr": 0.58,
+   "def": 0.76,
+   "wet": 0.8
+  },
+  "chiefEngineers": {
+   "aero": {
+    "name": "J. Allison (공력 기본)",
+    "tier": "B급",
+    "dept": "aero",
+    "deptKo": "공력(에어로)",
+    "aeroMod": 0.004,
+    "engMod": 0.001,
+    "tyreMod": 0.002,
+    "relMod": 0.001
+   },
+   "power": {
+    "name": "P. Gualtieri (파워 기본)",
+    "tier": "C급",
+    "dept": "power",
+    "deptKo": "파워트레인",
+    "aeroMod": 0.001,
+    "engMod": 0.004,
+    "tyreMod": 0.001,
+    "relMod": 0.002
+   },
+   "chassis": {
+    "name": "G. Clear (섀시 기본)",
+    "tier": "C급",
+    "dept": "chassis",
+    "deptKo": "섀시·트랙사이드",
+    "aeroMod": 0.001,
+    "engMod": 0.001,
+    "tyreMod": 0.004,
+    "relMod": 0.003
+   }
+  },
+  "engineerPool": [
+   {
+    "name": "A. Newey (전설 에어로 총괄)",
+    "dept": "aero",
+    "deptKo": "공력(에어로)",
+    "tier": "S급",
+    "aeroMod": 0.022,
+    "engMod": 0.004,
+    "tyreMod": 0.009,
+    "relMod": 0.004,
+    "cost": 4.2,
+    "reqPop": 0.7,
+    "hired": false
+   },
+   {
+    "name": "P. Prodromou (수석 에어로 디렉터)",
+    "dept": "aero",
+    "deptKo": "공력(에어로)",
+    "tier": "A급",
+    "aeroMod": 0.016,
+    "engMod": 0.003,
+    "tyreMod": 0.006,
+    "relMod": 0.003,
+    "cost": 2.6,
+    "reqPop": 0.54,
+    "hired": false
+   },
+   {
+    "name": "D. Sanchez (시니어 컨셉 에어로)",
+    "dept": "aero",
+    "deptKo": "공력(에어로)",
+    "tier": "B급",
+    "aeroMod": 0.01,
+    "engMod": 0.002,
+    "tyreMod": 0.005,
+    "relMod": 0.003,
+    "cost": 1.4,
+    "reqPop": 0.35,
+    "hired": false
+   },
+   {
+    "name": "H. Cowell (전설 하이브리드 파워 총괄)",
+    "dept": "power",
+    "deptKo": "파워트레인",
+    "tier": "S급",
+    "aeroMod": 0.004,
+    "engMod": 0.024,
+    "tyreMod": 0.004,
+    "relMod": 0.013,
+    "cost": 4,
+    "reqPop": 0.68,
+    "hired": false
+   },
+   {
+    "name": "E. Wolf (수석 파워트레인 디렉터)",
+    "dept": "power",
+    "deptKo": "파워트레인",
+    "tier": "A급",
+    "aeroMod": 0.003,
+    "engMod": 0.017,
+    "tyreMod": 0.004,
+    "relMod": 0.01,
+    "cost": 2.5,
+    "reqPop": 0.52,
+    "hired": false
+   },
+   {
+    "name": "M. Harman (시니어 엔진·냉각 디렉터)",
+    "dept": "power",
+    "deptKo": "파워트레인",
+    "tier": "B급",
+    "aeroMod": 0.002,
+    "engMod": 0.011,
+    "tyreMod": 0.004,
+    "relMod": 0.011,
+    "cost": 1.3,
+    "reqPop": 0.32,
+    "hired": false
+   },
+   {
+    "name": "E. Cardile (전설 섀시·서스펜션 총괄)",
+    "dept": "chassis",
+    "deptKo": "섀시·트랙사이드",
+    "tier": "S급",
+    "aeroMod": 0.009,
+    "engMod": 0.005,
+    "tyreMod": 0.022,
+    "relMod": 0.012,
+    "cost": 3.9,
+    "reqPop": 0.66,
+    "hired": false
+   },
+   {
+    "name": "S. Resta (수석 섀시·타이어 디렉터)",
+    "dept": "chassis",
+    "deptKo": "섀시·트랙사이드",
+    "tier": "A급",
+    "aeroMod": 0.006,
+    "engMod": 0.004,
+    "tyreMod": 0.016,
+    "relMod": 0.009,
+    "cost": 2.4,
+    "reqPop": 0.5,
+    "hired": false
+   },
+   {
+    "name": "K. Watanabe (실무 타이어·열관리 수석)",
+    "dept": "chassis",
+    "deptKo": "섀시·트랙사이드",
+    "tier": "B급",
+    "aeroMod": 0.003,
+    "engMod": 0.003,
+    "tyreMod": 0.012,
+    "relMod": 0.008,
+    "cost": 1,
+    "reqPop": 0.22,
+    "hired": false
+   }
+  ],
+  "marketPool": [
+   {
+    "name": "C. Leclerc",
+    "age": 27,
+    "speed": 0.93,
+    "cons": 0.87,
+    "tyre": 0.82,
+    "wet": 0.86,
+    "salary": 4.5,
+    "buyout": 3
+   },
+   {
+    "name": "L. Norris",
+    "age": 25,
+    "speed": 0.92,
+    "cons": 0.88,
+    "tyre": 0.84,
+    "wet": 0.88,
+    "salary": 4.2,
+    "buyout": 2.8
+   },
+   {
+    "name": "O. Piastri",
+    "age": 23,
+    "speed": 0.9,
+    "cons": 0.89,
+    "tyre": 0.85,
+    "wet": 0.84,
+    "salary": 3.2,
+    "buyout": 2
+   },
+   {
+    "name": "Y. Tsunoda",
+    "age": 24,
+    "speed": 0.84,
+    "cons": 0.8,
+    "tyre": 0.78,
+    "wet": 0.8,
+    "salary": 1.6,
+    "buyout": 0.8
+   },
+   {
+    "name": "L. Lawson",
+    "age": 22,
+    "speed": 0.83,
+    "cons": 0.84,
+    "tyre": 0.81,
+    "wet": 0.82,
+    "salary": 1.4,
+    "buyout": 0.6
+   },
+   {
+    "name": "K. Antonelli (특급 신성)",
+    "age": 19,
+    "speed": 0.88,
+    "cons": 0.83,
+    "tyre": 0.84,
+    "wet": 0.87,
+    "salary": 2,
+    "buyout": 1.8
+   }
+  ],
+  "missions": {
+   "double_p8": {
+    "name": "두 차량 모두 P8 이내 완주",
+    "reward": 0.9
+   },
+   "podium_one": {
+    "name": "최소 1대 포디움(P3 이내) 입상",
+    "reward": 1.4
+   },
+   "both_finish": {
+    "name": "두 차량 모두 리타이어 없이 완주",
+    "reward": 0.35
+   }
+  }
+ }
+}

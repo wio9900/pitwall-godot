@@ -17,16 +17,32 @@ jobs:
           mv Godot_v4.7.2-stable_linux.x86_64 godot
           chmod +x godot
       - name: 임포트(스크립트 파싱)
-        run: ./godot --headless --path . --import 2>&1 | tee import.log
+        run: |
+          timeout 240 ./godot --headless --path . --import 2>&1 | tee import.log
+          if grep -E "SCRIPT ERROR|Parse Error" import.log; then exit 1; fi
+      - name: 문법 검사 (모든 스크립트)
+        run: |
+          bad=0
+          for f in $(find scripts tests -name '*.gd'); do
+            out=$(timeout 60 ./godot --headless --path . --check-only --script "res://$f" 2>&1) || true
+            if echo "$out" | grep -qE "SCRIPT ERROR|Parse Error"; then echo "== $f"; echo "$out" | grep -E "ERROR|at:" | head -8; bad=1; fi
+          done
+          exit $bad
       - name: 시뮬레이션 스모크 테스트
-        run: ./godot --headless --path . --script res://tests/sim_smoke.gd 2>&1 | tee sim.log
+        run: timeout 240 ./godot --headless --path . --script res://tests/sim_smoke.gd 2>&1 | tee sim.log; test ${PIPESTATUS[0]} -eq 0
+      - name: 주말(연습·예선) 테스트
+        run: timeout 240 ./godot --headless --path . --script res://tests/weekend_smoke.gd 2>&1 | tee weekend.log; test ${PIPESTATUS[0]} -eq 0
+      - name: 커리어 테스트
+        run: timeout 240 ./godot --headless --path . --script res://tests/career_smoke.gd 2>&1 | tee career.log; test ${PIPESTATUS[0]} -eq 0
+      - name: 밸런스 점검
+        run: timeout 300 ./godot --headless --path . --script res://tests/calib.gd 2>&1 | tee calib.log
       - name: UI 스모크 테스트
         run: |
-          if [ -f tests/ui_smoke.gd ]; then ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee ui.log; fi
+          if [ -f tests/ui_smoke.gd ]; then timeout 240 ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee ui.log; test ${PIPESTATUS[0]} -eq 0; fi
       - name: 화면 캡처
         run: |
           sudo apt-get update -qq > /dev/null 2>&1; sudo apt-get install -y -qq xvfb libgl1-mesa-dri fonts-noto-cjk > /dev/null 2>&1 || true
-          xvfb-run -a -s "-screen 0 1920x1400x24" ./godot --path . --rendering-method gl_compatibility --audio-driver Dummy --script res://tests/shots.gd > shots.out 2>&1 || true
+          timeout 300 xvfb-run -a -s "-screen 0 1920x1400x24" ./godot --path . --rendering-method gl_compatibility --audio-driver Dummy --script res://tests/shots.gd > shots.out 2>&1 || true
           grep -v -E "^[A-Za-z0-9+/=]{200,}$" shots.out | head -60
           python3 -c "import re,base64,os;d=open('shots.out').read();os.makedirs('shots',exist_ok=True);[open('shots/'+n+'.jpg','wb').write(base64.b64decode(b)) for n,b in re.findall(r'SHOT-BEGIN (\S+)\n(\S+)\nSHOT-END',d)]"
           ls -la shots
@@ -42,3 +58,4 @@ jobs:
       - name: 에러 검사
         run: |
           if grep -hE "SCRIPT ERROR|Parse Error|ERROR:" *.log; then exit 1; fi
+          if grep -hE "SCRIPT ERROR|Parse Error" shots.out; then exit 1; fi

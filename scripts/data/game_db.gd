@@ -9,6 +9,7 @@ static var engines: Dictionary = {}
 static var teams: Array = []
 static var circuits: Dictionary = {}
 static var circuit_keys: Array = []
+static var career: Dictionary = {}
 static var _tracks: Dictionary = {}
 
 
@@ -20,6 +21,7 @@ static func load_all() -> void:
 	teams = t["teams"]
 	circuits = _read_json("res://data/circuits_f1.json")
 	circuit_keys = circuits.keys()
+	career = _read_json("res://data/career_f1.json")
 	loaded = true
 
 

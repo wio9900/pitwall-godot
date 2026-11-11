@@ -85,7 +85,13 @@ func gauss(s: float) -> float:
 
 # ═════════ 레이스 생성 ═════════
 ## start_comps: 내 차 2대의 출발 타이어 ["M", "H"] 등. my_team_ = -1이면 AI만 달린다(테스트용).
-func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, start_comps: Array = ["M", "M"], seed_value: int = 0) -> void:
+## opts(선택): 커리어·주말 모드에서 쓰는 설정
+##   teams: 팀 목록(기본 DB.teams) · engines: 엔진 성능표 · my_mods: 내 차 보정 {aero, engine, chassis, rel, crew}
+##   setup: 내 차 셋업 [{wing, press, fuel_load}] · sets: 내 차 주말 타이어 세트 [{S,M,H}] · true_mult: 실제 마모 배율
+const FUEL_LOAD := {"light": -0.03, "std": 0.02, "heavy": 0.06}
+
+
+func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, start_comps: Array = ["M", "M"], seed_value: int = 0, opts: Dictionary = {}) -> void:
 	DB.load_all()
 	if seed_value != 0:
 		rng.seed = seed_value
@@ -97,6 +103,8 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	laps = laps_
 	my_team = my_team_
 	true_mult = {"S": uni(0.88, 1.14), "M": uni(0.88, 1.14), "H": uni(0.88, 1.14)}
+	if opts.has("true_mult"):
+		true_mult = opts["true_mult"]
 	cars.clear()
 	radio_log.clear()
 	_cuts_cache.clear()
@@ -119,7 +127,10 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	finishing = false
 	ever_wet = false
 	night = false
-	var teams: Array = DB.teams
+	var teams: Array = opts.get("teams", DB.teams)
+	var engines: Dictionary = opts.get("engines", DB.engines)
+	var setups: Array = opts.get("setup", [])
+	var sets: Array = opts.get("sets", [])
 	n_stalls = teams.size()
 	for ti in teams.size():
 		var t: Dictionary = teams[ti]
@@ -137,7 +148,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 			c.aero = t["aero"]
 			c.chassis = t["chassis"]
 			c.rel = t["rel"]
-			c.engine = DB.engines.get(t["engine"], 0.86)
+			c.engine = float(t["engine_val"]) if t.has("engine_val") else float(engines.get(t["engine"], 0.86))
 			c.strategy = clampf(0.70 + 0.22 * (((c.aero + c.chassis) / 2.0 - 0.76) / 0.19), 0.66, 0.93)
 			c.drivers = [d.duplicate()]
 			c.nerve = uni(0.5, 1.6)
@@ -148,6 +159,14 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.fuel = laps * FPL * 1.02
 				c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
 				c.press = "std"
+				if k < setups.size():
+					var su: Dictionary = setups[k]
+					c.wing = float(su.get("wing", c.wing))
+					c.press = su.get("press", "std")
+					c.fuel_load = su.get("fuel_load", "std")
+					c.fuel = laps * FPL * (1.0 + float(FUEL_LOAD[c.fuel_load]))
+				if k < sets.size():
+					c.tyre_sets = sets[k]
 				c.sc_early = false
 				c.comp = sc_
 			else:
@@ -158,6 +177,16 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.comp = "M"
 			c.used = {c.comp: true}
 			cars.append(c)
+	# 커리어: 본부(HQ) 개발·설비·인력 보정을 내 차에 적용
+	if opts.has("my_mods"):
+		var mm: Dictionary = opts["my_mods"]
+		for c in cars:
+			if c.mine:
+				c.aero = minf(0.99, c.aero + float(mm.get("aero", 0.0)))
+				c.engine = minf(0.99, c.engine + float(mm.get("engine", 0.0)))
+				c.chassis = minf(0.99, c.chassis + float(mm.get("chassis", 0.0)))
+				c.rel = minf(0.99, c.rel + float(mm.get("rel", 0.0)))
+				c.crew = minf(0.99, c.crew + float(mm.get("crew", 0.0)))
 	# 그리드: 예선 페이스 순
 	var qp = {}
 	for c in cars:
@@ -310,7 +339,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var tt_target: float = pc[3]
 	var t = base * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"] * spd)
 	var evo_bonus = -0.65 * track_evo * (1.0 - w)
-	t += (float(COMP[c.comp][0]) + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh
+	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh
 	t += (setup_pen(c, w) + float(PRESS[c.press][0]) + press_straight(c.press)) * sh
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh
@@ -857,7 +886,8 @@ func on_cross(c, t: float) -> void:
 			var d: Variant = pit_decision(c)
 			if d != null:
 				c.boxing = d
-				c.pit_total = pit_loss() + gauss(0.6)
+				# 피트 크루 숙련도(기본 0.85, 훈련센터 Lv당 +0.025): Lv5면 정차 약 0.8초 단축
+				c.pit_total = pit_loss() + gauss(0.6) - (c.crew - 0.85) * 8.0
 	c.started = true
 	schedule_next(c, t)
 
@@ -877,6 +907,12 @@ func apply_pit(c) -> void:
 		c.comp = d["comp"]
 		c.used[c.comp] = true
 		c.wear = 0.0
+		c.used_set_pen = 0.0
+		if c.mine and c.tyre_sets != null and SLICK.has(c.comp):
+			if c.tyre_sets[c.comp] > 0:
+				c.tyre_sets[c.comp] -= 1
+			else:
+				c.used_set_pen = 0.45
 		c.tt = 0.35
 		c.stint_laps = 0
 	if c.mine:
@@ -1331,3 +1367,21 @@ func results() -> Array:
 			pts = POINTS[pos - 1]
 		out.append({"pos": pos, "car": c, "gap": gap, "points": pts})
 	return out
+
+
+## 출발 직전 정리 (HTML start()): 그리드 순서대로 정렬하고 반응 속도를 준다.
+## 주말 모드면 내 차 출발 타이어 세트를 소모한다(예선 최종 세션 진출 차는 예선 타이어 그대로).
+func prepare_start() -> void:
+	cars.sort_custom(func(a, b): return a.grid < b.grid)
+	for i in cars.size():
+		var c = cars[i]
+		c.grid = i
+		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) + gauss(0.012), 0.01, 0.09)
+		c.start_t = i * 0.25 + react
+		c.used[c.comp] = true
+		if c.mine and c.tyre_sets != null and not c.q3_locked and SLICK.has(c.comp):
+			if c.tyre_sets[c.comp] > 0:
+				c.tyre_sets[c.comp] -= 1
+				c.used_set_pen = 0.0
+			else:
+				c.used_set_pen = 0.45

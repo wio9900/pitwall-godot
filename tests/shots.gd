@@ -109,6 +109,82 @@ func _process(_delta: float) -> bool:
 				step = 11
 		11:
 			_shot("portrait_rain_night")
+			root.size = Vector2i(1280, 720)
+			main._on_resize()
+			main._show_menu()
+			main._on_mode("career")
+			wait = 3
+			step = 12
+		12:
+			_shot("menu_career")
+			main.new_entry = "create"
+			main._render_career_menu()
+			wait = 3
+			step = 13
+		13:
+			_shot("menu_career_create")
+			main.new_entry = "select"
+			main._new_career()
+			wait = 3
+			step = 14
+		14:
+			_shot("hq_home")
+			main.hq_view._on_tab("rnd")
+			wait = 3
+			step = 15
+		15:
+			_shot("hq_rnd")
+			main.hq_view._on_tab("staff")
+			wait = 3
+			step = 16
+		16:
+			_shot("hq_staff")
+			main.hq_view._on_tab("spon")
+			wait = 3
+			step = 17
+		17:
+			_shot("hq_spon")
+			main._start_weekend_career()
+			wait = 3
+			step = 18
+		18:
+			_shot("wk_practice")
+			main.wk_view._run_practice("long")
+			wait = 50
+			step = 19
+		19:
+			_shot("wk_practice_run")
+			wait = 60
+			step = 20
+		20:
+			main.wk_view._on_to_quali()
+			main.wk_view._run_quali_lap()
+			wait = 120
+			step = 21
+		21:
+			_shot("wk_quali_lap")
+			main.wk_view._on_auto_quali()
+			wait = 3
+			step = 22
+		22:
+			_shot("wk_grid")
+			main.wk_view._on_start_race()
+			main._update_start(10.0)
+			step = 23
+		23:
+			main.sim.advance(4.0)
+			if main.sim.done:
+				main._refresh_ui()
+				main._show_result()
+				wait = 3
+				step = 24
+		24:
+			_shot("career_result")
+			main._open_hq()
+			wait = 3
+			step = 25
+		25:
+			_shot("hq_after")
 			print("SHOTS DONE %d" % shot_n)
 			return true
-	return frames > 20000
+	return frames > 40000

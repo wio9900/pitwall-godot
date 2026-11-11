@@ -29,6 +29,8 @@ var lights_out_t := -10.0    # 소등 시각(실시간) — GO! 표시용
 var banner_text := ""
 var banner_kind := ""
 var banner_t := -10.0
+## 연습·예선 화면용: 차 한 대만 그린다 {car, dist(트랙 거리)}. null 이면 레이스 모드.
+var solo: Variant = null
 
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0
@@ -212,9 +214,13 @@ func _update_effects() -> void:
 func _process(delta: float) -> void:
 	_now += delta
 	if sim != null and sim.T != null and size.x > 4 and size.y > 4:
-		_update_cars(delta)
-		_update_camera(delta)
-		_update_effects()
+		if solo != null:
+			follow_slot = -1
+			_update_camera(delta)
+		else:
+			_update_cars(delta)
+			_update_camera(delta)
+			_update_effects()
 	queue_redraw()
 
 
@@ -230,6 +236,11 @@ func _draw() -> void:
 	_draw_track(T, night)
 	_draw_stalls(T)
 	_draw_labels(T, font, night)
+	if solo != null:
+		if solo.get("car") != null:
+			var d: float = solo["dist"]
+			_draw_car(_X(T.point_at_dist(d)), T.head_at_dist(d), solo["car"], night)
+		return
 	var wet: float = sim.wet
 	if wet > 0.2:
 		for c in sim.cars:

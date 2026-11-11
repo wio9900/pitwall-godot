@@ -6,6 +6,11 @@ const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
 const SfxS = preload("res://scripts/ui/sfx.gd")
 const DB = preload("res://scripts/data/game_db.gd")
+const KitS = preload("res://scripts/ui/kit.gd")
+const CareerS = preload("res://scripts/sim/career.gd")
+const WeekendS = preload("res://scripts/sim/weekend.gd")
+const HqViewS = preload("res://scripts/ui/hq_view.gd")
+const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
@@ -32,6 +37,26 @@ var opt_weather: OptionButton
 var opt_start: Array = []
 var circ_info: RichTextLabel
 var menu_cols: BoxContainer
+# 모드: quick(퀵 레이스) / career(커리어)
+var mode := "quick"
+var mode_btns: Array = []
+var quick_left: Control
+var quick_right: Control
+var career_left: VBoxContainer
+var career_right: VBoxContainer
+var career = null
+var wk = null
+var hq_view
+var wk_view
+var new_entry := "select"
+var new_opts := {"name": "Korea GP Racing", "color": "#00d2be", "rim": "#ffffff", "engine": "Mercedes", "region": "uk", "tier": 1}
+var new_team := 6
+var del_armed := false
+var result_title: Label
+var btn_again: Button
+var btn_menu: Button
+var btn_hq: Button
+var settled := false
 
 # 레이스
 var race_box: Control
@@ -72,6 +97,16 @@ func _ready() -> void:
 	add_child(bg)
 	_build_menu()
 	_build_race_ui()
+	hq_view = HqViewS.new()
+	hq_view.visible = false
+	add_child(hq_view)
+	hq_view.go_weekend.connect(_start_weekend_career)
+	hq_view.go_menu.connect(_show_menu)
+	wk_view = WeekendViewS.new()
+	wk_view.visible = false
+	add_child(wk_view)
+	wk_view.start_race.connect(_begin_race)
+	wk_view.go_back.connect(_weekend_back)
 	_build_result()
 	_show_menu()
 	get_viewport().size_changed.connect(_on_resize)
@@ -222,11 +257,18 @@ func _build_menu() -> void:
 	v.add_child(_label("PIT WALL", 52, AMBER))
 	v.add_child(_label("F1 피트월 전략 시뮬레이션 · Godot 프로토타입", 20, DIM))
 	v.add_child(HSeparator.new())
+	var mrow = KitS.hbox(6)
+	v.add_child(mrow)
+	mode_btns = KitS.seg(mrow, [["quick", "퀵 레이스"], ["career", "커리어"]], mode, _on_mode, 20)
+	quick_left = KitS.vbox(12)
+	v.add_child(quick_left)
+	career_left = KitS.vbox(10)
+	v.add_child(career_left)
 	var grid = GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 12)
-	v.add_child(grid)
+	quick_left.add_child(grid)
 	opt_circuit = OptionButton.new()
 	for k in DB.circuit_keys:
 		opt_circuit.add_item("%s  (%s)" % [DB.circuits[k]["name"], DB.circuits[k]["full"]])
@@ -256,18 +298,27 @@ func _build_menu() -> void:
 		var ctl: Control = r[1]
 		ctl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(ctl)
+	quick_right = KitS.vbox(12)
+	quick_right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v2.add_child(quick_right)
+	career_right = KitS.vbox(10)
+	v2.add_child(career_right)
 	circ_info = _rtl()
-	v2.add_child(circ_info)
+	quick_right.add_child(circ_info)
 	var hint = _rtl()
 	hint.text = "[color=#8b98a5]내 차는 직접 [b]박스(S/M/H)[/b]를 눌러야만 피트인해요. 드라이 레이스에서는 [b]두 가지 슬릭 컴파운드[/b]를 써야 하고, 안 쓰면 30초 페널티예요. 상대 AI는 서킷·마모를 계산해서 각자 다른 전략을 씁니다.[/color]"
-	v2.add_child(hint)
+	quick_right.add_child(hint)
 	var spacer = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v2.add_child(spacer)
-	var start = _btn("레이스 시작 ▶", 28)
-	start.custom_minimum_size = Vector2(0, 68)
+	quick_right.add_child(spacer)
+	var wkb = _btn("주말 진행 (연습·예선) ▶", 26)
+	wkb.custom_minimum_size = Vector2(0, 64)
+	wkb.pressed.connect(_start_weekend_quick)
+	quick_right.add_child(wkb)
+	var start = _btn("바로 레이스 ▶ (그리드 자동)", 18)
+	start.custom_minimum_size = Vector2(0, 44)
 	start.pressed.connect(_on_start)
-	v2.add_child(start)
+	quick_right.add_child(start)
 	_update_circ_info()
 
 
@@ -280,12 +331,183 @@ func _update_circ_info() -> void:
 
 
 func _show_menu() -> void:
-	menu_box.visible = true
-	race_box.visible = false
-	result_box.visible = false
+	_show_only(menu_box)
+	_render_career_menu()
 
 
-func _on_start() -> void:
+func _show_only(node: Control) -> void:
+	for n in [menu_box, race_box, result_box, hq_view, wk_view]:
+		if n != null:
+			n.visible = n == node
+	if sfx != null and node != race_box:
+		sfx.set_engine(0.0)
+
+
+func _on_mode(v) -> void:
+	mode = v
+	_render_career_menu()
+
+
+# ═════════ 커리어 시작 메뉴 ═════════
+func _render_career_menu() -> void:
+	if career_left == null:
+		return
+	if mode_btns.size() == 2:
+		mode_btns[0].set_pressed_no_signal(mode == "quick")
+		mode_btns[1].set_pressed_no_signal(mode == "career")
+	quick_left.visible = mode == "quick"
+	quick_right.visible = mode == "quick"
+	career_left.visible = mode == "career"
+	career_right.visible = mode == "career"
+	KitS.clear(career_left)
+	KitS.clear(career_right)
+	if mode != "career":
+		return
+	if CareerS.has_save():
+		var tmp = CareerS.new()
+		if tmp.load_save():
+			var h: Dictionary = tmp.hq
+			var c0 = KitS.card(career_left, "저장된 커리어", AMBER)
+			var r = KitS.rtl(16)
+			r.text = "[color=%s]■[/color] [b]%s[/b] · %s · 시즌 %d R%d · 자금 %.1fM · 평판 %d%%" % [h["team_color"], h["team_name"], tmp.tier_meta()["short"], int(h["season"]), tmp.round_idx() + 1, float(h["cash"]), int(float(h["pop"]) * 100)]
+			c0.add_child(r)
+			var hb = KitS.hbox(6)
+			c0.add_child(hb)
+			hb.add_child(KitS.btn("이어하기 ▶", 20, _continue_career))
+			var del = KitS.btn("⚠ 한 번 더 누르면 삭제" if del_armed else "저장 삭제", 15, _delete_save)
+			hb.add_child(del)
+	var c1 = KitS.card(career_left, "새 커리어")
+	KitS.seg(c1, [["select", "기존 팀으로 (F1)"], ["create", "신규 팀 창단"]], new_entry, _on_entry, 16)
+	if new_entry == "select":
+		var ob = OptionButton.new()
+		for i in DB.teams.size():
+			var t: Dictionary = DB.teams[i]
+			var ib: Array = DB.career["init_budget"].get(t["name"], [8.5, 0.6])
+			ob.add_item("%s · 초기 자금 %.1fM · 평판 %d%%" % [t["name"], float(ib[0]), int(float(ib[1]) * 100)])
+		ob.select(new_team)
+		ob.item_selected.connect(_on_new_team)
+		c1.add_child(ob)
+	else:
+		c1.add_child(KitS.label("팀 이름", 14, DIM))
+		var le = LineEdit.new()
+		le.text = new_opts["name"]
+		le.max_length = 24
+		le.text_changed.connect(_on_new_name)
+		c1.add_child(le)
+		c1.add_child(KitS.label("팀 색 / 포인트 색", 14, DIM))
+		var sw = KitS.hbox(4)
+		c1.add_child(sw)
+		for col in DB.career["swatch_main"]:
+			sw.add_child(_swatch(col, new_opts["color"] == col, _on_new_color.bind(col)))
+		var sw2 = KitS.hbox(4)
+		c1.add_child(sw2)
+		for col in DB.career["swatch_rim"]:
+			sw2.add_child(_swatch(col, new_opts["rim"] == col, _on_new_rim.bind(col)))
+		c1.add_child(KitS.label("출발 리그", 14, DIM))
+		KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+		c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
+		KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
+		c1.add_child(KitS.label("본부 지역", 14, DIM))
+		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
+	var info = KitS.rtl(15)
+	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n• [b]코스트캡[/b] 안에서 R&D와 설비에 투자하세요. 넘기면 벌금과 제재.\n• [b]스폰서[/b]는 시즌 전 제안 중 카테고리마다 하나를 골라요. 안정형·성과연동형·단기 고액은 성과 조항과 홍보 의무가 달라요.\n• 레이스 전에 [b]미션을 약속[/b]하면 보너스, 실패하면 평판 하락.\n• 신규 팀은 F3부터 시작해 승격을 노려요 (오너가 5시즌 동안 자본 지원).[/color]"
+	career_right.add_child(info)
+	var go = _btn("새 커리어 시작 ▶", 24)
+	go.custom_minimum_size = Vector2(0, 60)
+	go.pressed.connect(_new_career)
+	career_right.add_child(go)
+	if CareerS.has_save():
+		career_right.add_child(KitS.label("※ 새로 시작하면 저장된 커리어를 덮어써요.", 13, BAD))
+
+
+func _swatch(col: String, on: bool, cb: Callable) -> Button:
+	var b = Button.new()
+	b.custom_minimum_size = Vector2(38, 30)
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(col)
+	sb.set_corner_radius_all(6)
+	sb.border_color = AMBER if on else Color(col)
+	sb.set_border_width_all(3 if on else 1)
+	for st in ["normal", "hover", "pressed"]:
+		b.add_theme_stylebox_override(st, sb)
+	b.pressed.connect(cb)
+	return b
+
+
+func _on_entry(v) -> void:
+	new_entry = v
+	_render_career_menu()
+
+
+func _on_new_team(i: int) -> void:
+	new_team = i
+
+
+func _on_new_name(t: String) -> void:
+	new_opts["name"] = t
+
+
+func _on_new_color(c) -> void:
+	new_opts["color"] = c
+	_render_career_menu()
+
+
+func _on_new_rim(c) -> void:
+	new_opts["rim"] = c
+	_render_career_menu()
+
+
+func _on_new_tier(v) -> void:
+	new_opts["tier"] = int(v)
+	_render_career_menu()
+
+
+func _on_new_engine(v) -> void:
+	new_opts["engine"] = v
+	_render_career_menu()
+
+
+func _on_new_region(v) -> void:
+	new_opts["region"] = v
+	_render_career_menu()
+
+
+func _delete_save() -> void:
+	if not del_armed:
+		del_armed = true
+		_render_career_menu()
+		return
+	del_armed = false
+	CareerS.delete_save()
+	_render_career_menu()
+
+
+func _new_career() -> void:
+	career = CareerS.new()
+	var nm: String = String(new_opts["name"]).strip_edges()
+	if nm == "":
+		nm = "Korea GP Racing"
+	new_opts["name"] = nm
+	career.new_career(new_entry, new_team, new_opts)
+	career.save()
+	mode = "career"
+	_open_hq()
+
+
+func _continue_career() -> void:
+	career = CareerS.new()
+	if career.load_save():
+		mode = "career"
+		_open_hq()
+
+
+func _open_hq() -> void:
+	_show_only(hq_view)
+	hq_view.open(career)
+
+
+# ═════════ 레이스 주말 ═════════
+func _read_quick_settings() -> void:
 	last_settings = {
 		"circ": DB.circuit_keys[opt_circuit.selected],
 		"team": opt_team.selected,
@@ -293,6 +515,47 @@ func _on_start() -> void:
 		"wx": ["auto", "dry", "rain"][opt_weather.selected],
 		"start": [["S", "M", "H"][opt_start[0].selected], ["S", "M", "H"][opt_start[1].selected]],
 	}
+
+
+func _start_weekend_quick() -> void:
+	mode = "quick"
+	_read_quick_settings()
+	var s = last_settings
+	sim = RaceSimS.new()
+	sim.new_race(s["circ"], s["team"], s["laps"], s["wx"], ["M", "M"])
+	wk = WeekendS.new()
+	wk.setup(sim, 0)
+	_show_only(wk_view)
+	wk_view.open(sim, wk)
+
+
+func _start_weekend_career() -> void:
+	mode = "career"
+	sim = RaceSimS.new()
+	var opts := {"teams": career.race_teams(), "engines": career.hq["engines"], "my_mods": career.my_mods()}
+	sim.new_race(career.next_circuit(), career.race_my_index(), int(career.hq["laps"]), "auto", ["M", "M"], 0, opts)
+	wk = WeekendS.new()
+	wk.setup(sim, career.duty_laps())
+	_show_only(wk_view)
+	wk_view.open(sim, wk)
+
+
+func _weekend_back() -> void:
+	if mode == "career":
+		_open_hq()
+	else:
+		_show_menu()
+
+
+## 주말(연습·예선)을 마친 sim 으로 결승 시작
+func _begin_race() -> void:
+	sim.prepare_start()
+	_launch_race()
+
+
+func _on_start() -> void:
+	mode = "quick"
+	_read_quick_settings()
 	_start_race()
 
 
@@ -300,6 +563,12 @@ func _start_race() -> void:
 	sim = RaceSimS.new()
 	var s = last_settings
 	sim.new_race(s["circ"], s["team"], s["laps"], s["wx"], s["start"])
+	sim.prepare_start()
+	_launch_race()
+
+
+func _launch_race() -> void:
+	settled = false
 	race_view.reset()
 	race_view.sim = sim
 	race_view.follow_slot = -1
@@ -308,9 +577,7 @@ func _start_race() -> void:
 	start_t = 0.0
 	start_hold = 5.0 + randf_range(0.4, 1.1)
 	race_view.lights = 0
-	menu_box.visible = false
-	result_box.visible = false
-	race_box.visible = true
+	_show_only(race_box)
 	_set_speed(4)
 	_set_cam(-1)
 	for i in 2:
@@ -618,8 +885,11 @@ func _refresh_ui() -> void:
 				st += "\n[color=#f59e0b]두 번째 컴파운드 미사용[/color]"
 		cp["status"].text = st
 		var can_box: bool = c.is_running() and c.boxing == null
-		for b in cp["box"]:
+		for bi in cp["box"].size():
+			var b: Button = cp["box"][bi]
 			b.disabled = not can_box
+			var comp: String = ["S", "M", "H"][bi]
+			b.text = comp if c.tyre_sets == null else "%s 새%d" % [comp, int(c.tyre_sets[comp])]
 		cp["cancel"].disabled = c.pit_req == "" or c.boxing != null
 	_refresh_tower(ord, leader)
 	_refresh_radio()
@@ -689,19 +959,35 @@ func _build_result() -> void:
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	pc.add_child(v)
-	v.add_child(_label("레이스 결과", 34, AMBER))
+	result_title = _label("레이스 결과", 30, AMBER)
+	v.add_child(result_title)
 	result_text = _rtl(false)
 	result_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(result_text)
 	var h = HBoxContainer.new()
 	h.add_theme_constant_override("separation", 10)
 	v.add_child(h)
-	var again = _btn("같은 설정으로 다시", 22)
-	again.pressed.connect(_start_race)
-	h.add_child(again)
-	var menu = _btn("메뉴로", 22)
-	menu.pressed.connect(_show_menu)
-	h.add_child(menu)
+	btn_again = _btn("같은 설정으로 다시", 20)
+	btn_again.pressed.connect(_start_race)
+	h.add_child(btn_again)
+	btn_menu = _btn("메뉴로", 20)
+	btn_menu.pressed.connect(_show_menu)
+	h.add_child(btn_menu)
+	btn_hq = _btn("본부(HQ)로 ▶", 22)
+	btn_hq.pressed.connect(_open_hq)
+	h.add_child(btn_hq)
+
+
+func _career_summary(ec: Dictionary) -> String:
+	var mk: String = ec["mission_key"]
+	var mtxt := ""
+	if mk != "none":
+		mtxt = (" · 미션 [color=#22c55e]달성 +%.2fM[/color]" % ec["mission"]) if ec["mission_ok"] else (" · 미션 [color=#ef4444]실패 (평판 -%d%%)[/color]" % int(ec["mission_pen"] * 100))
+	var t := "[b][color=#ffc53d]커리어 정산[/color][/b] 내 팀 [b]%d점[/b]%s\n[color=#22c55e]스폰서 +%.2f · 페이 드라이버 +%.2f · 포인트 상금 +%.2f[/color] / [color=#ef4444]운영 -%.2f · 간접비 -%.2f · 연봉 -%.2f · 수리 -%.2f[/color] → 순익 [b]%+.2fM[/b] · 자금 [b]%.2fM[/b]" % [
+		ec["total"], mtxt, ec["spon"], ec["pay"], ec["prize"], ec["ops"], ec["overhead"], ec["salary"], ec["repair"], ec["net"], ec["cash"]]
+	for n in ec["notes"]:
+		t += "\n• " + n
+	return t + "\n"
 
 
 func _show_result() -> void:
@@ -731,5 +1017,13 @@ func _show_result() -> void:
 		var fc = sim.cars.filter(func(x): return x.id == sim.fastest_id)
 		if not fc.is_empty():
 			s += "\n[color=#a855f7]최고 랩[/color] %s %.3f초" % [fc[0].code, sim.fastest_t]
+	btn_again.visible = mode != "career"
+	btn_menu.visible = mode != "career"
+	btn_hq.visible = mode == "career"
+	result_title.text = "레이스 결과 · %s" % sim.CIRC["name"]
+	if mode == "career" and not settled:
+		settled = true
+		var ec: Dictionary = career.after_race(sim)
+		s = _career_summary(ec) + "\n" + s
 	result_text.text = s
 	result_box.visible = true
