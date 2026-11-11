@@ -30,6 +30,7 @@ var opt_laps: OptionButton
 var opt_weather: OptionButton
 var opt_start: Array = []
 var circ_info: RichTextLabel
+var menu_cols: BoxContainer
 
 # 레이스
 var race_box: Control
@@ -81,7 +82,8 @@ func _on_resize() -> void:
 		landscape = want
 		_apply_layout()
 	# 메뉴는 넓은 화면에서 가운데 정렬된 기둥으로
-	var side = maxf(28.0, (vs.x - 820.0) / 2.0)
+	menu_cols.vertical = landscape == 0
+	var side = maxf(24.0, (vs.x - (1200.0 if landscape == 1 else 820.0)) / 2.0)
 	menu_box.add_theme_constant_override("margin_left", int(side))
 	menu_box.add_theme_constant_override("margin_right", int(side))
 	result_panel.custom_minimum_size = Vector2(minf(760.0, vs.x - 32.0), minf(900.0, vs.y - 32.0))
@@ -194,13 +196,27 @@ func _build_menu() -> void:
 	var mc = MarginContainer.new()
 	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
-		mc.add_theme_constant_override("margin_" + side, 28)
+		mc.add_theme_constant_override("margin_" + side, 24)
 	add_child(mc)
 	menu_box = mc
+	# 화면이 작아도 잘리지 않게 스크롤 + 가로 화면에서는 2단 배치
+	var scroll = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	mc.add_child(scroll)
+	menu_cols = BoxContainer.new()
+	menu_cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	menu_cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	menu_cols.add_theme_constant_override("separation", 28)
+	scroll.add_child(menu_cols)
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 14)
-	mc.add_child(v)
-	v.add_child(_label("PIT WALL", 64, AMBER))
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 12)
+	menu_cols.add_child(v)
+	var v2 = VBoxContainer.new()
+	v2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v2.add_theme_constant_override("separation", 12)
+	menu_cols.add_child(v2)
+	v.add_child(_label("PIT WALL", 52, AMBER))
 	v.add_child(_label("F1 피트월 전략 시뮬레이션 · Godot 프로토타입", 20, DIM))
 	v.add_child(HSeparator.new())
 	var grid = GridContainer.new()
@@ -238,17 +254,17 @@ func _build_menu() -> void:
 		ctl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(ctl)
 	circ_info = _rtl()
-	v.add_child(circ_info)
+	v2.add_child(circ_info)
 	var hint = _rtl()
 	hint.text = "[color=#8b98a5]내 차는 직접 [b]박스(S/M/H)[/b]를 눌러야만 피트인해요. 드라이 레이스에서는 [b]두 가지 슬릭 컴파운드[/b]를 써야 하고, 안 쓰면 30초 페널티예요. 상대 AI는 서킷·마모를 계산해서 각자 다른 전략을 씁니다.[/color]"
-	v.add_child(hint)
+	v2.add_child(hint)
 	var spacer = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(spacer)
+	v2.add_child(spacer)
 	var start = _btn("레이스 시작 ▶", 28)
-	start.custom_minimum_size = Vector2(0, 72)
+	start.custom_minimum_size = Vector2(0, 68)
 	start.pressed.connect(_on_start)
-	v.add_child(start)
+	v2.add_child(start)
 	_update_circ_info()
 
 
