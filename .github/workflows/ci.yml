@@ -1,7 +1,10 @@
 name: check
 on:
   push:
+    branches-ignore: [ci-shots]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   godot:
     runs-on: ubuntu-latest
@@ -20,6 +23,22 @@ jobs:
       - name: UI 스모크 테스트
         run: |
           if [ -f tests/ui_smoke.gd ]; then ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee ui.log; fi
+      - name: 화면 캡처
+        run: |
+          sudo apt-get update -qq > /dev/null 2>&1; sudo apt-get install -y -qq xvfb libgl1-mesa-dri fonts-noto-cjk > /dev/null 2>&1 || true
+          xvfb-run -a -s "-screen 0 1920x1400x24" ./godot --path . --rendering-method gl_compatibility --audio-driver Dummy --script res://tests/shots.gd > shots.out 2>&1 || true
+          grep -v -E "^[A-Za-z0-9+/=]{200,}$" shots.out | head -60
+          python3 -c "import re,base64,os;d=open('shots.out').read();os.makedirs('shots',exist_ok=True);[open('shots/'+n+'.jpg','wb').write(base64.b64decode(b)) for n,b in re.findall(r'SHOT-BEGIN (\S+)\n(\S+)\nSHOT-END',d)]"
+          ls -la shots
+      - name: 캡처를 ci-shots 브랜치에 올리기
+        run: |
+          cd shots
+          git init -q -b ci-shots
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git add -A
+          git commit -qm "shots ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-shots
       - name: 에러 검사
         run: |
           if grep -hE "SCRIPT ERROR|Parse Error|ERROR:" *.log; then exit 1; fi

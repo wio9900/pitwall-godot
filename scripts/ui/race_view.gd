@@ -1,4 +1,6 @@
 extends Control
+
+signal cue(name: String) # 효과음 신호 (main 이 sfx 로 연결)
 ## 탑뷰 레이스 화면. 시뮬레이션 상태(sim)를 읽어서 그리기만 한다 — 규칙 로직은 없다.
 ## 연출을 바꾸고 싶으면 이 파일만 고치면 된다.
 
@@ -41,6 +43,10 @@ var _last_radio := {}
 var _radio_shown := {}
 var _last_fastest := -1
 var _last_log: Variant = null
+var _stop_t := {}      # car id → 차고 정차 시작 시각(시뮬레이션)
+var _fin_seen := {}    # car id → 체커기 받은 것 확인
+var _flash := {}       # car id → 추월 강조 시작(실시간)
+var _was_finishing := false
 
 
 func reset() -> void:
@@ -52,6 +58,10 @@ func reset() -> void:
 	_radio_shown.clear()
 	_last_fastest = -1
 	_last_log = null
+	_stop_t.clear()
+	_fin_seen.clear()
+	_flash.clear()
+	_was_finishing = false
 	banner_text = ""
 	_cam_center = Vector2.ZERO
 
@@ -84,7 +94,7 @@ func _update_camera(delta: float) -> void:
 		if follow_slot < mc.size() and mc[follow_slot].dnf == "" and _smooth.has(mc[follow_slot].id):
 			want_center = _smooth[mc[follow_slot].id]["p"]
 			want_zoom = 2.8
-	var k = clampf(delta * 3.5, 0.0, 1.0)
+	var k = clampf(delta * (7.0 if follow_slot >= 0 else 3.5), 0.0, 1.0)
 	if _cam_center == Vector2.ZERO:
 		_cam_center = want_center
 		_cam_zoom = want_zoom
@@ -104,7 +114,18 @@ func _update_cars(delta: float) -> void:
 	for c in sim.order():
 		if c.dnf != "":
 			continue
-		if not c.started or c.finished or sim.is_pitting(c):
+		if not c.started:
+			# 출발 전 그리드: 화면에서 겹치지 않는 간격 + 좌우 엇갈림
+			var gap: float = maxf(T.L * 0.0035, 13.0 * _car_scale(false) / maxf(_s, 0.01))
+			var gd: float = -(floor(c.grid / 2.0) + 1.0) * gap * 1.25 - float(c.grid % 2) * gap * 0.55
+			var dv = gd
+			if c.start_t > 0.0:
+				dv = gd * (1.0 - clampf(sim.clock / c.start_t, 0.0, 1.0))
+			var ha: float = T.head_at_dist(dv)
+			var lat: float = TRACK_W * 0.22 * (1.0 if c.grid % 2 == 0 else -1.0)
+			targets[c.id] = [T.point_at_dist(dv) + Vector2(-sin(ha), cos(ha)) * lat, ha]
+			continue
+		if c.finished or sim.is_pitting(c):
 			var pa: Array = sim.car_pos_angle(c)
 			targets[c.id] = [pa[0], pa[1]]
 			continue
@@ -138,10 +159,14 @@ func _update_effects() -> void:
 		if c.dnf == "" and c.started and not sim.sc and _last_pos.has(c.id) and pos < _last_pos[c.id]:
 			if (c.mine or pos <= 3) and _smooth.has(c.id) and not sim.is_pitting(c):
 				_popups.append({"id": c.id, "text": "▲ P%d" % pos, "col": GREEN if c.mine else Color.WHITE, "t": _now})
+				if c.mine:
+					_flash[c.id] = _now
+					cue.emit("pass")
 		_last_pos[c.id] = pos
 		if c.mine and c.radio != "" and _last_radio.get(c.id, "") != c.radio:
 			_last_radio[c.id] = c.radio
 			_radio_shown[c.id] = _now
+			cue.emit("radio")
 	if sim.fastest_id >= 0 and sim.fastest_id != _last_fastest:
 		_last_fastest = sim.fastest_id
 		if sim.leader_lap >= 2:
@@ -151,6 +176,30 @@ func _update_effects() -> void:
 		if _now - p["t"] < 2.2:
 			keep.append(p)
 	_popups = keep
+	# 차고 정차 감지: 목표 위치가 자기 차고 지점과 같으면 정차 중
+	var T = sim.T
+	for c in sim.cars:
+		var stopped := false
+		if c.dnf == "" and sim.is_pitting(c):
+			var sp: Array = T.pit_lane_point(sim._stall_u(c.stall_idx))
+			var tg: Array = sim.car_pos_angle(c)
+			stopped = (tg[0] - sp[0]).length() < 0.8
+		if stopped:
+			if not _stop_t.has(c.id):
+				_stop_t[c.id] = sim.clock
+				if c.mine:
+					cue.emit("gun")
+		else:
+			_stop_t.erase(c.id)
+		# 체커기
+		if c.finished and not _fin_seen.has(c.id):
+			_fin_seen[c.id] = true
+			if c.mine and _smooth.has(c.id):
+				var fp = sim.order().find(c) + 1
+				_popups.append({"id": c.id, "text": "🏁 P%d" % fp, "col": AMBER, "t": _now})
+	if sim.finishing and not _was_finishing:
+		_was_finishing = true
+		cue.emit("flag")
 	# 레이스 컨트롤 메시지 → 상단 배너
 	if not sim.radio_log.is_empty():
 		var top = sim.radio_log[0]
@@ -192,6 +241,8 @@ func _draw() -> void:
 				continue
 			var sp: Dictionary = _smooth[c.id]
 			_draw_car(_X(sp["p"]), sp["a"], c, night)
+	_draw_crews()
+	_draw_flashes()
 	_draw_my_labels(font)
 	_draw_safety_car(font)
 	_draw_popups(font)
@@ -200,6 +251,7 @@ func _draw() -> void:
 	if wet > 0.04:
 		_draw_rain(wet)
 	_draw_banner(font)
+	_draw_checkered(font)
 	_draw_lights(font)
 
 
@@ -447,6 +499,7 @@ func _draw_spray(p: Vector2, ang: float, wet: float) -> void:
 
 
 func _draw_my_labels(font) -> void:
+	var shown_txt := ""
 	for c in sim.my_cars():
 		if not _smooth.has(c.id):
 			continue
@@ -463,7 +516,8 @@ func _draw_my_labels(font) -> void:
 		draw_string_outline(font, lp, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, 4, Color(0, 0, 0, 0.7))
 		draw_string(font, lp, tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, AMBER)
 		# 무전 말풍선 (4초)
-		if _radio_shown.has(c.id) and _now - _radio_shown[c.id] < 4.0 and c.radio != "":
+		if _radio_shown.has(c.id) and _now - _radio_shown[c.id] < 4.0 and c.radio != "" and c.radio != shown_txt:
+			shown_txt = c.radio
 			var a := clampf((4.0 - (_now - _radio_shown[c.id])) / 0.6, 0.0, 1.0)
 			var txt: String = c.radio
 			if txt.length() > 26:
@@ -567,3 +621,68 @@ func _draw_lights(font) -> void:
 		var tsz: Vector2 = font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52)
 		draw_string_outline(font, Vector2(size.x / 2 - tsz.x / 2, origin.y + r * 4.4), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, 6, Color(0, 0, 0, 0.7 * a))
 		draw_string(font, Vector2(size.x / 2 - tsz.x / 2, origin.y + r * 4.4), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, Color(GREEN, a))
+
+
+# ═════════ 피트 작업: 크루 6명(휠 4·잭 2)이 붙어 타이어를 교체 ═════════
+func _draw_crews() -> void:
+	for c in sim.cars:
+		if not _stop_t.has(c.id) or not _smooth.has(c.id):
+			continue
+		var e: float = sim.clock - _stop_t[c.id]
+		var sp: Dictionary = _smooth[c.id]
+		var sc := _car_scale(c.mine)
+		draw_set_transform(_X(sp["p"]), sp["a"], Vector2(sc, sc))
+		var come := clampf(e / 0.35, 0.0, 1.0)
+		var crew: Color = c.rim
+		var spots := [Vector2(4.2, -7.6), Vector2(4.2, 7.6), Vector2(-4.0, -7.8), Vector2(-4.0, 7.8)]
+		for w in spots:
+			var stand: Vector2 = w * lerpf(1.9, 1.0, come)
+			draw_circle(stand, 1.5, crew)
+			draw_circle(stand, 1.5, Color(0, 0, 0, 0.5), false, 0.4)
+			# 헌 타이어 빼기(0.5~1.2) → 새 타이어 끼우기(1.2~1.9)
+			var wheel: Vector2 = Vector2(w.x, signf(w.y) * 3.9)
+			if e > 0.5 and e < 1.2:
+				var k := (e - 0.5) / 0.7
+				draw_rect(Rect2(wheel.lerp(wheel + Vector2(0, signf(w.y) * 6.0), k) - Vector2(1.6, 0.9), Vector2(3.2, 1.8)), Color("#2b2f36"))
+			elif e >= 1.2 and e < 1.9:
+				var k2 := (e - 1.2) / 0.7
+				draw_rect(Rect2((wheel + Vector2(0, signf(w.y) * 6.0)).lerp(wheel, k2) - Vector2(1.6, 0.9), Vector2(3.2, 1.8)), Color(sim.TYRE_HEX[c.comp]))
+		# 앞·뒤 잭
+		draw_circle(Vector2(lerpf(18.0, 10.5, come), 0), 1.5, crew)
+		draw_circle(Vector2(lerpf(-18.0, -10.5, come), 0), 1.5, crew)
+		# 진행 링 (휠건 작업 약 2초)
+		var frac := clampf(e / 2.1, 0.0, 1.0)
+		var ring := GREEN if frac >= 1.0 else AMBER
+		draw_arc(Vector2.ZERO, 12.5, -PI / 2, -PI / 2 + TAU * frac, 28, ring, 1.2, true)
+		draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+func _draw_flashes() -> void:
+	for id in _flash.keys():
+		var age: float = _now - _flash[id]
+		if age > 0.9 or not _smooth.has(id):
+			_flash.erase(id)
+			continue
+		var r := (10.0 + age * 26.0) * _car_scale(true)
+		draw_arc(_X(_smooth[id]["p"]), r, 0, TAU, 32, Color(GREEN, 0.9 * (1.0 - age / 0.9)), 2.5, true)
+
+
+func _draw_checkered(font) -> void:
+	# 선두가 체커기를 받은 뒤: 출발선 옆에서 체커기가 흔들리고, 화면 오른쪽 위에 표시
+	if not sim.finishing:
+		return
+	var T = sim.T
+	var base := _X(T.pts[0] + T.nrm[0] * (-float(T.inward) * TRACK_W * 1.6))
+	var cell := clampf(_s * 2.2, 3.0, 7.0)
+	for i in 6:
+		for j in 4:
+			var wob := sin(_now * 7.0 + i * 0.7) * cell * 0.35
+			var col := Color.WHITE if (i + j) % 2 == 0 else Color("#0b0f14")
+			draw_rect(Rect2(base + Vector2(i * cell, j * cell + wob - cell * 4), Vector2(cell, cell)), col)
+	draw_line(base + Vector2(0, -cell * 4), base + Vector2(0, cell * 3), Color("#9aa4b2"), 1.5)
+	var t := "🏁 체커기"
+	var tsz: Vector2 = font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+	var box := Rect2(Vector2(size.x - tsz.x - 28, 10), tsz + Vector2(16, 12))
+	draw_rect(box, Color(0.05, 0.06, 0.08, 0.85))
+	draw_rect(box, Color.WHITE, false, 1.2)
+	draw_string(font, box.position + Vector2(8, tsz.y + 2), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)

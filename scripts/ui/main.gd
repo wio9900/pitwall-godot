@@ -4,6 +4,7 @@ extends Control
 
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
+const SfxS = preload("res://scripts/ui/sfx.gd")
 const DB = preload("res://scripts/data/game_db.gd")
 
 const BG := Color("#0b0f14")
@@ -43,6 +44,8 @@ var result_box: Control
 var result_text: RichTextLabel
 var speed_btns: Array = []
 var cam_btns: Array = []
+var sfx
+var mute_btn: Button
 # 반응형 배치: 가로 화면(PC·가로 폰) / 세로 화면(세로 폰)
 var hud_top: Control
 var panels_box: Control
@@ -369,8 +372,16 @@ func _build_race_ui() -> void:
 		b.pressed.connect(_set_cam.bind(i))
 		sp.add_child(b)
 		cam_btns.append(b)
+	sp.add_child(VSeparator.new())
+	mute_btn = _btn("소리 켜짐", 16)
+	mute_btn.toggle_mode = true
+	mute_btn.pressed.connect(_on_mute)
+	sp.add_child(mute_btn)
 	# 트랙
+	sfx = SfxS.new()
+	add_child(sfx)
 	race_view = RaceViewS.new()
+	race_view.cue.connect(func(n): sfx.play(n))
 	race_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	race_view.size_flags_stretch_ratio = 1.6
 	race_view.clip_contents = true
@@ -502,7 +513,16 @@ func _on_ers(m: String, slot: int) -> void:
 # ═════════ 진행 ═════════
 func _process(delta: float) -> void:
 	if sim == null or not race_box.visible:
+		if sfx != null:
+			sfx.set_engine(0.0)
 		return
+	# 배경 엔진음: 출발 대기 중엔 공회전, 주행 중엔 배속에 따라
+	var lvl = 0.0
+	if starting:
+		lvl = 0.25
+	elif speed_x > 0 and not sim.done:
+		lvl = 0.45 + 0.1 * log(float(speed_x)) / log(2.0)
+	sfx.set_engine(lvl)
 	if starting:
 		_update_start(delta)
 	elif speed_x > 0 and not sim.done:
@@ -521,12 +541,19 @@ func _update_start(delta: float) -> void:
 	if start_t < start_hold:
 		if n != race_view.lights:
 			race_view.lights = n
+			sfx.play("beep")
 			top_label.text = "[b]%s[/b]  [color=#ef4444]스타트 시그널 점등 중… (%d/5)[/color]" % [sim.CIRC["name"], n]
 		return
 	starting = false
 	race_view.lights = -1
 	race_view.lights_out_t = race_view.now()
+	sfx.play("go")
 	race_view.show_banner("소등! 레이스 시작", "green")
+
+
+func _on_mute() -> void:
+	sfx.muted = mute_btn.button_pressed
+	mute_btn.text = "소리 꺼짐" if sfx.muted else "소리 켜짐"
 
 
 func _tyre_bb(comp: String) -> String:
@@ -647,10 +674,14 @@ func _refresh_radio() -> void:
 
 # ═════════ 결과 ═════════
 func _build_result() -> void:
+	var dim = ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(dim)
 	var cc = CenterContainer.new()
 	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(cc)
-	result_box = cc
+	dim.add_child(cc)
+	result_box = dim
 	var pc = PanelContainer.new()
 	pc.custom_minimum_size = Vector2(660, 680)
 	result_panel = pc
