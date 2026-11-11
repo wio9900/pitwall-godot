@@ -27,6 +27,9 @@ func _start(i: int) -> void:
 	# 박스 버튼·지시 버튼 경로도 한 번씩 지나가게
 	main._on_pace("attack", 0)
 	main._on_ers("deploy", 1)
+	main._on_instr("defend", 0)
+	main._on_plan("B", 1)
+	main._on_auto(true, 1)
 	print("레이스 시작: %s %s (%dx%d) %s" % cfg)
 
 
@@ -75,6 +78,25 @@ func _process(_delta: float) -> bool:
 	main._open_hq()
 	for t in ["home", "rnd", "base", "staff", "spon", "league"]:
 		main.hq_view._on_tab(t)
-	main.CareerS.delete_save()
+	main._open_season()
+	main.CareerS.delete_save(main.career.save_slot)
+	# WEC 커리어: 인력 탭 FA 영입 · 라인업 버튼
+	main.new_series = "wec"
+	main.new_entry = "select"
+	main.new_team = 0
+	main._new_career()
+	main.hq_view._on_tab("staff")
+	main.hq_view._on_wec_target(1, 0)
+	main.hq_view._on_wec_hire(0)
+	main.hq_view._on_wec_starter(0, 2)
+	main.hq_view._on_wec_swap(1)
+	main.hq_view._on_tab("league")
+	main.hq_view._on_tab("home")
+	main.hq_view._on_diff("2")
+	var names: Array = []
+	for d in main.career.my_crew(0):
+		names.append(d["name"])
+	print("WEC 인력 탭 · 라인업: #1 차 %s · 난이도 %d" % [names, int(main.career.hq["difficulty"])])
+	main.CareerS.delete_save(main.career.save_slot)
 	print("UI 테스트 통과 (%d프레임)" % frames)
 	return true

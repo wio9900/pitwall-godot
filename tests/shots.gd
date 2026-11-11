@@ -9,6 +9,7 @@ var frames := 0
 var step := 0
 var wait := 0
 var shot_n := 0
+var help_btn
 
 
 func _initialize() -> void:
@@ -66,6 +67,21 @@ func _process(_delta: float) -> bool:
 				step = 3
 		3:
 			_shot("race_full")
+			main.race_view._rain_t = main.race_view._now - 0.5
+			main.race_view._celebrate(1)
+			wait = 20
+			step = 40
+		40:
+			_shot("fx_rain_win")
+			help_btn = main.KitS.help("레이스", main.HT.RACE)
+			main.add_child(help_btn)
+			help_btn.open()
+			wait = 4
+			step = 41
+		41:
+			_shot("help_race")
+			help_btn.close_help()
+			help_btn.queue_free()
 			main._on_box("H", 0)
 			main._set_cam(0)
 			step = 4
@@ -187,6 +203,22 @@ func _process(_delta: float) -> bool:
 			step = 25
 		25:
 			_shot("hq_after")
+			main.career._season_summary(1, 4.2)
+			main.career.hq["last_season"]["notes"] = ["💰 시즌 1 컨스트럭터 챔피언십 P1 상금 +4.20M (캡처 테스트용 가짜 결산)"]
+			main._open_season()
+			wait = 6
+			step = 42
+		42:
+			_shot("season_end")
+			main.new_series = "wec"
+			main.new_entry = "select"
+			main.new_team = 0
+			main._new_career()
+			main.hq_view._on_tab("staff")
+			wait = 3
+			step = 43
+		43:
+			_shot("hq_wec_staff")
 			main._show_menu()
 			main._on_mode("quick")
 			_race("lemans", "dry", 1280, 720, "wec")
@@ -218,6 +250,18 @@ func _process(_delta: float) -> bool:
 				step = 30
 		30:
 			_shot("wec_result")
+			root.size = Vector2i(904, 2316)
+			main._on_resize()
+			main._show_menu()
+			wait = 4
+			step = 31
+		31:
+			_shot("menu_fold_cover")
+			main._start_weekend_quick()
+			wait = 4
+			step = 32
+		32:
+			_shot("wk_fold_cover")
 			print("SHOTS DONE %d" % shot_n)
 			return true
 	return frames > 40000

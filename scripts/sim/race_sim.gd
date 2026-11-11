@@ -55,6 +55,11 @@ var rules := {"two_compounds": true, "wear_mult": 1.0} # 하위 클래스 최소
 var laps := 15
 var my_team := -1
 var cars: Array = []
+## 난이도: 0 쉬움 · 1 보통(원작 밸런스) · 2 어려움 · 3 전설. AI 차 랩타임 배율.
+const DIFF_PACE := [1.0065, 1.0, 0.9967, 0.9938]
+const DIFF_STRAT := [-0.12, 0.0, 0.05, 0.09]
+const DIFF_KO := ["쉬움", "보통", "어려움", "전설"]
+var difficulty: int = 1
 var true_mult: Dictionary = {"S": 1.0, "M": 1.0, "H": 1.0}
 
 # 레이스 상태
@@ -139,6 +144,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	CIRC = DB.circuits[circ_key]
 	series = CIRC.get("series", "f1")
 	min_drive = opts.get("min_drive", null)
+	difficulty = clampi(int(opts.get("difficulty", 1)), 0, DIFF_PACE.size() - 1)
 	rules = {"two_compounds": true, "wear_mult": 1.0}
 	if opts.has("rules"):
 		for k in opts["rules"]:
@@ -195,7 +201,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 			c.chassis = t["chassis"]
 			c.rel = t["rel"]
 			c.engine = float(t["engine_val"]) if t.has("engine_val") else float(engines.get(t["engine"], 0.86))
-			c.strategy = clampf(0.70 + 0.22 * (((c.aero + c.chassis) / 2.0 - 0.76) / 0.19), 0.66, 0.93)
+			c.strategy = clampf(0.70 + 0.22 * (((c.aero + c.chassis) / 2.0 - 0.76) / 0.19), 0.66, 0.93) + DIFF_STRAT[difficulty]
 			c.drivers = [d.duplicate()]
 			c.nerve = uni(0.5, 1.6)
 			apply_driver(c)
@@ -290,9 +296,10 @@ func apply_driver(c) -> void:
 
 # ═════════ 성능 모델 ═════════
 func car_factor(c) -> float:
+	var dm: float = 1.0 if c.mine else float(DIFF_PACE[difficulty])
 	if c.cls == "F1":
-		return 1.0 - K["car_scale"] * (c.aero * float(CIRC["wA"]) + c.engine * float(CIRC["wE"]) + c.chassis * float(CIRC["wC"]))
-	return float(CLASS_PACE.get(c.cls, 1.0)) * (1.0 - c.perf * BOP_K + c.bop)
+		return dm * (1.0 - K["car_scale"] * (c.aero * float(CIRC["wA"]) + c.engine * float(CIRC["wE"]) + c.chassis * float(CIRC["wC"])))
+	return dm * float(CLASS_PACE.get(c.cls, 1.0)) * (1.0 - c.perf * BOP_K + c.bop)
 
 
 func ideal_tyre(w: float) -> String:
@@ -883,7 +890,10 @@ func pit_decision(c) -> Variant:
 			c.stops_done += 1
 		return {"comp": comp, "tyres": true}
 	if c.mine:
-		return null
+		if c.plans_at != c.pits and c.lap - c.stint_start_lap >= 4 and SLICK.has(c.comp):
+			c.plans_at = c.pits
+			make_plans(c)
+		return _my_auto_decision(c, cur, left, want) if c.auto_plan else null
 	if rules.get("no_pits", false) and kind_of(c.comp) == want:
 		return null # F3·스프린트: 날씨가 바뀔 때만 피트
 	ai_replan(c)
@@ -1150,6 +1160,8 @@ func apply_pit(c) -> void:
 			acts.append(c.name + " 교대")
 		else:
 			c.stint_drv += 1
+	if c.mine and d["tyres"]:
+		make_plans(c)
 	if c.mine:
 		if d.get("forced", false):
 			say(c, "수리 끝. 다시 나갑니다")
@@ -1715,6 +1727,146 @@ func prepare_start() -> void:
 				c.used_set_pen = 0.0
 			else:
 				c.used_set_pen = 0.45
+	for c in my_cars():
+		make_plans(c)
+
+
+# ═════════ 내 차 전략 계획 (A/B 플랜 · 자동 피트) ═════════
+## 플레이어가 아는 마모율: 공칭값 (실제 배율은 모름). 스틴트를 3랩 이상 달렸으면 관측 마모로 보정.
+func my_rates(c) -> Dictionary:
+	var out := {}
+	for k in SLICK:
+		out[k] = float(COMP[k][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85 * c.tyre_deg_rate
+	var done_laps: int = c.lap - c.stint_start_lap
+	if done_laps >= 3 and SLICK.has(c.comp):
+		var obs: float = (c.wear - c.stint_start_wear) / float(done_laps)
+		var scl: float = clampf(obs / maxf(1e-4, float(out[c.comp])), 0.6, 1.7)
+		for k in out:
+			out[k] = float(out[k]) * scl
+	return out
+
+
+## 남은 랩 기준으로 계획 A(최적)와 B(스톱 수가 다른 차선책)를 다시 계산한다.
+func make_plans(c) -> void:
+	# 지금 고른 계획의 남은 스톱 수 (재계산해도 같은 스톱 수를 유지해서 B가 스톱을 계속 늘리지 않게)
+	var keep_n: int = c.plan["stops"].size() - c.stops_done if not c.plans.is_empty() else -1
+	var was: String = c.active_plan
+	c.plans = {}
+	c.plan["stops"] = c.plan["stops"].slice(0, c.stops_done)
+	if is_wec() or rules.get("no_pits", false) or wet > 0.05 or not SLICK.has(c.comp):
+		return
+	var left: int = laps - c.lap
+	if left < 3:
+		return
+	var max_st: int = 3 if left >= 12 else 2
+	var sets: Dictionary = {"S": 9, "M": 9, "H": 9}
+	if c.tyre_sets != null:
+		sets = {"S": int(c.tyre_sets["S"]), "M": int(c.tyre_sets["M"]), "H": int(c.tyre_sets["H"])}
+	var cands: Array = ai_optimize(left, c.comp, c.wear, my_rates(c), pit_loss() + 3.0, c.used, sets, max_st)
+	if cands.is_empty():
+		cands = ai_optimize(left, c.comp, c.wear, my_rates(c), pit_loss() + 3.0, c.used, {"S": 9, "M": 9, "H": 9}, max_st)
+	if cands.is_empty():
+		return
+	var a: Dictionary = cands[0]
+	var b: Variant = null
+	var keep_b: bool = was == "B" and keep_n >= 0
+	if keep_b:
+		# B를 쓰는 중이면 남은 스톱 수가 같은 계획 중 A가 아닌 최선 (스톱이 계속 늘지 않게)
+		for x in cands:
+			if x != a and x["cuts"].size() == keep_n:
+				b = x
+				break
+	if b == null and not keep_b:
+		for x in cands:
+			if x["cuts"].size() != a["cuts"].size():
+				b = x
+				break
+	if b == null and not keep_b and cands.size() > 1:
+		b = cands[1]
+	c.plans["A"] = _abs_plan(c, a)
+	if b != null:
+		c.plans["B"] = _abs_plan(c, b)
+	if not c.plans.has(c.active_plan):
+		c.active_plan = "A"
+	_use_plan(c)
+
+
+func _abs_plan(c, x: Dictionary) -> Dictionary:
+	var stops: Array = []
+	for i in x["cuts"].size():
+		stops.append({"lap": clampi(c.lap + int(x["cuts"][i]), c.lap + 1, laps - 1), "comp": x["seq"][i + 1]})
+	return {"stops": stops, "cost": float(x["cost"])}
+
+
+func _use_plan(c) -> void:
+	var p: Variant = c.plans.get(c.active_plan)
+	if p == null:
+		return
+	var done: Array = c.plan["stops"].slice(0, c.stops_done)
+	c.plan = {"start": c.plan.get("start", c.comp), "stops": done + p["stops"]}
+
+
+func set_plan(c, key: String) -> void:
+	if not c.plans.has(key):
+		return
+	c.active_plan = key
+	_use_plan(c)
+
+
+func set_auto(c, on: bool) -> void:
+	c.auto_plan = on
+	if on and c.plans.is_empty():
+		make_plans(c)
+	say(c, "자동 전략 켬: 계획 %s 대로 박스할게요" % c.active_plan if on else "자동 전략 끔: 박스는 직접 지시해 주세요")
+
+
+func set_instr(c, v: String) -> void:
+	c.instr = v
+
+
+## 계획 요약 문자열 (UI용): "L9 H → L15 M"
+func plan_text(c, key: String) -> String:
+	var p: Variant = c.plans.get(key)
+	if p == null:
+		return ""
+	if p["stops"].is_empty():
+		return "노스톱"
+	var parts: PackedStringArray = []
+	for st in p["stops"]:
+		parts.append("L%d %s" % [int(st["lap"]), st["comp"]])
+	return " → ".join(parts)
+
+
+func _my_auto_decision(c, cur: int, left: int, want: String) -> Variant:
+	if c.pit_req != "" or c.boxing != null:
+		return null
+	var have = kind_of(c.comp)
+	var ns: Variant = next_stop(c)
+	if want != have:
+		var nw: String = want
+		if want == "slick":
+			nw = String(ns["comp"]) if ns != null else ("M" if left > 8 else "S")
+		var lose: float = weather_pen(c.comp, wet) - weather_pen(nw, wet)
+		if lose * minf(left, 5) > pit_loss():
+			c.crew_out = true
+			say(c, "자동 전략: 노면이 바뀌었어요 → %s 로 박스" % TYRE_KO[nw])
+			return {"comp": nw, "tyres": true}
+		return null
+	if rules.get("no_pits", false) or not SLICK.has(c.comp):
+		return null
+	if ns == null:
+		if need_two() and left <= 3 and c.used_slicks() < 2:
+			c.crew_out = true
+			var alt := _alt_slick(c.comp)
+			say(c, "자동 전략: 두 번째 컴파운드 의무 → %s 로 박스" % TYRE_KO[alt])
+			return {"comp": alt, "tyres": true}
+		return null
+	if cur >= int(ns["lap"]) or (sc and int(ns["lap"]) - cur <= 3 and c.wear >= 0.3):
+		c.stops_done += 1
+		c.crew_out = true
+		say(c, "자동 전략 %s: 박스 → %s%s" % [c.active_plan, TYRE_KO[ns["comp"]], " (SC 활용)" if sc and cur < int(ns["lap"]) else ""])
+		return {"comp": ns["comp"], "tyres": true}
+	return null
 
 
 ## WEC 엔트리: 하이퍼카(HY) 팀별 1~2대 + LMGT3(GT) 9팀 × 2대. 팀·크루는 data/wec.json (HTML WEC_FIELD 그대로).
@@ -1750,7 +1902,7 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c.eng_eff = float(eng["eff"])
 		c.rel = clampf(float(t["rel"]) + float(eng["relMod"]), 0.75, 0.98)
 		c.crew = float(t["crew"])
-		c.strategy = float(t["strategy"])
+		c.strategy = float(t["strategy"]) + DIFF_STRAT[difficulty]
 		c.drivers = e["crew"].duplicate(true)
 		c.fuel = TANK
 		c.bop = uni(-0.004, 0.004)
@@ -1791,7 +1943,7 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c2.perf = float(t2["perf"])
 		c2.rel = float(t2["rel"])
 		c2.crew = float(t2["crew"])
-		c2.strategy = float(t2["strategy"])
+		c2.strategy = float(t2["strategy"]) + DIFF_STRAT[difficulty]
 		c2.drivers = e["crew"].duplicate(true)
 		c2.fuel = TANK
 		c2.bop = uni(-0.004, 0.004)

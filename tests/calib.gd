@@ -8,9 +8,9 @@ const DB = preload("res://scripts/data/game_db.gd")
 const CIRCS = ["melbourne", "bahrain", "monaco", "silverstone", "monza", "suzuka", "singapore", "interlagos"]
 
 
-func _race(team: int, mode: String, key: String, seed_v: int) -> Dictionary:
+func _race(team: int, mode: String, key: String, seed_v: int, diff: int = 1) -> Dictionary:
 	var sim = RaceSimS.new()
-	sim.new_race(key, team if mode != "ai" else -1, 15, "auto", ["M", "M"], seed_v)
+	sim.new_race(key, team if mode != "ai" else -1, 15, "auto", ["M", "M"], seed_v, {"difficulty": diff})
 	if mode == "bot_wk":
 		var wk = WeekendS.new()
 		wk.setup(sim, 0)
@@ -54,6 +54,16 @@ func _init() -> void:
 					tot_pts += r["pts"].get(team, 0)
 					n += 1
 			print("%s %s: 평균 순위 %.1f · 레이스당 포인트 %.1f (%d판)" % [DB.teams[team]["name"], mode, tot_pos / n, tot_pts / n, n])
+	# 난이도별: 윌리엄스 봇(주말 포함) 평균 순위
+	for diff in RaceSimS.DIFF_KO.size():
+		var tp = 0.0
+		var nn = 0
+		for ci in CIRCS.size():
+			for s in 2:
+				var r2 = _race(6, "bot_wk", CIRCS[ci], 9500 + ci * 10 + s, diff)
+				tp += r2["pos"].get(6, 22.0)
+				nn += 1
+		print("난이도 %s: 윌리엄스 봇(주말) 평균 순위 %.1f (%d판)" % [RaceSimS.DIFF_KO[diff], tp / nn, nn])
 	# 팀별 레이스당 포인트 (AI만)
 	var agg := {}
 	var n2 = 0

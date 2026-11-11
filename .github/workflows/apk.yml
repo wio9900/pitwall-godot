@@ -1,7 +1,6 @@
 name: apk
+# 사용자가 요청할 때만 수동 실행 (gh api -X POST repos/wio9900/pitwall-godot/actions/workflows/apk.yml/dispatches -f ref=main)
 on:
-  push:
-    branches: [main, "build/**"]
   workflow_dispatch:
 permissions:
   contents: write

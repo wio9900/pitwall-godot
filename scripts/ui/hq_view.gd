@@ -4,10 +4,13 @@ extends Control
 
 signal go_weekend
 signal go_menu
+signal go_season
 
 const K = preload("res://scripts/ui/kit.gd")
 const DB = preload("res://scripts/data/game_db.gd")
 const CS = preload("res://scripts/sim/career.gd")
+const RS = preload("res://scripts/sim/race_sim.gd")
+const HT = preload("res://scripts/ui/help_text.gd")
 
 const TABS := [["home", "개요"], ["rnd", "개발"], ["base", "설비"], ["staff", "인력"], ["spon", "스폰서"], ["league", "리그"]]
 const REGION_KO := {"uk": "영국 (공력)", "italy": "이탈리아 (엔진)", "germany": "독일 (섀시·내구)", "japan": "일본 (타이어)"}
@@ -16,6 +19,7 @@ const MISSION_KO := {"none": "약속 안 함", "both_finish": "두 대 모두 �
 
 var cr
 var tab := "home"
+var wec_target: Array = [0, 2]  # WEC 영입 시 바꿀 자리 [차, 순번]
 var _head: VBoxContainer
 var _tabs_row: HBoxContainer
 var _body: VBoxContainer
@@ -101,9 +105,17 @@ func _h() -> Dictionary:
 func _render_head() -> void:
 	K.clear(_head)
 	var h := _h()
+	var hr = K.hbox(6)
+	_head.add_child(hr)
 	var r = K.rtl(20)
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	r.text = "[color=%s]■[/color] [b]%s[/b] [color=#8b98a5]HQ · %s · 시즌 %d · R%d/%d[/color]" % [h["team_color"], h["team_name"], cr.tier_meta()["short"], int(h["season"]), cr.round_idx() + 1, cr.cal_len()]
-	_head.add_child(r)
+	hr.add_child(r)
+	var tab_ko: String = "개요"
+	for tt in TABS:
+		if tt[0] == tab:
+			tab_ko = tt[1]
+	hr.add_child(K.help("HQ · " + tab_ko, HT.HQ.get(tab, "")))
 	var cap: float = h["cost_cap_limit"]
 	var spent: float = h["spent_cap"]
 	var proj: float = cr.projected_spend()
@@ -185,6 +197,17 @@ func _tab_home() -> void:
 			break
 		nt += "• %s\n" % s
 	_txt(c5, nt, 13)
+	var c6 = K.card(_body, "난이도 — AI 차의 속도와 전략 판단")
+	var d_items: Array = []
+	for di in RS.DIFF_KO.size():
+		d_items.append([str(di), RS.DIFF_KO[di]])
+	K.seg(c6, d_items, str(int(h.get("difficulty", 1))), _on_diff, 14)
+	_txt(c6, "[color=#8b98a5]보통이 원작 밸런스예요. 어려움·전설은 AI가 더 빠르고 피트 타이밍도 날카로워요. 언제든 바꿀 수 있어요.[/color]", 12)
+
+
+func _on_diff(v) -> void:
+	_h()["difficulty"] = int(v)
+	_act(true)
 
 
 func _min_drive_txt() -> String:
@@ -384,10 +407,10 @@ func _on_fac(k) -> void:
 func _tab_staff() -> void:
 	var h := _h()
 	var pre: bool = cr.is_preseason()
-	_txt(_body, ("[color=#22c55e]🟢 이적 시장 열림 (시즌 개막 전)[/color] — 자금·평판에 맞춰 엔지니어와 드라이버를 영입하세요." if pre else "[color=#ffc53d]🔒 시즌 중: 외부 영입은 다음 시즌 개막 전에만 가능해요. 리저브·유망주 교체는 언제든 가능해요.[/color]"), 14)
 	if cr.is_wec():
 		_staff_wec()
 		return
+	_txt(_body, ("[color=#22c55e]🟢 이적 시장 열림 (시즌 개막 전)[/color] — 자금·평판에 맞춰 엔지니어와 드라이버를 영입하세요." if pre else "[color=#ffc53d]🔒 시즌 중: 외부 영입은 다음 시즌 개막 전에만 가능해요. 리저브·유망주 교체는 언제든 가능해요.[/color]"), 14)
 	var c1 = K.card(_body, "주전 드라이버")
 	for slot in 2:
 		var d: Dictionary = cr.my_driver(slot)
@@ -450,14 +473,31 @@ func _tab_staff() -> void:
 func _staff_wec() -> void:
 	var h := _h()
 	var c1 = K.card(_body, "드라이버 라인업 (차당 3명 · 등급제)")
-	_txt(c1, "[color=#8b98a5]등급: 플래티넘 > 골드 > 실버 > 브론즈. %s 한 드라이버가 세 스틴트 이상 연속으로 타면 피로로 실수가 늘어요.[/color]" % _min_drive_txt(), 13)
+	_txt(c1, "[color=#8b98a5]등급: 플래티넘 > 골드 > 실버 > 브론즈. %s. 한 드라이버가 세 스틴트 이상 연속으로 타면 피로로 실수가 늘어요. 맨 위 드라이버가 선발로 출발해요.[/color]" % _min_drive_txt(), 13)
 	for slot in 2:
-		var t := "[b]#%d[/b]  " % (slot + 1)
-		for d in cr.my_crew(slot):
-			var g: String = d.get("grade", "-")
-			var gc: String = {"P": "#a855f7", "G": "#ffc53d", "S": "#cbd5e1", "B": "#c2410c"}.get(g, "#8b98a5")
-			t += "[color=%s][%s][/color] %s (속도 %d)   " % [gc, g, d["name"], int(float(d["speed"]) * 100)]
-		_txt(c1, t, 14)
+		_txt(c1, "[b]#%d 차[/b]" % (slot + 1), 15)
+		var crew: Array = cr.my_crew(slot)
+		for i in crew.size():
+			var d: Dictionary = crew[i]
+			var sel: bool = wec_target[0] == slot and wec_target[1] == i
+			var btns: Array = [
+				K.sbtn("선발" if i > 0 else "선발 ✓", _on_wec_starter.bind(slot, i), i > 0),
+				K.sbtn("↔ #%d" % (2 - slot), _on_wec_swap.bind(i), true),
+				K.sbtn("교체 대상 ✓" if sel else "교체 대상", _on_wec_target.bind(slot, i), not sel, K.AMBER),
+			]
+			K.row(c1, "%s%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]" % ["▶ " if sel else "", _grade_tag(d.get("grade", "-")), d["name"], int(d.get("age", 28)), int(float(d["speed"]) * 100), int(float(d.get("cons", 0.75)) * 100), int(float(d.get("tyreMgmt", 0.75)) * 100), int(float(d.get("wet", 0.75)) * 100), cr.driver_salary(d)], btns, 13)
+	# FA 시장
+	var tgt: Array = cr.my_crew(wec_target[0])
+	var tname: String = tgt[wec_target[1]]["name"] if wec_target[1] < tgt.size() else "-"
+	var cm = K.card(_body, "드라이버 FA 시장 → #%d 차 %s 자리에 영입" % [wec_target[0] + 1, tname], K.AMBER)
+	_txt(cm, "[color=#8b98a5]위 라인업에서 '교체 대상'을 고른 뒤 영입하세요. 내보낸 드라이버는 FA 시장으로 가요. 시장 명단은 시즌 개막 때 새로 바뀌어요. 연봉은 차마다 가장 비싼 드라이버 기준으로 나가요.[/color]", 12)
+	var mk: Array = cr.wec_market()
+	for i in mk.size():
+		var fa: Dictionary = mk[i]
+		var why: String = cr.wec_hire_block(i, wec_target[0], wec_target[1])
+		var lab: String = ("%.2fM 영입" % float(fa["cost"])) if why == "" else why
+		K.row(cm, "%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]" % [_grade_tag(fa["grade"]), fa["name"], int(fa["age"]), int(float(fa["speed"]) * 100), int(float(fa["cons"]) * 100), int(float(fa["tyreMgmt"]) * 100), int(float(fa["wet"]) * 100), float(fa["salary"])],
+			[K.sbtn(lab, _on_wec_hire.bind(i), why == "", K.GOOD)], 13)
 	var c2 = K.card(_body, "수석 엔지니어")
 	var ce: Dictionary = h["chief"]
 	_txt(c2, "공력 [b]%s[/b] [%s] · 파워 [b]%s[/b] [%s] · 섀시 [b]%s[/b] [%s]" % [ce["aero"]["name"], ce["aero"]["tier"], ce["power"]["name"], ce["power"]["tier"], ce["chassis"]["name"], ce["chassis"]["tier"]], 14)
@@ -472,6 +512,28 @@ func _staff_wec() -> void:
 		elif float(h["pop"]) < float(en["reqPop"]):
 			lab = "평판 %d%% 필요" % int(float(en["reqPop"]) * 100)
 		K.row(c2, "[%s] [b]%s[/b] %s" % [en["tier"], en["name"], en["deptKo"]], [K.sbtn(lab, _on_hire_eng.bind(i), cr.can_hire_engineer(i), K.GOOD)], 13)
+
+
+func _grade_tag(g: String) -> String:
+	var gc: String = {"P": "#a855f7", "G": "#ffc53d", "S": "#cbd5e1", "B": "#c2410c"}.get(g, "#8b98a5")
+	return "[color=%s][%s][/color]" % [gc, g]
+
+
+func _on_wec_starter(slot, i) -> void:
+	_act(cr.wec_set_starter(slot, i))
+
+
+func _on_wec_swap(i) -> void:
+	_act(cr.wec_swap_cars(i))
+
+
+func _on_wec_target(slot, i) -> void:
+	wec_target = [slot, i]
+	refresh()
+
+
+func _on_wec_hire(i) -> void:
+	_act(cr.hire_wec(i, wec_target[0], wec_target[1]))
 
 
 func _on_swap(slot) -> void:
@@ -581,11 +643,27 @@ func _tab_league() -> void:
 			var b = K.btn(lab, 16, _on_tier_up)
 			b.disabled = not cr.can_tier_up()
 			c0.add_child(b)
+	# 진행 중인 시즌 드라이버 순위
+	var cd = K.card(_body, "시즌 %d 드라이버 순위" % int(h["season"]))
+	var td := ""
+	var di := 0
+	for r in cr.driver_standings():
+		di += 1
+		if di > 10:
+			break
+		td += "P%-2d [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [b]%d[/b]\n" % [di, r["color"], "#ffc53d" if r["mine"] else "#e6edf3", r["name"], r["team"], int(r["pts"])]
+	_txt(cd, td if td != "" else "[color=#8b98a5]아직 레이스가 없어요.[/color]", 14)
 	var c1 = K.card(_body, "지난 시즌 기록")
 	var t2 := ""
 	for s in h["season_log"]:
-		t2 += "시즌 %d · %s · P%d · 자금 %.1fM · 캡 %.1f/%.1fM\n" % [int(s["season"]), cr.tier_meta(int(s.get("tier", 3)))["short"], int(s["rank"]), float(s["cash"]), float(s["spent"]), float(s["cap"])]
+		t2 += "시즌 %d · %s · P%d · %d점 · 우승 %d · 자금 %.1fM · 캡 %.1f/%.1fM\n" % [int(s["season"]), cr.tier_meta(int(s.get("tier", 3)))["short"], int(s["rank"]), int(s.get("pts", 0)), int(s.get("wins", 0)), float(s["cash"]), float(s["spent"]), float(s["cap"])]
 	_txt(c1, t2 if t2 != "" else "[color=#8b98a5]아직 끝난 시즌이 없어요.[/color]", 14)
+	if h.has("last_season"):
+		c1.add_child(K.btn("🏆 지난 시즌 결산 · 트로피 진열장 보기", 15, _on_season))
+
+
+func _on_season() -> void:
+	go_season.emit()
 
 
 func _on_tier_up() -> void:

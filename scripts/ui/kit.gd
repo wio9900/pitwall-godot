@@ -1,6 +1,7 @@
 extends RefCounted
 ## 화면 부품 공통 도구 (버튼·라벨·서식 텍스트·카드). 모든 화면이 같은 모양을 쓰도록 한곳에 모았다.
 
+const HelpS = preload("res://scripts/ui/help.gd")
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
 const PANEL2 := Color("#1b232d")
@@ -170,3 +171,10 @@ static func scroll_v(parent: Control) -> VBoxContainer:
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(v)
 	return v
+
+
+## "?" 도움말 버튼 (누르면 설명 창)
+static func help(title: String, body_bb: String) -> Button:
+	var b = HelpS.new()
+	b.setup(title, body_bb)
+	return b

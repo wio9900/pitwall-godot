@@ -17,6 +17,7 @@
 - UI는 코드로 생성한다(.tscn은 최소한으로).
 
 ## 검증
+- APK 는 사용자가 요청할 때만 만든다 (.github/workflows/apk.yml 은 수동 실행 전용).
 - 푸시하면 GitHub Actions(.github/workflows/ci.yml)가 Godot 4.7.2로 문법 검사 · sim/주말/커리어/UI 테스트 · 밸런스 점검 · 화면 캡처를 돌린다. 캡처는 `ci-shots` 브랜치에 jpg로 올라간다 (`git fetch origin ci-shots` 후 확인).
 - 로컬: `godot --headless --path . --script res://tests/sim_smoke.gd` 등.
 - 밸런스 변경 시 여러 서킷·여러 시드로 스톱 분포·팀별 순위를 비교한다.
@@ -28,5 +29,5 @@
 4. 스폰서 개편 (완료: scripts/sim/career.gd 스폰서 절)
 5. 하위 리그 (완료): F2 스프린트+피처, F3 피트 없음·성장 ×2, WEC LMGT3(브론즈 25%)·LMP2(실버 20%)
 6. WEC 모드 (완료): race_sim.gd 의 is_wec() 분기, data/wec.json · circuits_wec.json
-- (다음) 난이도·AI 전략 보정: 단순 봇(마모 58%에 하드로 박스)이 AI 팀보다 레이스당 약 2계단, 예선까지 하면 약 3.5계단 앞선다 (tests/calib.gd). WEC 커리어 봇도 쉽게 우승권.
-- (다음) WEC 드라이버 시장·라인업 교체, F2/F3 실제 로스터 드라이버 능력치 보강
+7. 편의·콘텐츠 (완료): 난이도 4단계(race_sim DIFF_PACE/DIFF_STRAT, 보통 = 원작), 레이스 지시·전략 A/B·자동 피트(make_plans/_my_auto_decision), 인터·웻 박스 버튼, WEC FA 시장·라인업, F2/F3 로스터 능력치(이름 해시), 시즌 결산 화면(season_view.gd·트로피), 저장 슬롯 3개(1번 = 예전 파일), "?" 도움말(help.gd·help_text.gd), 비·SC·우승 연출
+- 참고: 보통 난이도에서 단순 봇이 AI보다 레이스당 약 2계단(예선 포함 3.5계단) 앞선다 (tests/calib.gd 난이도별 출력으로 비교).

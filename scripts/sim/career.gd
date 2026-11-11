@@ -101,6 +101,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 		"contracts": [], "offers": [], "pay_pool": [], "pay_drivers": {},
 		"politics": {},
 		"laps": 15,
+		"difficulty": clampi(int(opts.get("difficulty", 1)), 0, 3),
 	}
 	# 팀·엔진은 커리어마다 복사해서 바꿔 쓴다 (AI 개발·드라이버 교체가 원본 데이터를 건드리지 않게)
 	if series == "wec":
@@ -192,6 +193,9 @@ func _create_wec_team(opts: Dictionary) -> void:
 func my_crew(slot: int) -> Array:
 	for e in hq.get("field", []):
 		if int(e["ti"]) == my_team() and int(e["k"]) == slot:
+			for d in e["crew"]:
+				if not d.has("age"):
+					d["age"] = 22 + int(16.0 * _hash01(String(d["name"]), 7))
 			return e["crew"]
 	return []
 
@@ -501,10 +505,13 @@ func race_teams() -> Array:
 		var t: Dictionary = r.duplicate(true)
 		t["engine_val"] = spec_engine()
 		for d in t["drivers"]:
-			d["tyreMgmt"] = d.get("tyreMgmt", 0.80)
-			d["aggr"] = d.get("aggr", 0.60)
-			d["def"] = d.get("def", 0.78)
-			d["wet"] = d.get("wet", 0.80)
+			# 실제 로스터는 속도·안정성만 있어서 나머지 능력치를 이름 기반 고정 난수로 채운다 (평균은 기존 기본값과 같게)
+			var nm: String = d["name"]
+			d["tyreMgmt"] = d.get("tyreMgmt", 0.72 + 0.16 * _hash01(nm, 2))
+			d["aggr"] = d.get("aggr", 0.45 + 0.30 * _hash01(nm, 3))
+			d["def"] = d.get("def", 0.70 + 0.16 * _hash01(nm, 4))
+			d["wet"] = d.get("wet", 0.70 + 0.20 * _hash01(nm, 5))
+			d["age"] = d.get("age", 18 + int(5.0 * _hash01(nm, 6)) + (2 if tier() == 2 else 0))
 		out.append(t)
 	var me: Dictionary = my_team_dict().duplicate(true)
 	me["engine_val"] = spec_engine()
@@ -547,6 +554,12 @@ func _roster_crew(names: Array) -> Array:
 
 ## 레이스 시뮬레이션에 넘길 옵션 (팀·엔진·내 차 보정·WEC 엔트리)
 func race_opts(sprint: bool = false) -> Dictionary:
+	var o: Dictionary = _race_opts(sprint)
+	o["difficulty"] = int(hq.get("difficulty", 1))
+	return o
+
+
+func _race_opts(sprint: bool) -> Dictionary:
 	if not is_wec():
 		return {"teams": race_teams(), "engines": hq["engines"], "my_mods": my_mods(), "rules": race_rules(sprint)}
 	if not is_spec_tier():
@@ -1313,9 +1326,128 @@ func _mission_ok(k: String, mine: Array, classified: Array) -> bool:
 ## 내 드라이버 (F1: 팀 드라이버 / WEC: 각 차의 첫 번째 크루)
 func salary_driver(slot: int) -> Dictionary:
 	if is_wec():
-		var cr: Array = my_crew(slot)
-		return cr[0] if not cr.is_empty() else {"name": "-", "speed": 0.8}
+		# 크루 중 연봉이 가장 높은 드라이버 기준 (영입한 플래티넘이 있으면 그만큼 비싸진다)
+		var best: Dictionary = {"name": "-", "speed": 0.8}
+		var bs := -1.0
+		for d in my_crew(slot):
+			var sv := driver_salary(d)
+			if sv > bs:
+				bs = sv
+				best = d
+		return best
 	return my_driver(slot)
+
+
+# ═════════ WEC 드라이버 시장 · 라인업 ═════════
+const WEC_FA_NAMES := ["R. Rast", "F. Habsburg", "P. Hanson", "M. Jensen", "L. Delétraz", "R. De Wilde", "Y. Ye", "R. Andrade", "J. Aitken", "S. Bird",
+	"T. Blomqvist", "D. Juncadella", "C. Ledogar", "J. Gounon", "A. Fuoco", "N. Nato", "M. Kvamme", "S. Saucy", "T. Vautier", "B. Hartley",
+	"E. Cheever", "J. Hanley", "F. Scherer", "O. Rasmussen", "M. Wainwright", "T. Kimber-Smith", "G. Roda", "C. Ried", "A. Pierburg", "K. Hirakawa"]
+const WEC_FA_COST := {"P": 1.6, "G": 0.9, "S": 0.45, "B": 0.2}
+const WEC_FA_SAL := {"P": 1.5, "G": 0.85, "S": 0.4, "B": 0.0}
+const WEC_FA_POP := {"P": 0.5, "G": 0.3, "S": 0.0, "B": 0.0}
+const GRADE_KO := {"P": "플래티넘", "G": "골드", "S": "실버", "B": "브론즈"}
+
+
+func _wec_taken_names() -> Dictionary:
+	var out := {}
+	for e in hq.get("field", []):
+		for d in e["crew"]:
+			out[d["name"]] = true
+	for t in DB.wec["rosters"]:
+		for r in DB.wec["rosters"][t]:
+			for nm in r["crew_names"]:
+				out[nm] = true
+	return out
+
+
+## 자유 계약(FA) 드라이버 목록. 없으면 만든다 (시즌마다 새로 고침).
+func wec_market() -> Array:
+	if not hq.has("wec_market"):
+		_refresh_wec_market()
+	return hq["wec_market"]
+
+
+func _refresh_wec_market() -> void:
+	var taken := _wec_taken_names()
+	var pool: Array = []
+	for nm in WEC_FA_NAMES:
+		if not taken.has(nm):
+			pool.append(nm)
+	var out: Array = []
+	for g in ["P", "G", "G", "S", "S", "B", "B"]:
+		if pool.is_empty():
+			break
+		var nm: String = pool.pop_at(int(rnd() * pool.size()) % pool.size())
+		var rg: Array = GRADE_RANGE[g]
+		out.append({"name": nm, "grade": g, "speed": uni(rg[0], rg[1]), "cons": uni(0.66, 0.9), "tyreMgmt": uni(0.68, 0.9), "aggr": uni(0.3, 0.8), "def": uni(0.6, 0.85), "wet": uni(0.55, 0.92),
+			"cost": r2(WEC_FA_COST[g] * (0.85 + 0.3 * rnd())), "salary": WEC_FA_SAL[g], "age": 21 + int(rnd() * 16)})
+	hq["wec_market"] = out
+
+
+## 영입 가능 여부. 가능하면 "" , 아니면 이유.
+func wec_hire_block(i: int, slot: int, idx: int) -> String:
+	var m: Array = wec_market()
+	if i < 0 or i >= m.size():
+		return "없음"
+	var fa: Dictionary = m[i]
+	var crew := my_crew(slot)
+	if idx < 0 or idx >= crew.size():
+		return "자리 없음"
+	if float(hq["cash"]) < float(fa["cost"]):
+		return "자금 부족"
+	if float(hq["pop"]) < float(WEC_FA_POP[fa["grade"]]):
+		return "평판 %d%% 필요" % int(WEC_FA_POP[fa["grade"]] * 100)
+	var md: Variant = WEC_MIN_DRIVE.get(str(tier())) if is_spec_tier() else null
+	if md != null and String(crew[idx].get("grade", "")) == md["grade"] and fa["grade"] != md["grade"]:
+		var left := 0
+		for d in crew:
+			if String(d.get("grade", "")) == md["grade"]:
+				left += 1
+		if left <= 1:
+			return "%s 자리는 %s만" % [GRADE_KO[md["grade"]], GRADE_KO[md["grade"]]]
+	return ""
+
+
+func hire_wec(i: int, slot: int, idx: int) -> bool:
+	if wec_hire_block(i, slot, idx) != "":
+		return false
+	var fa: Dictionary = hq["wec_market"][i]
+	var crew := my_crew(slot)
+	var old: Dictionary = crew[idx]
+	hq["cash"] = r2(float(hq["cash"]) - float(fa["cost"]))
+	book("staff", float(fa["cost"]))
+	hq["salaries"][fa["name"]] = fa["salary"]
+	crew[idx] = {"name": fa["name"], "grade": fa["grade"], "speed": fa["speed"], "cons": fa["cons"], "tyreMgmt": fa["tyreMgmt"], "aggr": fa["aggr"], "def": fa["def"], "wet": fa["wet"], "age": fa["age"]}
+	hq["wec_market"].remove_at(i)
+	# 내보낸 드라이버는 FA 시장으로
+	var g0: String = old.get("grade", "S")
+	hq["wec_market"].append({"name": old["name"], "grade": g0, "speed": old["speed"], "cons": old.get("cons", 0.76), "tyreMgmt": old.get("tyreMgmt", 0.75), "aggr": old.get("aggr", 0.5), "def": old.get("def", 0.72), "wet": old.get("wet", 0.74),
+		"cost": r2(WEC_FA_COST.get(g0, 0.4) * 0.8), "salary": WEC_FA_SAL.get(g0, 0.4), "age": int(old.get("age", 28))})
+	news("%s 드라이버 %s 영입 (#%d 차 · %s 대신)." % [GRADE_KO[fa["grade"]], fa["name"], slot + 1, old["name"]])
+	return true
+
+
+## 두 차 사이에서 같은 순번 드라이버를 맞바꾼다
+func wec_swap_cars(idx: int) -> bool:
+	var a := my_crew(0)
+	var b := my_crew(1)
+	if idx >= a.size() or idx >= b.size():
+		return false
+	var t: Dictionary = a[idx]
+	a[idx] = b[idx]
+	b[idx] = t
+	return true
+
+
+## 선발 드라이버 지정 (크루 맨 앞으로)
+func wec_set_starter(slot: int, idx: int) -> bool:
+	var crew := my_crew(slot)
+	if idx <= 0 or idx >= crew.size():
+		return false
+	var d: Dictionary = crew[idx]
+	crew.remove_at(idx)
+	crew.push_front(d)
+	return true
 
 
 func driver_salary(d: Dictionary) -> float:
@@ -1345,6 +1477,7 @@ func after_race(sim) -> Dictionary:
 			hq["team_pts"][c.team] = int(hq["team_pts"].get(c.team, 0)) + pv
 			if c.mine:
 				total += pv
+	_track_season(classified, mine, POINTS, mult, sim)
 	var ec := _settle(mine, classified, total)
 	hq["race_count"] = int(hq["race_count"]) + 1
 	_complete_projects(notes)
@@ -1377,10 +1510,87 @@ func after_race(sim) -> Dictionary:
 	hq["pop"] = clampf(r2(hq["pop"] + rep), 0.15, 0.98)
 	if ri == 0:
 		_season_end(notes)
+		hq["last_season"]["notes"] = notes.duplicate()
+		ec["season_end"] = true
 	ec["notes"] = notes
 	ec["total"] = total
 	save()
 	return ec
+
+
+# ═════════ 시즌 기록 (드라이버 챔피언십 · 내 팀 통계 · 트로피) ═════════
+func _drv_key(c) -> String:
+	if is_wec():
+		return "%s #%d" % [c.team, c.slot + 1]
+	return c.name
+
+
+func _track_season(classified: Array, mine: Array, pts_table: Array, mult: int, sim) -> void:
+	if not hq.has("drv_pts"):
+		hq["drv_pts"] = {}
+	if not hq.has("season_stats"):
+		hq["season_stats"] = {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99}
+	var dp: Dictionary = hq["drv_pts"]
+	for i in classified.size():
+		var c = classified[i]
+		var pv: int = (int(pts_table[i]) if i < pts_table.size() else 0) * mult
+		if sim != null and pts_table == POINTS and not is_wec() and sim.fastest_id == c.id and i < 10:
+			pv += 1
+		var k := _drv_key(c)
+		if not dp.has(k):
+			dp[k] = {"name": k, "team": c.team, "color": "#" + c.color.to_html(false), "pts": 0, "wins": 0, "mine": c.mine}
+		dp[k]["pts"] = int(dp[k]["pts"]) + pv
+		dp[k]["team"] = c.team
+		if i == 0 and pts_table == POINTS:
+			dp[k]["wins"] = int(dp[k]["wins"]) + 1
+	if pts_table != POINTS:
+		return
+	var st: Dictionary = hq["season_stats"]
+	st["races"] = int(st["races"]) + 1
+	for c in mine:
+		var p := classified.find(c)
+		if c.dnf != "" or p < 0:
+			st["dnf"] = int(st["dnf"]) + 1
+			continue
+		if p == 0:
+			st["wins"] = int(st["wins"]) + 1
+		if p <= 2:
+			st["podiums"] = int(st["podiums"]) + 1
+		st["best"] = mini(int(st["best"]), p + 1)
+
+
+func driver_standings() -> Array:
+	var rows: Array = []
+	for k in hq.get("drv_pts", {}):
+		rows.append(hq["drv_pts"][k])
+	rows.sort_custom(func(a, b): return int(a["pts"]) > int(b["pts"]) if int(a["pts"]) != int(b["pts"]) else int(a["wins"]) > int(b["wins"]))
+	return rows
+
+
+## 시즌 종료 요약을 hq["last_season"] 에 남기고, 3위 안이면 트로피를 쌓는다
+func _season_summary(rank: int, prize: float) -> void:
+	var cons: Array = standings()
+	var drv: Array = driver_standings()
+	var my_drv := 0
+	for i in drv.size():
+		if drv[i]["mine"]:
+			my_drv = i + 1
+			break
+	var st: Dictionary = hq.get("season_stats", {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99})
+	var my_pts := 0
+	for r in cons:
+		if r["mine"]:
+			my_pts = int(r["pts"])
+	var tname: String = tier_meta()["short"]
+	hq["last_season"] = {"season": int(hq["season"]), "tier": tier(), "tier_name": tname, "series": ser(), "rank": rank, "pts": my_pts, "prize": prize,
+		"cons": cons.slice(0, 12), "drivers": drv.slice(0, 12), "my_drv": my_drv, "stats": st.duplicate(),
+		"champ": cons[0]["name"] if not cons.is_empty() else "-", "drv_champ": drv[0]["name"] if not drv.is_empty() else "-", "notes": []}
+	if not hq.has("trophies"):
+		hq["trophies"] = []
+	if rank <= 3:
+		hq["trophies"].append({"season": int(hq["season"]), "tier_name": tname, "rank": rank})
+	if my_drv == 1:
+		hq["trophies"].append({"season": int(hq["season"]), "tier_name": tname, "rank": 1, "driver": drv[0]["name"]})
 
 
 ## F2 스프린트: 포인트(8위까지 10-8-6-5-4-3-2-1)와 평판만 반영. 돈 정산은 피처 레이스 뒤에 한 번.
@@ -1396,6 +1606,7 @@ func after_sprint(sim) -> Dictionary:
 		hq["team_pts"][c.team] = int(hq["team_pts"].get(c.team, 0)) + pv
 		if c.mine:
 			total += pv
+	_track_season(classified, sim.my_cars(), SPRINT_POINTS, 1, sim)
 	if total > 0:
 		hq["pop"] = clampf(r2(hq["pop"] + (0.02 if total >= 10 else 0.01)), 0.15, 0.98)
 	save()
@@ -1459,6 +1670,7 @@ func _settle(mine: Array, classified: Array, total: int) -> Dictionary:
 func _season_end(notes: Array) -> void:
 	var rank := my_rank_now()
 	var pz := prize_for(rank)
+	_season_summary(rank, pz)
 	hq["cash"] = r2(hq["cash"] + pz)
 	book("prize", pz)
 	var msg := "💰 시즌 %d 컨스트럭터 챔피언십 P%d 상금 +%.2fM" % [int(hq["season"]), rank, pz]
@@ -1466,7 +1678,9 @@ func _season_end(notes: Array) -> void:
 	notes.append(msg)
 	_ai_develop(1.0 / 3.0)
 	_cost_cap_audit(notes)
-	hq["season_log"].append({"season": hq["season"], "rank": rank, "cash": hq["cash"], "spent": hq["spent_cap"], "cap": hq["cost_cap_limit"], "tier": tier()})
+	var ls: Dictionary = hq["last_season"]
+	hq["season_log"].append({"season": hq["season"], "rank": rank, "cash": hq["cash"], "spent": hq["spent_cap"], "cap": hq["cost_cap_limit"], "tier": tier(),
+		"pts": ls["pts"], "champ": ls["champ"], "drv_champ": ls["drv_champ"], "wins": int(ls["stats"].get("wins", 0)), "podiums": int(ls["stats"].get("podiums", 0))})
 	if hq["season_log"].size() > 12:
 		hq["season_log"].pop_front()
 	if not is_spec_tier():
@@ -1486,6 +1700,8 @@ func _season_end(notes: Array) -> void:
 
 func _season_start(notes: Array) -> void:
 	hq["team_pts"] = {}
+	hq["drv_pts"] = {}
+	hq["season_stats"] = {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99}
 	hq["last_ledger"] = hq["ledger"]
 	hq["ledger"] = _new_ledger()
 	var carry := 0.0
@@ -1501,6 +1717,8 @@ func _season_start(notes: Array) -> void:
 	book("fac", carry)
 	hq["cost_cap_limit"] = cap_limit_now()
 	_pay_owner(notes)
+	if is_wec():
+		_refresh_wec_market()
 	if not is_spec_tier():
 		if int(hq["season"]) > 1 and reg_year() == 1:
 			_regulation_reset(notes)
@@ -1602,21 +1820,32 @@ func tier_up() -> bool:
 
 
 # ═════════ 저장 ═════════
+## 저장 슬롯 3개. 1번은 예전 저장 파일 이름을 그대로 써서 기존 저장을 이어 쓴다.
+const SLOTS := 3
+var save_slot := 1
+
+
+static func path_for(s: int) -> String:
+	return SAVE_PATH if s <= 1 else "user://career_slot%d.json" % s
+
+
 func save() -> void:
-	var f = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var f = FileAccess.open(path_for(save_slot), FileAccess.WRITE)
 	if f == null:
 		return
 	f.store_string(JSON.stringify(hq))
 
 
-static func has_save() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+static func has_save(s: int = 1) -> bool:
+	return FileAccess.file_exists(path_for(s))
 
 
-func load_save() -> bool:
-	if not has_save():
+func load_save(s: int = -1) -> bool:
+	if s > 0:
+		save_slot = s
+	if not has_save(save_slot):
 		return false
-	var f = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var f = FileAccess.open(path_for(save_slot), FileAccess.READ)
 	if f == null:
 		return false
 	var data = JSON.parse_string(f.get_as_text())
@@ -1627,6 +1856,6 @@ func load_save() -> bool:
 	return true
 
 
-static func delete_save() -> void:
-	if FileAccess.file_exists(SAVE_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+static func delete_save(s: int = 1) -> void:
+	if FileAccess.file_exists(path_for(s)):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path_for(s)))

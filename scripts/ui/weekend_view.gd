@@ -6,6 +6,7 @@ signal start_race
 signal go_back
 
 const K = preload("res://scripts/ui/kit.gd")
+const HT = preload("res://scripts/ui/help_text.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const WK = preload("res://scripts/sim/weekend.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
@@ -100,7 +101,13 @@ func refresh() -> void:
 
 
 func _title(t: String, sub: String) -> void:
-	_side.add_child(K.label(t, 22, K.AMBER))
+	var th = K.hbox(6)
+	_side.add_child(th)
+	var tl = K.label(t, 22, K.AMBER)
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	th.add_child(tl)
+	var hb: String = HT.PRACTICE if phase == "practice" else (HT.QUALI if phase == "quali" else HT.GRID)
+	th.add_child(K.help({"practice": "연습", "quali": "예선"}.get(phase, "그리드"), hb))
 	if sub != "":
 		var r = K.rtl(14)
 		r.text = "[color=#8b98a5]%s[/color]" % sub

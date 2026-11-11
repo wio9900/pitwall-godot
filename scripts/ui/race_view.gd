@@ -49,6 +49,15 @@ var _stop_t := {}      # car id → 차고 정차 시작 시각(시뮬레이션)
 var _fin_seen := {}    # car id → 체커기 받은 것 확인
 var _flash := {}       # car id → 추월 강조 시작(실시간)
 var _was_finishing := false
+# 큰 장면 연출: 비 시작 · 폭우(번개) · 세이프티카 출동 · 우승/포디움
+var _prev_wet := -1.0
+var _rain_t := -10.0
+var _storm_t := -10.0
+var _prev_sc := false
+var _sc_t := -10.0
+var _win_t := -10.0
+var _win_rank := 0
+var _confetti: Array = []
 
 
 func reset() -> void:
@@ -64,6 +73,14 @@ func reset() -> void:
 	_fin_seen.clear()
 	_flash.clear()
 	_was_finishing = false
+	_prev_wet = -1.0
+	_rain_t = -10.0
+	_storm_t = -10.0
+	_prev_sc = false
+	_sc_t = -10.0
+	_win_t = -10.0
+	_win_rank = 0
+	_confetti.clear()
 	banner_text = ""
 	_cam_center = Vector2.ZERO
 
@@ -200,6 +217,22 @@ func _update_effects() -> void:
 			if c.mine and _smooth.has(c.id):
 				var fp = sim.order().find(c) + 1
 				_popups.append({"id": c.id, "text": "🏁 P%d" % fp, "col": AMBER, "t": _now})
+				var cp: int = sim.class_pos(c) if sim.is_wec() else fp
+				if cp <= 3 and c.penalty <= 0.0 and (_win_rank == 0 or cp < _win_rank):
+					_celebrate(cp)
+	# 날씨·세이프티카 장면 전환
+	if _prev_wet < 0.0:
+		_prev_wet = sim.wet
+	if sim.wet > 0.04 and _prev_wet <= 0.04:
+		_rain_t = _now
+		cue.emit("radio")
+	if sim.wet >= 0.65 and _prev_wet < 0.65:
+		_storm_t = _now
+	_prev_wet = sim.wet
+	if sim.sc and not _prev_sc:
+		_sc_t = _now
+		cue.emit("beep")
+	_prev_sc = sim.sc
 	if sim.finishing and not _was_finishing:
 		_was_finishing = true
 		cue.emit("flag")
@@ -263,6 +296,7 @@ func _draw() -> void:
 	if wet > 0.04:
 		_draw_rain(wet)
 	_draw_banner(font)
+	_draw_events(font)
 	_draw_checkered(font)
 	_draw_lights(font)
 
@@ -744,3 +778,84 @@ func _draw_checkered(font) -> void:
 	draw_rect(box, Color(0.05, 0.06, 0.08, 0.85))
 	draw_rect(box, Color.WHITE, false, 1.2)
 	draw_string(font, box.position + Vector2(8, tsz.y + 2), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
+
+
+# ═════════ 큰 장면 연출 ═════════
+func _celebrate(rank: int) -> void:
+	_win_t = _now
+	_win_rank = rank
+	_confetti.clear()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242 + rank
+	var cols := [Color("#fbbf24"), Color("#ef4444"), Color("#22c55e"), Color("#38bdf8"), Color("#a855f7"), Color.WHITE]
+	var n: int = 140 if rank == 1 else 60
+	for i in n:
+		_confetti.append({"x": rng.randf(), "y": -rng.randf() * 0.6, "vx": rng.randf_range(-0.05, 0.05), "vy": rng.randf_range(0.12, 0.3), "rot": rng.randf() * TAU, "spin": rng.randf_range(-6.0, 6.0), "col": cols[i % cols.size()], "w": rng.randf_range(4.0, 8.0)})
+	cue.emit("flag")
+
+
+func _big_text(font, text: String, y: float, fg: Color, bg: Color, fs := 30, x_off := 0.0) -> void:
+	var tsz: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+	var box := Rect2(Vector2((size.x - tsz.x) * 0.5 - 18 + x_off, y - tsz.y * 0.5 - 10), tsz + Vector2(36, 20))
+	draw_rect(box, bg)
+	draw_rect(box, Color(fg, fg.a * 0.8), false, 2.0)
+	draw_string(font, Vector2(box.position.x + 18, box.position.y + 10 + tsz.y * 0.78), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
+
+
+func _draw_events(font) -> void:
+	var full := Rect2(Vector2.ZERO, size)
+	# 비 시작: 화면이 푸르게 어두워지며 안내
+	var ra: float = _now - _rain_t
+	if ra < 3.0:
+		var a: float = clampf(1.0 - ra / 3.0, 0.0, 1.0)
+		draw_rect(full, Color(0.12, 0.3, 0.65, 0.2 * a))
+		_big_text(font, "🌧  비가 내리기 시작했어요", size.y * 0.3, Color(0.8, 0.9, 1.0, a), Color(0.04, 0.1, 0.25, 0.85 * a), 26)
+	# 폭우: 번개 두 번 번쩍
+	var sa: float = _now - _storm_t
+	if sa < 1.4:
+		var f: float = 0.0
+		if sa < 0.08 or (sa > 0.2 and sa < 0.27):
+			f = 0.55
+		f += maxf(0.0, 0.2 * (1.0 - sa / 1.4))
+		draw_rect(full, Color(0.92, 0.95, 1.0, f))
+		if sa > 0.3:
+			_big_text(font, "⛈  폭우! 웻 타이어 노면", size.y * 0.3, Color(1, 1, 1, clampf((1.4 - sa) / 0.5, 0.0, 1.0)), Color(0.05, 0.08, 0.2, 0.85), 26)
+	# 세이프티카 출동: 노란 테두리 점멸 + 미끄러져 들어오는 표지
+	var sca: float = _now - _sc_t
+	if sca < 3.4 and sim.sc:
+		var fade: float = clampf((3.4 - sca) / 0.6, 0.0, 1.0)
+		var blink: float = 0.5 + 0.5 * sin(sca * 12.0)
+		draw_rect(full, Color(1.0, 0.76, 0.05, 0.9 * blink * fade), false, 8.0)
+		var slide: float = clampf(sca / 0.35, 0.0, 1.0)
+		var off: float = (1.0 - slide) * -size.x * 0.7
+		var txt: String = "⚠  SAFETY CAR 출동" if sim.sc_kind == "SC" else "⚠  VIRTUAL SAFETY CAR"
+		_big_text(font, txt, size.y * 0.3, Color(0.07, 0.07, 0.07, fade), Color(1.0, 0.76, 0.05, 0.95 * fade), 30, off)
+		# 흔들리는 노란 깃발 두 개
+		for k in 2:
+			var bx: float = 22.0 if k == 0 else size.x - 62.0
+			var by: float = 46.0
+			draw_line(Vector2(bx, by), Vector2(bx, by + 56), Color("#9aa4b2"), 2.0)
+			var pts := PackedVector2Array()
+			for i in 7:
+				var u: float = i / 6.0
+				pts.append(Vector2(bx + u * 40.0, by + sin(_now * 9.0 + u * 4.0 + k) * 4.0 * u))
+			for i in range(6, -1, -1):
+				var u2: float = i / 6.0
+				pts.append(Vector2(bx + u2 * 40.0, by + 24.0 + sin(_now * 9.0 + u2 * 4.0 + k) * 4.0 * u2))
+			draw_colored_polygon(pts, Color(1.0, 0.8, 0.1, fade))
+	# 우승·포디움: 꽃가루 + 큰 글씨
+	var wa: float = _now - _win_t
+	if wa < 7.0 and _win_rank > 0:
+		for p in _confetti:
+			var y: float = (float(p["y"]) + float(p["vy"]) * wa + 0.03 * wa * wa) * size.y
+			if y > size.y + 10:
+				continue
+			var x: float = (float(p["x"]) + float(p["vx"]) * wa) * size.x + sin(wa * 3.0 + float(p["rot"])) * 10.0
+			draw_set_transform(Vector2(x, y), float(p["rot"]) + float(p["spin"]) * wa, Vector2.ONE)
+			draw_rect(Rect2(-float(p["w"]) * 0.5, -2, float(p["w"]), 4), p["col"])
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var pop: float = clampf(wa / 0.25, 0.0, 1.0)
+		var fa: float = clampf((7.0 - wa) / 0.8, 0.0, 1.0)
+		var wt: String = "🏆  우승!" if _win_rank == 1 else "🍾  포디움 P%d!" % _win_rank
+		var col: Color = Color("#fbbf24") if _win_rank == 1 else Color.WHITE
+		_big_text(font, wt, size.y * 0.42, Color(col, fa), Color(0.05, 0.06, 0.08, 0.85 * fa), int(22 + 14 * pop))

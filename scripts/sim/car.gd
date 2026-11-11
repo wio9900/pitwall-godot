@@ -52,6 +52,10 @@ var fuel_burn_rate := 1.0
 # 운영 상태
 var plan: Dictionary = {"start": "M", "stops": []}
 var stops_done := 0
+var plans: Dictionary = {}   # 내 차 전략 계획 {"A": {stops, cost}, "B": ...}
+var active_plan := "A"
+var auto_plan := false       # 자동 전략: 계획 랩에 알아서 박스
+var plans_at := -1
 var sc_early := false
 var wing := 3.0
 var press := "std"

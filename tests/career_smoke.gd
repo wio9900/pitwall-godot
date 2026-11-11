@@ -29,6 +29,21 @@ func _bot_preseason(cr) -> void:
 			cr.hire_engineer(i)
 	if cr.can_tier_up():
 		cr.tier_up()
+	# WEC: FA 시장에서 한 명 영입 시도 + 라인업 조정
+	if cr.is_wec():
+		var mk: Array = cr.wec_market()
+		var done := false
+		for i in mk.size():
+			for idx in 3:
+				if not done and cr.wec_hire_block(i, 1, idx) == "" and float(cr.hq["cash"]) > float(mk[i]["cost"]) + 4.0:
+					var nm: String = mk[i]["name"]
+					if cr.hire_wec(i, 1, idx):
+						print("  WEC FA 영입: %s → #2 차 %d번" % [nm, idx + 1])
+						done = true
+		cr.wec_swap_cars(0)
+		cr.wec_swap_cars(0)
+		cr.wec_set_starter(0, 1)
+		cr.wec_set_starter(0, 1)
 
 
 func _bot_round(cr) -> void:
