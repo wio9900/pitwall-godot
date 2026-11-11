@@ -31,6 +31,16 @@ const PRESS_FX := {
 }
 const K := {"car_scale": 0.92, "drv_k": 0.022, "noise": 0.28, "fail": 0.0045, "crash": 0.005, "overtake_scale": 0.21, "victim": 0.25, "dirty": 1.0, "ot_gap": 0.3}
 const POINTS := [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
+# WEC 규칙 (HTML 원본과 동일)
+const STINT := 5                 # 스틴트 5랩 (연료 세이브면 6랩)
+const TANK := 5.45 * 1.6         # 연료 탱크 = 5.45랩 분량
+const GT3_PACE := 1.12
+const CLASS_PACE := {"HY": 1.0, "P2": 1.06, "GT": 1.12} # 클래스 기본 페이스 배율 (LMP2는 하이퍼카와 GT3 사이)
+const GRADE_KO := {"P": "플래티넘", "G": "골드", "S": "실버", "B": "브론즈"}
+const BOP_K := 0.006
+const WEC_WEAR := 3.0            # 미디엄 1스틴트 ≈ 50%, 더블 스틴트 끝 ≈ 100%
+const WPIT := {"lane": 30.0, "fuel": 30.0, "tyres": 12.0, "driver": 3.0}
+const WEC_FUEL_KO := {"lean": "세이브", "std": "표준", "rich": "리치"}
 const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
 const STRAT_KO := {"aggressive": "공격형", "balanced": "균형형", "conservative": "보수형", "reactive": "반응형"}
 
@@ -38,6 +48,10 @@ var rng := RandomNumberGenerator.new()
 var T: Variant            # 트랙 (track.gd)
 var CIRC: Dictionary = {}
 var circ_key := ""
+var series := "f1"
+var min_drive: Variant = null
+## 시리즈 규칙: two_compounds(드라이 레이스 두 컴파운드 의무) · wear_mult(타이어 마모 배율, F3·스프린트는 작게)
+var rules := {"two_compounds": true, "wear_mult": 1.0} # 하위 클래스 최소 주행 규정 {grade, pct} (예: 브론즈 25%)
 var laps := 15
 var my_team := -1
 var cars: Array = []
@@ -70,6 +84,29 @@ var radio_log: Array = [] # {lap, who, color, msg, kind}
 var _cuts_cache: Dictionary = {}
 
 
+func is_wec() -> bool:
+	return series == "wec"
+
+
+## WEC 는 랩이 길어서(르망 207초) 초 단위 페널티를 서킷 길이에 비례시킨다
+func wsc() -> float:
+	return float(CIRC["base"]) / 90.0 if is_wec() else 1.0
+
+
+func poisson(lam: float) -> int:
+	var l := exp(-lam)
+	var k := 0
+	var p := 1.0
+	while true:
+		p *= rnd()
+		if p <= l:
+			break
+		k += 1
+		if k > 30:
+			break
+	return k
+
+
 # ═════════ 난수 ═════════
 func rnd() -> float:
 	return rng.randf()
@@ -100,6 +137,12 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	circ_key = circ_key_
 	T = DB.track(circ_key)
 	CIRC = DB.circuits[circ_key]
+	series = CIRC.get("series", "f1")
+	min_drive = opts.get("min_drive", null)
+	rules = {"two_compounds": true, "wear_mult": 1.0}
+	if opts.has("rules"):
+		for k in opts["rules"]:
+			rules[k] = opts["rules"][k]
 	laps = laps_
 	my_team = my_team_
 	true_mult = {"S": uni(0.88, 1.14), "M": uni(0.88, 1.14), "H": uni(0.88, 1.14)}
@@ -132,6 +175,9 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	var setups: Array = opts.get("setup", [])
 	var sets: Array = opts.get("sets", [])
 	n_stalls = teams.size()
+	if is_wec():
+		_build_wec_field(opts, start_comps)
+		teams = []
 	for ti in teams.size():
 		var t: Dictionary = teams[ti]
 		for k in 2:
@@ -187,6 +233,14 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.chassis = minf(0.99, c.chassis + float(mm.get("chassis", 0.0)))
 				c.rel = minf(0.99, c.rel + float(mm.get("rel", 0.0)))
 				c.crew = minf(0.99, c.crew + float(mm.get("crew", 0.0)))
+	if is_wec() and opts.has("my_mods"):
+		var mw: Dictionary = opts["my_mods"]
+		for c in cars:
+			if c.mine:
+				c.perf = minf(0.99, c.perf + float(mw.get("perf", 0.0)))
+				c.rel = minf(0.99, c.rel + float(mw.get("rel", 0.0)))
+				c.crew = minf(0.99, c.crew + float(mw.get("crew", 0.0)))
+				c.bop += float(mw.get("bop", 0.0))
 	# 그리드: 예선 페이스 순
 	var qp = {}
 	for c in cars:
@@ -196,7 +250,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		cars[i].grid = i
 		cars[i].start_t = i * 0.22
 	for c in cars:
-		if not c.mine:
+		if not c.mine and not is_wec():
 			plan_ai_strategy(c, "")
 	# 날씨
 	rain = null
@@ -236,14 +290,16 @@ func apply_driver(c) -> void:
 
 # ═════════ 성능 모델 ═════════
 func car_factor(c) -> float:
-	return 1.0 - K["car_scale"] * (c.aero * float(CIRC["wA"]) + c.engine * float(CIRC["wE"]) + c.chassis * float(CIRC["wC"]))
+	if c.cls == "F1":
+		return 1.0 - K["car_scale"] * (c.aero * float(CIRC["wA"]) + c.engine * float(CIRC["wE"]) + c.chassis * float(CIRC["wC"]))
+	return float(CLASS_PACE.get(c.cls, 1.0)) * (1.0 - c.perf * BOP_K + c.bop)
 
 
 func ideal_tyre(w: float) -> String:
 	if w >= 0.65:
 		return "W"
-	if w >= 0.22:
-		return "I"
+	if w >= (0.27 if is_wec() else 0.22):
+		return "W" if is_wec() else "I"
 	return "slick"
 
 
@@ -260,6 +316,10 @@ func weather_pen(comp: String, w: float) -> float:
 		if w < 0.42:
 			return 0.8 + 3.7 * pow((0.42 - w) / 0.42, 1.35)
 		return 0.8 + 11.5 * pow(w - 0.42, 1.45)
+	if is_wec():
+		if w >= 0.65:
+			return 0.0
+		return 6.2 * pow((0.65 - w) / 0.65, 1.28)
 	if w >= 0.85:
 		return 0.4
 	return 0.4 + 7.4 * pow((0.85 - w) / 0.85, 1.25)
@@ -276,7 +336,12 @@ func cliff_pen(comp: String, w: float) -> float:
 
 
 func true_wear_rate(comp: String) -> float:
-	return float(COMP[comp][1]) * float(true_mult.get(comp, 1.0))
+	return float(COMP[comp][1]) * float(true_mult.get(comp, 1.0)) * float(rules.get("wear_mult", 1.0))
+
+
+## 두 컴파운드 의무가 지금 적용되는지 (드라이 레이스 + 규칙)
+func need_two() -> bool:
+	return bool(rules.get("two_compounds", true)) and not is_wec() and not ever_wet
 
 
 func drv_wing_pref(c) -> float:
@@ -290,20 +355,21 @@ func wing_opt(w: float, c) -> float:
 
 func setup_pen(c, w: float) -> float:
 	var d: float = c.wing - wing_opt(w, c)
-	return 0.15 * d * d
+	return 0.15 * d * d * wsc()
 
 
 func press_straight(pr: String) -> float:
-	return float(PRESS_FX[pr]["straight"]) * (float(CIRC["wE"]) / 0.05)
+	var k: float = float(CIRC["wE"]) / 0.05 if CIRC.has("wE") else (1.3 if float(CIRC["wingOpt"]) <= 2.0 else 0.9)
+	return float(PRESS_FX[pr]["straight"]) * k * wsc()
 
 
 func press_kerb(pr: String) -> float:
 	var k: float = PRESS_FX[pr]["kerb"]
-	return 1.0 + (k - 1.0) * (float(CIRC["wC"]) / 0.045)
+	return 1.0 + (k - 1.0) * (float(CIRC["wC"]) / 0.045 if CIRC.has("wC") else 1.0)
 
 
 func drs_on() -> bool:
-	return leader_lap >= 2 and not sc and wet < 0.25
+	return not is_wec() and leader_lap >= 2 and not sc and wet < 0.25
 
 
 func sc_mult() -> float:
@@ -313,7 +379,30 @@ func sc_mult() -> float:
 
 
 func pit_loss() -> float:
+	if is_wec():
+		return float(CIRC.get("wecLaneLoss", WPIT["lane"])) * maxf(0.52, pit_scale()) * sc_mult()
 	return float(CIRC["pitLoss"]) * sc_mult()
+
+
+func pit_scale() -> float:
+	return STINT / (3000.0 / float(CIRC["base"]))
+
+
+## WEC 정차 시간: 피트레인 + 급유·타이어·드라이버 교대 작업 (실제 초를 레이스 압축률로 줄임)
+func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true) -> float:
+	var lane_loss: float = float(CIRC.get("wecLaneLoss", WPIT["lane"])) * maxf(0.52, pit_scale())
+	var fuel_work: float = WPIT["fuel"] * (1.05 - 0.2 * c.crew) if fuel else 0.0
+	var tyre_work: float = WPIT["tyres"] * (1.15 - 0.35 * c.crew) if tyres else 0.0
+	var drv_work: float = WPIT["driver"] if driver else 0.0
+	var work: float = (fuel_work + tyre_work + drv_work) * maxf(0.32, pit_scale())
+	var scf := 1.0
+	if sc:
+		scf = 0.62 if sc_kind == "SC" else 0.78
+	return (lane_loss + work) * scf
+
+
+func real_laps() -> float:
+	return float(CIRC.get("hours", 6)) * 3600.0 / float(CIRC["base"])
 
 
 func lap_base(c) -> float:
@@ -339,27 +428,49 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var tt_target: float = pc[3]
 	var t = base * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"] * spd)
 	var evo_bonus = -0.65 * track_evo * (1.0 - w)
-	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh
+	var ws := wsc()
+	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh * ws
 	t += (setup_pen(c, w) + float(PRESS[c.press][0]) + press_straight(c.press)) * sh
 	var wp = weather_pen(c.comp, w)
-	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh
-	if gap_ahead != null and gap_ahead < K["dirty"] and c.instr != "hold":
-		t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
-	var em: String = c.ers_mode
-	if em == "deploy" and c.ers <= 0.02:
-		em = "balance"
-	t += float(ERS[em][0]) * sh
-	c.ers = clampf(c.ers + float(ERS[em][1]) * sh, 0.0, 1.0)
+	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
+	if not is_wec():
+		if gap_ahead != null and gap_ahead < K["dirty"] and c.instr != "hold":
+			t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
+		var em: String = c.ers_mode
+		if em == "deploy" and c.ers <= 0.02:
+			em = "balance"
+		t += float(ERS[em][0]) * sh
+		c.ers = clampf(c.ers + float(ERS[em][1]) * sh, 0.0, 1.0)
 	var fm: Array = FUEL[c.fuel_mode]
-	t += float(fm[0]) * sh
+	t += float(fm[0]) * sh * ws
 	if c.fuel <= 0.0:
-		t += 2.5 * sh
+		t += 2.5 * sh * ws
 	if c.instr == "defend" and gap_behind != null and gap_behind < 1.0:
 		t += 0.3 * sh
 	if night:
 		t += base * sh * 0.008 * (1.2 - c.cons)
+	# 멀티클래스 트래픽 (WEC): 하이퍼카는 GT3를 추월하며 시간 손실·접촉 위험, GT3는 비켜주며 소폭 손실
+	# (HTML 은 HY↔GT 두 클래스뿐 → 클래스 페이스 차이로 일반화: HY·GT 만 있으면 원본과 같은 값)
+	if is_wec():
+		var my_p: float = CLASS_PACE.get(c.cls, 1.0)
+		var lam_slow := 0.0
+		var lam_fast := 0.0
+		for o in cars:
+			if o.is_running() and o.cls != c.cls:
+				var op: float = CLASS_PACE.get(o.cls, 1.0)
+				if op > my_p:
+					lam_slow += op - my_p
+				else:
+					lam_fast += my_p - op
+		for i in poisson(lam_slow * sh):
+			t += uni(0.3, 1.6) * (1.3 - c.cons) * (1.4 if night else 1.0) * (1.0 + w)
+			if rnd() < 0.0005 * (1.0 + c.aggr) * (1.5 if night else 1.0):
+				c.damage_now = "느린 클래스 차량과 접촉"
+				break
+		for i in poisson(lam_fast * sh):
+			t += uni(0.15, 0.6)
 	# 타이어 온도
-	var target = tt_target + (0.05 if c.instr == "attack" else 0.0) + (0.02 if c.ers_mode == "deploy" else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
+	var target = tt_target + (0.05 if c.instr == "attack" else 0.0) + (0.02 if (c.ers_mode == "deploy" and not is_wec()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
@@ -367,15 +478,16 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	c.tt = clampf(c.tt + (target - c.tt) * minf(0.9, 0.35 * float(PRESS_FX[c.press]["warm"])), 0.0, 1.0)
 	var cold = maxf(0.0, 0.42 - c.tt)
 	var hot = maxf(0.0, c.tt - 0.80)
-	t += (cold * 4.0 + hot * 3.0 * float(PRESS_FX[c.press]["heat"])) * sh
-	var cons: float = c.cons - (0.08 if night else 0.0)
+	t += (cold * 4.0 + hot * 3.0 * float(PRESS_FX[c.press]["heat"])) * sh * ws
+	var fat: float = maxf(0.0, c.stint_drv - 1) * 0.04 if is_wec() else 0.0
+	var cons: float = c.cons - fat - (0.08 if night else 0.0)
 	var is_launch: bool = c.lap == 0 and c.sec == 0
 	var noise_scale = 0.18 if is_launch else 1.0
-	t += gauss((K["noise"] - cons * 0.4 + 0.3 * w) * sqrt(sh) * noise_scale)
+	t += gauss((K["noise"] - cons * 0.4 + 0.3 * w) * sqrt(sh) * noise_scale * sqrt(ws))
 	var pressure = 1.5 if (not is_launch and gap_ahead != null and gap_ahead < 0.5) else 1.0
 	var p_err = 0.0
 	if not is_launch:
-		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * (1.5 if night else 1.0)
+		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * (1.5 if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0)
 	var crash = ""
 	if rnd() < p_err:
 		t += uni(1.0, 4.0) + w * 3.0
@@ -409,11 +521,11 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		c.focus = clampf(c.focus + 1.5 * sh, 30.0, 100.0)
 	# 마모·연료
 	var over = 2.0 if (not SLICK.has(c.comp) and w < 0.2) else 1.0
-	var wear_rate = true_wear_rate(c.comp) * float(CIRC["wear"]) * (WEAR_SCALE / laps)
+	var wear_rate = true_wear_rate(c.comp) * float(CIRC["wear"]) * (WEC_WEAR if is_wec() else WEAR_SCALE / laps)
 	var lift_wear = 0.80 if c.instr == "lift" else (0.92 if c.instr == "hold" else 1.0)
 	var lift_fuel = 0.86 if c.instr == "lift" else 1.0
 	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * sh)
-	c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0))
+	c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (2.0 - c.eng_eff) * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0))
 	return {"t": t, "crash": crash}
 
 
@@ -435,6 +547,8 @@ func _push_log(lap_tag: String, who: String, col: Color, msg: String, kind: Stri
 
 
 func name_of(c) -> String:
+	if is_wec():
+		return c.label if c.label != "" else c.team
 	return "%s (%s)" % [c.code, c.team]
 
 
@@ -454,7 +568,10 @@ func retire(c, why: String) -> void:
 	c.pending_crash = ""
 	c.pending_victim = false
 	c.sec_end = INF
-	event("%s %s → 리타이어" % [name_of(c), why], "bad")
+	var tag := ""
+	if is_wec():
+		tag = "[HY] " if c.cls == "HY" else "[LMGT3] "
+	event("%s%s %s → 리타이어" % [tag, name_of(c), why], "bad")
 	if c.mine:
 		say(c, "%s 발생으로 리타이어합니다." % why)
 	if not sc and leader_lap < laps - 1:
@@ -464,7 +581,25 @@ func retire(c, why: String) -> void:
 		if r < p_sc:
 			deploy("SC")
 		elif r < p_sc + p_v:
-			deploy("VSC")
+			deploy("FCY" if is_wec() else "VSC")
+
+
+## WEC: 수리 가능한 손상 (60% 개러지 수리, 40% 리타이어)
+func damage(c, why: String) -> void:
+	if rnd() < 0.6:
+		var lost: float = uni(1.5, 8.0) * float(CIRC["base"]) * laps / real_laps()
+		c.garage += lost
+		c.repairs += 1
+		event("%s %s → 개러지 수리 (약 %d초 손실)" % [name_of(c), why, int(round(lost))], "bad")
+		if c.mine:
+			say(c, "%s. 피트로 들어가 수리합니다" % why)
+		if c.boxing == null:
+			c.boxing = {"comp": c.comp, "tyres": false, "driver": false, "fuel": false, "forced": true}
+			c.pit_total = WPIT["lane"] * pit_scale()
+		if not sc and rnd() < 0.08:
+			deploy("FCY")
+	else:
+		retire(c, why)
 
 
 func deploy(kind: String) -> void:
@@ -476,13 +611,15 @@ func deploy(kind: String) -> void:
 	sc_in_pit_lane = false
 	sc_pit_prog = 0.0
 	var n = int(round(uni(3, 4))) if kind == "SC" else 2
+	if is_wec():
+		n = maxi(2, int(round(laps * uni(0.08, 0.14)))) if kind == "SC" else 1
 	sc_end_lap = leader_lap + n
 	if kind == "SC":
 		var lead: Variant = leader_car()
 		sc_dist = (car_dist(lead) + T.L * 0.035) if lead != null else 0.0
 		event("세이프티카 출동! 대열이 압축됩니다 (%d랩 종료 예정)" % sc_end_lap, "sc")
 	else:
-		event("버추얼 세이프티카 발령! 간격 유지, 피트 손실 감소", "sc")
+		event("%s 발령! 간격 유지, 피트 손실 감소" % ("풀 코스 옐로" if kind == "FCY" else "버추얼 세이프티카"), "sc")
 
 
 # ═════════ AI 전략가 ═════════
@@ -583,7 +720,7 @@ func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionar
 			for k in C:
 				if all.has(k):
 					n_slick += 1
-			if not ever_wet and n_slick < 2:
+			if need_two() and n_slick < 2:
 				continue
 			var cnt = {"S": 0, "M": 0, "H": 0}
 			for i in range(1, seq.size()):
@@ -651,7 +788,8 @@ func plan_ai_strategy(c, fixed_start: String) -> void:
 		return
 	c.strat_style = team_style(c.team)
 	c.est_err = clampf(1.0 + gauss((1.0 - c.strategy) * 0.45), 0.7, 1.35)
-	var cands = ai_optimize(laps, fixed_start, c.wear, ai_rates(c, 1.0), pit_loss() + 3.0, {}, {"S": 1, "M": 2, "H": 1}, 3 if laps >= 12 else 2)
+	var max_st := 0 if rules.get("no_pits", false) else (3 if laps >= 12 else 2)
+	var cands = ai_optimize(laps, fixed_start, c.wear, ai_rates(c, 1.0), pit_loss() + 3.0, {}, {"S": 1, "M": 2, "H": 1}, max_st)
 	var pk: Variant = ai_choose(c, cands, true)
 	if pk == null:
 		return
@@ -694,7 +832,7 @@ func ai_replan(c) -> void:
 
 
 func _pick_ai_slick(c, pref: String, rem_laps: int) -> String:
-	var need_diff: bool = not ever_wet and c.used_slicks() < 2
+	var need_diff: bool = need_two() and c.used_slicks() < 2
 	var cands: Array = ["S", "M", "H"] if rem_laps <= 5 else (["M", "H", "S"] if rem_laps <= 9 else ["H", "M", "S"])
 	if SLICK.has(pref):
 		var re = [pref]
@@ -734,6 +872,8 @@ func pit_decision(c) -> Variant:
 	var want = ideal_tyre(wet)
 	if left < 1 or c.crew_cooldown > 0:
 		return null
+	if is_wec():
+		return wec_decision(c, cur, left, want)
 	if c.pit_req != "":
 		var comp: String = c.pit_req
 		c.pit_req = ""
@@ -744,6 +884,8 @@ func pit_decision(c) -> Variant:
 		return {"comp": comp, "tyres": true}
 	if c.mine:
 		return null
+	if rules.get("no_pits", false) and kind_of(c.comp) == want:
+		return null # F3·스프린트: 날씨가 바뀔 때만 피트
 	ai_replan(c)
 	var ns: Variant = next_stop(c)
 	var have = kind_of(c.comp)
@@ -801,14 +943,73 @@ func pit_decision(c) -> Variant:
 			c.stops_done += 1
 		c.crew_out = true
 		return {"comp": _pick_ai_slick(c, fresh, left) if want == "slick" else want, "tyres": true}
-	if not ever_wet and left <= 3 and c.used_slicks() < 2:
+	if need_two() and left <= 3 and c.used_slicks() < 2:
 		c.crew_out = true
 		return {"comp": _alt_slick(c.comp), "tyres": true}
 	return null
 
 
+func _wec_burn(c, m: String) -> float:
+	return FPL * float(FUEL[m][1]) * c.fuel_burn_rate * (2.0 - c.eng_eff)
+
+
+## WEC 피트 판단 (HTML wecDecision). 내 차는 지시가 있을 때만, 단 연료가 1랩도 안 남으면 자동 급유
+func wec_decision(c, cur: int, left: int, want: String) -> Variant:
+	var want_kind := "slick" if want == "slick" else "W"
+	if c.mine:
+		if c.pit_req == "":
+			var fm_m: float = float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0)) * (2.0 - c.eng_eff)
+			var one_lap: float = FPL * fm_m
+			var fuel_line: float = c.fuel - one_lap * T.share[NS - 1]
+			if left >= 1 and fuel_line < one_lap * 0.90:
+				var d_t: bool = c.wear > 0.45 or kind_of(c.comp) != want_kind
+				var comp0: String = ("M" if want == "slick" else "W") if d_t else c.comp
+				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
+				return {"comp": comp0, "tyres": d_t, "driver": false, "fuel": true}
+			return null
+		var req: Dictionary = c.wec_req if c.wec_req != null else {"tyres": true, "fuel": true, "driver": false}
+		var comp1: String = c.pit_req
+		c.pit_req = ""
+		c.wec_req = null
+		c.crew_out = true
+		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true))}
+	var fm: float = float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate
+	var fuel_at_line: float = c.fuel - FPL * T.share[NS - 1] * fm
+	var need_fuel: bool = fuel_at_line < FPL * fm * 0.92 and left >= 1
+	var worn_out: bool = c.wear >= 0.62 and left >= 2
+	var early: bool = c.sc_early and sc and cur > 2 and c.wear >= 0.38 and (fuel_at_line < FPL * fm * 2.2 or c.wear >= 0.50) and left > 2
+	var wrong: bool = kind_of(c.comp) != want_kind
+	var weather := false
+	if wrong:
+		var nw := "M" if want == "slick" else "W"
+		var lose: float = weather_pen(c.comp, wet) - weather_pen(nw, wet)
+		weather = lose * uni(1.8, 4.5) > wec_stop_time(c, true, false) * 0.75
+	if not need_fuel and not worn_out and not early and not weather:
+		return null
+	var tyre_due: bool = c.stint_tyre + 1 >= c.tyre_every or c.wear >= 0.52 or worn_out
+	var tyres: bool = tyre_due or wrong
+	var driver: bool = c.stint_drv + 1 >= c.driver_every
+	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
+	if not tyres:
+		comp = c.comp
+	c.crew_out = true
+	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true}
+
+
 func ai_control(c, gap_ahead, gap_behind) -> void:
 	if c.mine:
+		return
+	if is_wec():
+		# 팀 성향별 연비 전략 + 막판 연비 주행으로 마지막 스톱 생략 시도
+		var left: int = laps - c.lap
+		var st: String = c.wec_style
+		var std_m := "rich" if st == "push" else "std"
+		var need_lean := maxi(0, int(ceil((left * _wec_burn(c, "lean") - c.fuel) / TANK - 0.000001)))
+		var need_std := maxi(0, int(ceil((left * _wec_burn(c, std_m) - c.fuel) / TANK - 0.000001)))
+		if left <= 14 and need_lean < need_std:
+			c.fuel_mode = "lean"
+		else:
+			c.fuel_mode = "rich" if st == "push" else ("lean" if st == "save" else "std")
 		return
 	if c.ers < 0.2:
 		c.ers_mode = "harvest"
@@ -846,6 +1047,8 @@ func on_cross(c, t: float) -> void:
 				fastest_t = lt
 				fastest_id = c.id
 		c.stint_laps += 1
+		if c.drv < c.drv_laps.size():
+			c.drv_laps[c.drv] += 1
 		c.lap_hist.push_front({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap})
 		if c.lap_hist.size() > 45:
 			c.lap_hist.pop_back()
@@ -864,12 +1067,17 @@ func on_cross(c, t: float) -> void:
 			c.finish_t = t
 			c.boxing = null
 			c.pit_phase = 0
-			if not ever_wet and c.used_slicks() < 2:
+			if need_two() and c.used_slicks() < 2:
 				c.penalty = 30.0
 				c.finish_t += 30.0
+			if min_drive != null and min_drive_short(c) > 0:
+				c.min_drive_fail = true
+				c.penalty += 60.0
+				c.finish_t += 60.0
+				event("%s %s 최소 주행 시간 미달 → 60초 페널티" % [name_of(c), GRADE_KO.get(min_drive["grade"], "")], "bad")
 			if not finishing:
 				finishing = true
-				event("체커기! %s 우승" % c.code)
+				event("체커기! %s 우승" % (c.label if is_wec() else c.code))
 			return
 		c.sec = 0
 		if c.boxing != null:
@@ -877,8 +1085,13 @@ func on_cross(c, t: float) -> void:
 		else:
 			c.pit_phase = 0
 		if rnd() < (1.0 - c.rel) * K["fail"] * (1.3 if c.pace == "attack" else 1.0) * (1.2 if night else 1.0):
-			retire(c, "고장")
-			return
+			if is_wec():
+				damage(c, "고장")
+				if c.dnf != "":
+					return
+			else:
+				retire(c, "고장")
+				return
 	elif c.started:
 		c.sec += 1
 		c.pit_phase = 0
@@ -887,7 +1100,10 @@ func on_cross(c, t: float) -> void:
 			if d != null:
 				c.boxing = d
 				# 피트 크루 숙련도(기본 0.85, 훈련센터 Lv당 +0.025): Lv5면 정차 약 0.8초 단축
-				c.pit_total = pit_loss() + gauss(0.6) - (c.crew - 0.85) * 8.0
+				if is_wec():
+					c.pit_total = wec_stop_time(c, d["tyres"], d.get("driver", false), d.get("fuel", true))
+				else:
+					c.pit_total = pit_loss() + gauss(0.6) - (c.crew - 0.85) * 8.0
 	c.started = true
 	schedule_next(c, t)
 
@@ -903,6 +1119,8 @@ func apply_pit(c) -> void:
 	c.pits += 1
 	c.pit_req = ""
 	c.crew_out = false
+	c.pit_total += c.garage
+	c.garage = 0.0
 	if d["tyres"]:
 		c.comp = d["comp"]
 		c.used[c.comp] = true
@@ -915,15 +1133,35 @@ func apply_pit(c) -> void:
 				c.used_set_pen = 0.45
 		c.tt = 0.35
 		c.stint_laps = 0
+		c.stint_tyre = 0
+	elif not d.get("forced", false):
+		c.stint_tyre += 1
+	var acts: Array = []
+	if d["tyres"]:
+		acts.append(TYRE_KO[c.comp] + " 장착")
+	if is_wec() and not d.get("forced", false):
+		if d.get("fuel", true):
+			c.fuel = TANK
+			acts.append("연료 급유")
+		if d.get("driver", false):
+			c.drv = (c.drv + 1) % c.drivers.size()
+			apply_driver(c)
+			c.stint_drv = 0
+			acts.append(c.name + " 교대")
+		else:
+			c.stint_drv += 1
 	if c.mine:
-		say(c, "박스 완료 (%s 장착)" % TYRE_KO[c.comp])
+		if d.get("forced", false):
+			say(c, "수리 끝. 다시 나갑니다")
+		else:
+			say(c, "박스 완료 (%s)" % (" · ".join(acts) if not acts.is_empty() else "점검"))
 
 
 func _same_class_ahead(c, k: int, t: float) -> Array:
 	var ahead: Variant = null
 	var ahead_t = -INF
 	for o in cars:
-		if o == c or o.dnf != "":
+		if o == c or o.dnf != "" or o.cls != c.cls:
 			continue
 		if o.cross.size() > k:
 			var ot: float = o.cross[k]
@@ -946,7 +1184,7 @@ func schedule_next(c, t: float) -> void:
 	var behind_gap: Variant = null
 	if k > 0:
 		for o in cars:
-			if o == c or o.dnf != "" or o.cross.size() <= k - 1:
+			if o == c or o.dnf != "" or o.cls != c.cls or o.cross.size() <= k - 1:
 				continue
 			var g: float = o.cross[k - 1] - c.cross[k - 1]
 			if g > 0 and (behind_gap == null or g < behind_gap):
@@ -975,7 +1213,7 @@ func schedule_next(c, t: float) -> void:
 					car_in_front = o
 		if sc_kind == "SC":
 			var lead_pace = float(CIRC["base"]) * sh * 1.58
-			var catchup = float(CIRC["base"]) * sh * 1.08
+			var catchup = float(CIRC["base"]) * sh * (1.15 if c.cls == "GT" else 1.08)
 			if car_in_front == null:
 				dur = lead_pace
 			else:
@@ -1000,6 +1238,15 @@ func schedule_next(c, t: float) -> void:
 			c.sec_base = c.sec_end - t
 			c.pending_crash = r["crash"]
 			return
+		if c.damage_now != "":
+			var why: String = c.damage_now
+			c.damage_now = ""
+			damage(c, why)
+			if c.dnf != "":
+				c.sec_start = t
+				c.sec_end = t + 0.1
+				c.sec_base = 0.1
+				return
 		if drs_on() and T.drs_secs.has(c.sec) and gap != null and gap < 1.0 and not pitting:
 			dur -= 0.45
 			c.drs = true
@@ -1011,8 +1258,8 @@ func schedule_next(c, t: float) -> void:
 				dur = maxf(dur, (ahead.sec_end - t) + 1.0)
 			elif gap - diff < K["ot_gap"] and diff > 0:
 				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
-					+ (0.15 if c.drs else 0.0) + (0.06 if (c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
-					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
+					+ (0.15 if c.drs else 0.0) + (0.06 if (not is_wec() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
+					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (not is_wec() and ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
 				p = clampf(p, 0.02, 0.9) * K["overtake_scale"]
 				if rnd() < p:
 					dur = maxf(0.4, (ahead.sec_end - t) - 0.15)
@@ -1024,6 +1271,23 @@ func schedule_next(c, t: float) -> void:
 					if ahead.mine:
 						say(ahead, "%s에게 추월당했어요" % c.code)
 				elif rnd() < K["crash"] * c.aggr * float(PACE[c.pace][2]) * (1.0 + 2.0 * wet) * (1.6 if c.instr == "attack" else 1.0) * (1.3 if ahead.instr == "defend" else 1.0):
+					if is_wec():
+						damage(c, "경합 중 접촉")
+						if c.dnf != "":
+							c.sec_start = t
+							c.sec_end = t + 0.1
+							c.sec_base = 0.1
+							return
+						dur = maxf(dur, (ahead.sec_end - t) + K["ot_gap"])
+						dur = maxf(0.5, dur)
+						c.sec_base = dur
+						if c.boxing != null and c.sec == NS - 1:
+							dur += c.pit_total * 0.35
+						if c.pit_phase == 2:
+							dur += c.pit_total * 0.65
+						c.sec_start = t
+						c.sec_end = t + dur
+						return
 					c.sec_start = t
 					c.sec_end = t + dur * 0.5
 					c.sec_base = c.sec_end - t
@@ -1129,15 +1393,17 @@ func on_leader_lap() -> void:
 		var it = ideal_tyre(wet)
 		if kind_of(c.comp) != (it if it != "slick" else "slick"):
 			say(c, "라인이 말랐어요. 슬릭으로 바꿔야 해요" if it == "slick" else "노면이 젖었어요. %s 필요해요" % TYRE_KO[it])
-		elif c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) - FPL * 0.2 and left > 0:
+		elif not is_wec() and c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) - FPL * 0.2 and left > 0:
 			say(c, "연료가 부족해요. 세이브 필요")
 		elif c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF):
 			say(c, "타이어가 다 됐어요 (%d%%)" % int(round(c.wear * 100)))
 		elif c.tt > 0.82:
 			say(c, "타이어가 과열됐어요. 페이스 좀 낮출게요?")
-		elif c.ers < 0.1 and c.ers_mode == "deploy":
+		elif is_wec() and c.stint_drv >= 2:
+			say(c, "%s: 세 번째 스틴트라 집중력이 떨어져요" % c.name)
+		elif not is_wec() and c.ers < 0.1 and c.ers_mode == "deploy":
 			say(c, "배터리가 바닥이에요")
-		elif not ever_wet and left <= 4 and c.used_slicks() < 2:
+		elif need_two() and left <= 4 and c.used_slicks() < 2:
 			say(c, "아직 두 번째 컴파운드를 안 썼어요! 안 바꾸면 30초 페널티예요")
 
 
@@ -1242,6 +1508,8 @@ func gap_to(c, ref) -> String:
 	var lb = int(floor(float(ri - ci) / NS))
 	if lb >= 1:
 		return "+%dL" % lb
+	if ci >= ref.cross.size():
+		return ""
 	var d = maxf(0.0, c.cross[ci] - ref.cross[ci])
 	return "+%.1f" % d
 
@@ -1308,7 +1576,7 @@ func _lane_u(g: float, stall: float) -> float:
 ## 차의 화면 위치 [Vector2, 방향]. 출발 전 그리드, 피트레인 진입·정차·출구를 모두 처리한다.
 func car_pos_angle(c) -> Array:
 	if not c.started:
-		var grid_d = -(c.grid + 1) * T.L * 0.0048
+		var grid_d = -(c.grid + 1) * T.L * (0.0035 if is_wec() else 0.0048)
 		if c.start_t <= 0.0:
 			return [T.point_at_dist(grid_d), T.head_at_dist(grid_d)]
 		var prog = clampf(clock / maxf(0.01, c.start_t), 0.0, 1.0)
@@ -1346,13 +1614,19 @@ func sc_pos_angle() -> Array:
 
 
 # ═════════ 결과 ═════════
+## 결과: 클래스별 순위와 포인트 (F1 은 클래스가 하나). pos = 클래스 내 순위
 func results() -> Array:
 	var out = []
 	var ord = order()
-	var winner = ord[0]
-	var pos = 0
+	var cls_pos := {}
+	var winners := {}
 	for c in ord:
-		pos += 1
+		if not winners.has(c.cls):
+			winners[c.cls] = c
+	for c in ord:
+		cls_pos[c.cls] = int(cls_pos.get(c.cls, 0)) + 1
+		var pos: int = cls_pos[c.cls]
+		var winner = winners[c.cls]
 		var gap = ""
 		if c.dnf != "":
 			gap = "DNF (%s)" % c.dnf
@@ -1363,10 +1637,66 @@ func results() -> Array:
 		else:
 			gap = "+%.1f초" % (c.finish_t - winner.finish_t)
 		var pts = 0
-		if c.dnf == "" and pos <= POINTS.size():
-			pts = POINTS[pos - 1]
-		out.append({"pos": pos, "car": c, "gap": gap, "points": pts})
+		var ptab: Array = rules.get("points", POINTS)
+		if c.dnf == "" and pos <= ptab.size():
+			pts = ptab[pos - 1]
+		out.append({"pos": pos, "car": c, "gap": gap, "points": pts, "cls": c.cls})
 	return out
+
+
+## WEC 내 차 박스 지시: 타이어(comp) · 급유 · 드라이버 교대를 고른다
+func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool) -> void:
+	if not c.is_running() or c.boxing != null:
+		return
+	if not tyres and not fuel and not driver:
+		say(c, "타이어·급유·교대 중 하나는 골라주세요")
+		return
+	c.pit_req = comp if tyres else c.comp
+	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver}
+	var parts: Array = []
+	parts.append(TYRE_KO[comp] + " 교체" if tyres else "타이어 유지")
+	parts.append("급유" if fuel else "급유 생략")
+	if driver:
+		parts.append("드라이버 교대")
+	say(c, "박스 지시 확인: " + " + ".join(parts))
+
+
+func set_fuel_mode(c, m: String) -> void:
+	c.fuel_mode = m
+	say(c, "연료 %s 모드" % WEC_FUEL_KO[m])
+
+
+## 최소 주행 규정: 해당 등급 드라이버가 더 달려야 하는 랩 수 (0이면 충족)
+func min_drive_short(c) -> int:
+	if min_drive == null:
+		return 0
+	var need := int(ceil(float(min_drive["pct"]) * laps))
+	var done_l := 0
+	var has := false
+	for i in c.drivers.size():
+		if c.drivers[i].get("grade", "") == min_drive["grade"]:
+			has = true
+			if i < c.drv_laps.size():
+				done_l += int(c.drv_laps[i])
+	if not has:
+		return 0
+	return maxi(0, need - done_l)
+
+
+## 클래스 안에서의 순위 (1부터)
+func class_pos(c) -> int:
+	var n := 0
+	for o in order():
+		if o.cls == c.cls:
+			n += 1
+			if o == c:
+				return n
+	return n
+
+
+## WEC 남은 연료로 달릴 수 있는 랩 수
+func fuel_laps(c) -> float:
+	return maxf(0.0, c.fuel / maxf(0.01, _wec_burn(c, c.fuel_mode)))
 
 
 ## 출발 직전 정리 (HTML start()): 그리드 순서대로 정렬하고 반응 속도를 준다.
@@ -1377,7 +1707,7 @@ func prepare_start() -> void:
 		var c = cars[i]
 		c.grid = i
 		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) + gauss(0.012), 0.01, 0.09)
-		c.start_t = i * 0.25 + react
+		c.start_t = i * (0.42 if is_wec() else 0.25) + react
 		c.used[c.comp] = true
 		if c.mine and c.tyre_sets != null and not c.q3_locked and SLICK.has(c.comp):
 			if c.tyre_sets[c.comp] > 0:
@@ -1385,3 +1715,169 @@ func prepare_start() -> void:
 				c.used_set_pen = 0.0
 			else:
 				c.used_set_pen = 0.45
+
+
+## WEC 엔트리: 하이퍼카(HY) 팀별 1~2대 + LMGT3(GT) 9팀 × 2대. 팀·크루는 data/wec.json (HTML WEC_FIELD 그대로).
+## opts.wec_hy / wec_gt / wec_field 로 커리어용 명단을 넘길 수 있다.
+func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
+	var W: Dictionary = DB.wec
+	if opts.has("wec_entries"):
+		_build_wec_entries(opts["wec_entries"], opts, start_comps)
+		return
+	var hy: Array = opts.get("wec_hy", W["hy"])
+	var gt: Array = opts.get("wec_gt", W["gt"])
+	var field: Dictionary = opts.get("wec_field", W["field"])
+	var engines: Dictionary = W["engines"]
+	var setups: Array = opts.get("setup", [])
+	var sets: Array = opts.get("sets", [])
+	var stall_keys: Array = []
+	for e in field["hy"]:
+		var t: Dictionary = hy[int(e["ti"])]
+		var mine: bool = int(e["ti"]) == my_team
+		var k: int = int(e["k"])
+		var eng: Dictionary = engines.get(t.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+		var c = CarS.new()
+		c.id = cars.size()
+		c.cls = "HY"
+		c.team = t["name"]
+		c.team_idx = int(e["ti"])
+		c.label = ("%s #%d" % [t["name"], k + 1]) if int(t.get("cars", 2)) > 1 else String(t["name"])
+		c.color = Color(t["color"])
+		c.rim = Color(t.get("rim", "#ffffff"))
+		c.mine = mine
+		c.slot = k
+		c.perf = float(t["perf"]) + (float(eng["pwr"]) - 0.88) * 0.25
+		c.eng_eff = float(eng["eff"])
+		c.rel = clampf(float(t["rel"]) + float(eng["relMod"]), 0.75, 0.98)
+		c.crew = float(t["crew"])
+		c.strategy = float(t["strategy"])
+		c.drivers = e["crew"].duplicate(true)
+		c.fuel = TANK
+		c.bop = uni(-0.004, 0.004)
+		c.nerve = uni(0.5, 1.6)
+		if mine:
+			c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
+			c.press = "std"
+			c.tyre_every = 2
+			c.driver_every = 2
+			c.sc_early = false
+			c.comp = String(start_comps[k]) if k < start_comps.size() else "M"
+			if k < setups.size():
+				c.wing = float(setups[k].get("wing", c.wing))
+				c.press = setups[k].get("press", "std")
+			if k < sets.size():
+				c.tyre_sets = sets[k]
+		else:
+			c.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
+			c.press = "std"
+			c.tyre_every = 2 if rnd() < float(t["strategy"]) - 0.3 else 1
+			c.driver_every = 2
+			c.sc_early = rnd() < 0.7
+			c.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
+			c.comp = "M" if rnd() < 0.7 else "H"
+		_finish_wec_car(c, stall_keys)
+	for e in field["gt"]:
+		var t2: Dictionary = gt[int(e["ti"])]
+		var k2: int = int(e["k"])
+		var c2 = CarS.new()
+		c2.id = cars.size()
+		c2.cls = "GT"
+		c2.team = t2["name"]
+		c2.team_idx = 100 + int(e["ti"])
+		c2.label = "%s #%d" % [t2["name"], k2 + 1]
+		c2.color = Color(t2["color"])
+		c2.rim = Color(t2.get("rim", "#ffffff"))
+		c2.slot = k2
+		c2.perf = float(t2["perf"])
+		c2.rel = float(t2["rel"])
+		c2.crew = float(t2["crew"])
+		c2.strategy = float(t2["strategy"])
+		c2.drivers = e["crew"].duplicate(true)
+		c2.fuel = TANK
+		c2.bop = uni(-0.004, 0.004)
+		c2.nerve = uni(0.5, 1.6)
+		c2.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
+		c2.press = "std"
+		c2.tyre_every = 2 if rnd() < 0.5 else 1
+		c2.driver_every = 2
+		c2.sc_early = rnd() < 0.7
+		c2.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
+		c2.comp = "M" if rnd() < 0.6 else "H"
+		_finish_wec_car(c2, stall_keys)
+	n_stalls = stall_keys.size()
+
+
+func _finish_wec_car(c, stall_keys: Array) -> void:
+	apply_driver(c)
+	c.used = {c.comp: true}
+	var key: String = c.cls + ":" + c.team
+	if not stall_keys.has(key):
+		stall_keys.append(key)
+	c.stall_idx = stall_keys.find(key)
+	cars.append(c)
+
+
+## 커리어 하위 리그용 엔트리: [{cls, team:{name,color,rim,perf,rel,crew,strategy,eng_eff}, k, crew:[3명], mine}]
+func _build_wec_entries(entries: Array, opts: Dictionary, start_comps: Array) -> void:
+	var stall_keys: Array = []
+	var setups: Array = opts.get("setup", [])
+	var sets: Array = opts.get("sets", [])
+	for e in entries:
+		var t: Dictionary = e["team"]
+		var k: int = int(e["k"])
+		var c = CarS.new()
+		c.id = cars.size()
+		c.cls = e["cls"]
+		c.team = t["name"]
+		c.team_idx = int(e.get("ti", 0))
+		c.label = "%s #%d" % [t["name"], k + 1]
+		c.color = Color(t["color"])
+		c.rim = Color(t.get("rim", "#ffffff"))
+		c.mine = bool(e.get("mine", false))
+		c.slot = k
+		c.perf = float(t["perf"])
+		c.eng_eff = float(t.get("eng_eff", 1.0))
+		c.rel = float(t["rel"])
+		c.crew = float(t.get("crew", 0.82))
+		c.strategy = float(t.get("strategy", 0.8))
+		c.drivers = e["crew"].duplicate(true)
+		c.fuel = TANK
+		c.bop = uni(-0.004, 0.004)
+		c.nerve = uni(0.5, 1.6)
+		c.press = "std"
+		c.driver_every = 2
+		if c.mine:
+			c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
+			c.tyre_every = 2
+			c.sc_early = false
+			c.comp = String(start_comps[k]) if k < start_comps.size() else "M"
+			if k < setups.size():
+				c.wing = float(setups[k].get("wing", c.wing))
+				c.press = setups[k].get("press", "std")
+			if k < sets.size():
+				c.tyre_sets = sets[k]
+		else:
+			c.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
+			c.tyre_every = 2 if rnd() < c.strategy - 0.3 else 1
+			c.sc_early = rnd() < 0.7
+			c.wec_style = "push" if rnd() < 0.25 else ("save" if rnd() < 0.33 else "std")
+			c.comp = "M" if rnd() < 0.65 else "H"
+		_finish_wec_car(c, stall_keys)
+	n_stalls = stall_keys.size()
+
+
+## 그리드를 직접 정한다 (F2 스프린트 리버스 그리드 등). keys = ["팀|슬롯", …] 앞에서부터 순서
+func apply_grid(keys: Array) -> void:
+	var pos := {}
+	for i in keys.size():
+		pos[keys[i]] = i
+	cars.sort_custom(func(a, b): return int(pos.get("%s|%d" % [a.team, a.slot], 999)) < int(pos.get("%s|%d" % [b.team, b.slot], 999)))
+	for i in cars.size():
+		cars[i].grid = i
+
+
+func grid_keys() -> Array:
+	var out: Array = []
+	for c in cars:
+		out.append("%s|%d" % [c.team, c.slot])
+	return out

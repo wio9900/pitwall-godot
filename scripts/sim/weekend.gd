@@ -28,7 +28,11 @@ var _q_soft_used := {}
 ## sim 은 new_race 까지 끝난 상태여야 한다. obligation_laps: 스폰서 행사로 줄어드는 연습 랩 수.
 func setup(sim_, obligation_laps: int = 0) -> void:
 	sim = sim_
-	sets = [{"S": 2, "M": 2, "H": 1}, {"S": 2, "M": 2, "H": 1}]
+	# 주말 타이어: F1 S2·M2·H1 / WEC S1·M2·H2 (예선 세션이 2개라 새 소프트가 1세트뿐)
+	if sim.is_wec():
+		sets = [{"S": 1, "M": 2, "H": 2}, {"S": 1, "M": 2, "H": 2}]
+	else:
+		sets = [{"S": 2, "M": 2, "H": 1}, {"S": 2, "M": 2, "H": 1}]
 	setups = []
 	for c in my_cars():
 		setups.append({"wing": c.wing, "press": c.press, "fuel_load": c.fuel_load})
@@ -46,6 +50,16 @@ func setup(sim_, obligation_laps: int = 0) -> void:
 
 func my_cars() -> Array:
 	return sim.my_cars()
+
+
+## 내 차가 속한 클래스 (WEC 하위 리그면 LMP2·LMGT3). 하이퍼폴은 이 클래스만
+func main_cls() -> String:
+	var mc: Array = my_cars()
+	return mc[0].cls if not mc.is_empty() else "HY"
+
+
+func _cls_rank(c: String) -> int:
+	return {"HY": 0, "P2": 1, "GT": 2}.get(c, 0)
 
 
 ## 셋업 변경은 연습 중에만 (예선부터는 파크 페르메로 윙 고정)
@@ -80,7 +94,7 @@ func est_range_text(comp: String) -> String:
 	var lo := maxf(0.008, est * (1.0 - err))
 	var hi := est * (1.0 + err)
 	# 화면에는 '한 바퀴 마모 %' 로 보여준다 (서킷 마모·레이스 길이 반영)
-	var k: float = float(sim.CIRC["wear"]) * RS.WEAR_SCALE / sim.laps * 100.0
+	var k: float = float(sim.CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / sim.laps) * 100.0
 	return "%.1f~%.1f%%/랩" % [lo * k, hi * k]
 
 
@@ -114,11 +128,12 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	var wear := 0.0
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
 	var CIRC: Dictionary = sim.CIRC
-	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEAR_SCALE / 15.0) * float(RS.PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate
+	var ws: float = sim.wsc()
+	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * float(RS.PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate
 	var res: Array = []
 	for i in n:
 		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press)
-		t += wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * 0.03 + sim.gauss(0.25)
+		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * 0.03) * ws + sim.gauss(0.25)
 		if c.press == "low" and wear > 0.5:
 			t += 0.3 * float(RS.PRESS_FX["low"]["heat"])
 		res.append(t)
@@ -132,7 +147,7 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	if kind == "long":
 		wear_est["runs"] = int(wear_est["runs"]) + 1
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": wr * 15.0 / sim.laps * 100.0, "kind": kind, "wing": c.wing, "press": c.press}
+	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press}
 	practice_runs.push_front(r)
 	last_feedback = "%s: %s" % [c.name, feedback(c)]
 	if kind == "long":
@@ -151,7 +166,7 @@ func auto_practice() -> void:
 
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
 func start_quali() -> void:
-	Q = {"res": {}, "stage": 1, "max_stage": 3, "eliminated": {}, "idx": 0, "done": false}
+	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "idx": 0, "done": false}
 	_q_soft_used.clear()
 	for c in my_cars():
 		c.q3_locked = false
@@ -168,8 +183,9 @@ func q_lap(c, push: String, traffic: String, stage: int, comp: String, used_set:
 	var evo_bonus: float = tv[0]
 	var trf_risk: float = tv[1]
 	var stage_evo := (stage - 1) * -0.18
-	var comp_delta: float = float(RS.COMP[comp][0])
-	var used_pen := 0.45 if used_set else 0.0
+	var ws: float = sim.wsc()
+	var comp_delta: float = float(RS.COMP[comp][0]) * ws
+	var used_pen: float = 0.45 * ws if used_set else 0.0
 	var note := "헌 타이어 어택 (약 +0.45s)" if used_set else ""
 	var deleted := false
 	var secs: Array = []
@@ -178,7 +194,7 @@ func q_lap(c, push: String, traffic: String, stage: int, comp: String, used_set:
 		var sh: float = sim.T.share[s]
 		var t: float = float(CIRC["base"]) * sh * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"]) * spd)
 		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
-		t += sim.gauss(0.10 * sqrt(sh))
+		t += sim.gauss(0.10 * sqrt(sh) * sqrt(ws))
 		if sim.rnd() < trf_risk * sh * 1.6:
 			var loss: float = sim.uni(0.22, 0.68)
 			t += loss
@@ -200,13 +216,15 @@ func _run_ai_stage(st: int) -> void:
 	for c in sim.cars:
 		if c.mine or Q["eliminated"].has(c.id):
 			continue
+		if sim.is_wec() and c.cls != main_cls() and st > 1:
+			continue # 하이퍼폴은 하이퍼카만
 		var r = sim.rnd()
 		var trf := "clean"
 		if r >= 0.6:
 			trf = "early" if sim.rnd() < 0.5 else "late"
 		var ai_comp := "M" if (st == 1 and c.speed > 0.86 and sim.rnd() < 0.5) else "S"
 		var used_n: int = _q_soft_used.get(c.id, 0)
-		var ai_used := ai_comp == "S" and used_n >= 2
+		var ai_used: bool = ai_comp == "S" and used_n >= (1 if sim.is_wec() else 2)
 		if ai_comp == "S":
 			_q_soft_used[c.id] = used_n + 1
 		var push := "std"
@@ -254,6 +272,16 @@ func commit_lap(res: Dictionary) -> void:
 	while Q["stage"] < Q["max_stage"]:
 		var cut := 15 if Q["stage"] == 1 else 10
 		var ord: Array = q_order()
+		if sim.is_wec():
+			# 하이퍼폴: 하이퍼카 상위 8대만 진출 (GT3는 예선 기록으로 뒤쪽 그리드)
+			cut = 8
+			var hy: Array = []
+			for c in ord:
+				if c.cls == main_cls():
+					hy.append(c)
+				else:
+					Q["eliminated"][c.id] = true
+			ord = hy
 		for i in range(cut, ord.size()):
 			Q["eliminated"][ord[i].id] = true
 		Q["stage"] += 1
@@ -287,6 +315,8 @@ func q_order() -> Array:
 
 func _q_cmp(x, y) -> bool:
 	var res: Dictionary = Q.get("res", {})
+	if x.cls != y.cls:
+		return _cls_rank(x.cls) < _cls_rank(y.cls)
 	var a: Variant = res.get(x.id)
 	var b: Variant = res.get(y.id)
 	if a == null and b == null:
@@ -346,7 +376,8 @@ func finish_quali() -> void:
 			c.wear = 0.14 if r["used"] else 0.05
 	for c in sim.cars:
 		if not c.mine:
-			sim.plan_ai_strategy(c, c.comp if c.q3_locked else "")
+			if not sim.is_wec():
+				sim.plan_ai_strategy(c, c.comp if c.q3_locked else "")
 	var parts: Array = []
 	for c in my_cars():
 		parts.append("%s P%d(%s)" % [c.code, c.grid + 1, c.comp])

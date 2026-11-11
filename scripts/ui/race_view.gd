@@ -111,7 +111,7 @@ func _update_cars(delta: float) -> void:
 	var T = sim.T
 	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px)
 	var gap_d: float = maxf(T.L * 0.0045, 15.0 * _car_scale(false) / maxf(_s, 0.01))
-	var last_d: Variant = null
+	var last_by_cls := {} # 클래스별로 앞차보다 앞서 그리지 않기
 	var targets := {}
 	for c in sim.order():
 		if c.dnf != "":
@@ -132,9 +132,10 @@ func _update_cars(delta: float) -> void:
 			targets[c.id] = [pa[0], pa[1]]
 			continue
 		var dist: float = sim.car_dist(c)
+		var last_d: Variant = last_by_cls.get(c.cls)
 		if last_d != null and last_d - dist < T.L * 0.5:
 			dist = minf(dist, last_d - gap_d)
-		last_d = dist
+		last_by_cls[c.cls] = dist
 		targets[c.id] = [T.point_at_dist(dist), T.head_at_dist(dist)]
 	var kp = clampf(delta * 18.0, 0.0, 1.0)
 	var ka = clampf(delta * 14.0, 0.0, 1.0)
@@ -449,6 +450,10 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 		_ellipse(Vector2.ZERO, Vector2(9.5, 6.2), AMBER, 2.0 if c.slot == sel_slot else 1.3)
 	if c.drs and not sim.sc:
 		_ellipse(Vector2(-1, 0), Vector2(10.5, 6.8), GREEN, 1.4)
+	if c.cls != "F1":
+		_draw_wec_body(c)
+		draw_set_transform_matrix(Transform2D.IDENTITY)
+		return
 	# 오픈 휠 4개 + 컴파운드 색 띠
 	var tyre := Color("#0b0e12")
 	draw_rect(Rect2(2.6, -4.8, 3.2, 1.7), tyre)
@@ -470,6 +475,48 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_fill_ellipse(Vector2(-0.5, 0), Vector2(2.0, 1.1), Color("#11161d"))
 	draw_arc(Vector2(-0.3, 0), 1.6, -1.2, 1.2, 8, Color("#6b7280"), 0.5)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+## WEC 하이퍼카(풀 카울 + 눈물방울 캐노피 + 샤크핀) / LMGT3(박스형 쿠페 + 스포일러)
+func _draw_wec_body(c) -> void:
+	var tcol: Color = Color(sim.TYRE_HEX[c.comp])
+	if c.cls == "HY":
+		_round_rect(Rect2(-6.8, -4.2, 13.6, 8.4), 3.2, c.color)
+		_round_rect_line(Rect2(-6.8, -4.2, 13.6, 8.4), 3.2, c.rim, 0.6)
+		_fill_ellipse(Vector2(0.6, 0), Vector2(2.8, 1.9), Color("#0f172a"))
+		draw_line(Vector2(-1.8, 0), Vector2(-6.4, 0), c.rim, 0.6)
+		draw_rect(Rect2(-7.0, -4.0, 1.4, 8.0), Color("#111827"))
+		draw_rect(Rect2(3.0, -4.4, 1.6, 0.6), tcol)
+		draw_rect(Rect2(3.0, 3.8, 1.6, 0.6), tcol)
+	else:
+		var g := 0.88
+		_round_rect(Rect2(-5.8 * g, -3.8 * g, 11.6 * g, 7.6 * g), 1.8 * g, c.color)
+		draw_rect(Rect2(-2.2 * g, -2.7 * g, 4.8 * g, 5.4 * g), Color("#111827"))
+		draw_rect(Rect2(-1.8 * g, -2.1 * g, 2.6 * g, 4.2 * g), c.color)
+		draw_rect(Rect2(-6.2 * g, -3.6 * g, 1.1 * g, 7.2 * g), Color("#0b0e12"))
+		draw_rect(Rect2(2.6 * g, -4.0 * g, 1.4 * g, 0.5 * g), tcol)
+		draw_rect(Rect2(2.6 * g, 3.5 * g, 1.4 * g, 0.5 * g), tcol)
+
+
+func _round_rect(r: Rect2, rad: float, col: Color) -> void:
+	draw_colored_polygon(_rr_pts(r, rad), col)
+
+
+func _round_rect_line(r: Rect2, rad: float, col: Color, w: float) -> void:
+	var pts := _rr_pts(r, rad)
+	pts.append(pts[0])
+	draw_polyline(pts, col, w, true)
+
+
+func _rr_pts(r: Rect2, rad: float) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	var cs := [r.position + Vector2(r.size.x - rad, rad), r.position + Vector2(r.size.x - rad, r.size.y - rad), r.position + Vector2(rad, r.size.y - rad), r.position + Vector2(rad, rad)]
+	var a0 := [-PI / 2, 0.0, PI / 2, PI]
+	for i in 4:
+		for k in 5:
+			var a: float = a0[i] + PI / 2 * k / 4.0
+			pts.append(cs[i] + Vector2(cos(a), sin(a)) * rad)
+	return pts
 
 
 func _car_body(o: Vector2) -> PackedVector2Array:
@@ -516,7 +563,7 @@ func _draw_my_labels(font) -> void:
 			continue
 		var q := _X(_smooth[c.id]["p"])
 		var sc := _car_scale(true)
-		var tag: String = c.code
+		var tag: String = ("#%d %s" % [c.slot + 1, c.code]) if c.cls != "F1" else c.code
 		if sim.is_pitting(c):
 			if not _pit_seen.has(c.id):
 				_pit_seen[c.id] = sim.clock

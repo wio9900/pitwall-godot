@@ -18,6 +18,22 @@ var chassis := 0.0
 var rel := 0.0
 var crew := 0.85
 var strategy := 0.8
+# WEC 전용
+var label := ""           # "Toyota Gazoo Racing #1"
+var perf := 0.0           # 하이퍼카·GT3 종합 성능 (BoP 후)
+var bop := 0.0            # BoP 보정 (+ 느림)
+var eng_eff := 1.0        # 연비 효율
+var tyre_every := 2       # 몇 스틴트마다 타이어 교체
+var driver_every := 2     # 몇 스틴트마다 드라이버 교대
+var stint_tyre := 0
+var stint_drv := 0
+var wec_style := "std"    # AI 연비 성향 push / std / save
+var garage := 0.0         # 개러지 수리 시간 (다음 피트에 더해짐)
+var repairs := 0
+var damage_now := ""
+var wec_req: Variant = null
+var drv_laps: Array = [0, 0, 0] # 드라이버별 완주 랩 (최소 주행 규정 확인용)
+var min_drive_fail := false # 내 차 WEC 피트 지시 {tyres, fuel, driver}
 
 # 드라이버
 var drivers: Array = []

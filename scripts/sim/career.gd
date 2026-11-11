@@ -12,6 +12,7 @@ const DEV_AREAS := ["aero", "engine", "chassis", "rel"]
 const FAC_KEYS := ["wind", "bench", "rig", "sim", "factory", "pit"]
 const ENGINE_CHOICES := ["Mercedes", "Ferrari", "Red Bull Ford", "Honda"]
 const POINTS := [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
+const SPRINT_POINTS := [10, 8, 6, 5, 4, 3, 2, 1]
 const CE0 := {"aero": 0.006, "eng": 0.006, "tyre": 0.007, "rel": 0.006}
 const MISSION_PEN := {"both_finish": 0.01, "double_p8": 0.02, "podium_one": 0.03}
 
@@ -42,6 +43,20 @@ func _init() -> void:
 	D = DB.career
 
 
+## 커리어 시리즈: "f1" / "wec"
+func ser() -> String:
+	return String(hq.get("series", "f1"))
+
+
+func is_wec() -> bool:
+	return ser() == "wec"
+
+
+## 시리즈별 데이터 (WEC 는 data/wec.json)
+func SD() -> Dictionary:
+	return DB.wec if is_wec() else D
+
+
 # ═════════ 난수 ═════════
 func rnd() -> float:
 	return rng.randf()
@@ -67,7 +82,9 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	else:
 		rng.randomize()
 	var HD: Dictionary = D["hq_default"]
+	var series: String = opts.get("series", "f1")
 	hq = {
+		"series": series, "jokers": int(D["econ"]["jokersPerCycle"]), "wec_bop": 0.0,
 		"ver": SAVE_VER, "season": 1, "race_count": 0, "cash": 8.5, "pop": 0.45,
 		"entry": entry, "tier": 3, "promo_qualified": false, "news": [],
 		"team_name": "", "team_color": "#00d2be", "team_rim": "#ffffff",
@@ -86,11 +103,17 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 		"laps": 15,
 	}
 	# 팀·엔진은 커리어마다 복사해서 바꿔 쓴다 (AI 개발·드라이버 교체가 원본 데이터를 건드리지 않게)
-	hq["teams"] = DB.teams.duplicate(true)
-	hq["engines"] = DB.engines.duplicate(true)
+	if series == "wec":
+		hq["teams"] = DB.wec["hy"].duplicate(true)
+		hq["engines"] = {}
+		hq["field"] = DB.wec["field"]["hy"].duplicate(true)
+		hq["laps"] = 0
+	else:
+		hq["teams"] = DB.teams.duplicate(true)
+		hq["engines"] = DB.engines.duplicate(true)
 	# 드라이버 나이는 teams_f1.json 의 age (HTML 원본 driverAges 는 이름과 순서가 어긋나 있어 실제 나이로 교정)
 	for t in hq["teams"]:
-		for d in t["drivers"]:
+		for d in t.get("drivers", []):
 			d["age"] = int(d.get("age", 26))
 	_reset_econ()
 	if entry == "create":
@@ -100,6 +123,9 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 		hq["team_rim"] = opts.get("rim", "#ffffff")
 		hq["engine_supplier"] = opts.get("engine", "Mercedes")
 		hq["region"] = opts.get("region", "uk")
+		if series == "wec":
+			_create_wec_team(opts)
+	if entry == "create" and series != "wec":
 		hq["teams"].append({
 			"name": hq["team_name"], "color": hq["team_color"], "rim": hq["team_rim"], "engine": hq["engine_supplier"],
 			"aero": 0.72, "chassis": 0.72, "rel": 0.81,
@@ -108,9 +134,10 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 				{"name": "H. Park", "speed": 0.73, "cons": 0.75, "tyreMgmt": 0.73, "aggr": 0.52, "def": 0.70, "wet": 0.72, "age": 24},
 			],
 		})
+	if entry == "create":
 		hq["my_team"] = hq["teams"].size() - 1
 		var seed_cash := 5.2 if hq["tier"] == 1 else (6.0 if hq["tier"] == 2 else 6.5)
-		hq["cash"] = seed_cash
+		hq["cash"] = snappedf(seed_cash * (0.96 if series == "wec" else 1.0), 0.1)
 		hq["pop"] = 0.28 if hq["tier"] == 1 else (0.32 if hq["tier"] == 2 else 0.35)
 	else:
 		hq["my_team"] = team_idx
@@ -119,7 +146,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 		hq["team_color"] = t["color"]
 		hq["team_rim"] = t["rim"]
 		hq["engine_supplier"] = t["engine"]
-		var ib: Array = D["init_budget"].get(t["name"], [8.5, 0.60])
+		var ib: Array = SD()["init_budget"].get(t["name"], [9.0, 0.70] if series == "wec" else [8.5, 0.60])
 		hq["cash"] = float(ib[0])
 		hq["pop"] = float(ib[1])
 	hq["cost_cap_limit"] = cap_limit_now()
@@ -129,6 +156,44 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	_refresh_offers()
 	_refresh_pay_pool()
 	news("시즌 1 개막! %s 본부에 오신 걸 환영합니다." % hq["team_name"])
+
+
+const WEC_PKGS := {
+	"Ferrari F163 3.0L V6 Twin-Turbo Hybrid": "Ferrari 499P 커스터머",
+	"Cadillac LMC55R 5.5L V8 NA Hybrid": "Cadillac V-Series.R",
+	"BMW P66/3 4.0L V8 Twin-Turbo Hybrid": "BMW M Hybrid V8",
+	"Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "독자 워크스 (GMR V8)",
+}
+# 하위 리그 라인업 등급 · 최소 주행 규정 (LMGT3 브론즈 25%, LMP2 실버 20%)
+const WEC_TIER_GRADES := {"1": ["G", "S", "B"], "2": ["G", "G", "S"], "3": ["P", "P", "G"]}
+const WEC_MIN_DRIVE := {"1": {"grade": "B", "pct": 0.25}, "2": {"grade": "S", "pct": 0.20}}
+const GRADE_RANGE := {"P": [0.86, 0.93], "G": [0.80, 0.87], "S": [0.70, 0.78], "B": [0.56, 0.66]}
+
+
+func _create_wec_team(opts: Dictionary) -> void:
+	var pkg: String = opts.get("engine", "Ferrari F163 3.0L V6 Twin-Turbo Hybrid")
+	if not WEC_PKGS.has(pkg):
+		pkg = "Ferrari F163 3.0L V6 Twin-Turbo Hybrid"
+	hq["engine_supplier"] = pkg
+	hq["teams"].append({"name": hq["team_name"], "color": hq["team_color"], "cars": 2, "perf": 0.48, "rel": 0.84, "crew": 0.78, "strategy": 0.76, "rim": hq["team_rim"], "engine": pkg})
+	var ti: int = hq["teams"].size() - 1
+	var names := [["K. Seo", "J. Holm", "D. Kim"], ["H. Park", "M. Vance", "L. Jung"]]
+	var grades := ["G", "S", "B"]
+	var spd := {"G": 0.78, "S": 0.73, "B": 0.64}
+	for k in 2:
+		var crew: Array = []
+		for i in 3:
+			var g: String = grades[i]
+			crew.append({"name": names[k][i], "grade": g, "speed": spd[g] - 0.01 * k, "cons": 0.76, "tyreMgmt": 0.75, "aggr": 0.52, "def": 0.72, "wet": 0.74})
+		hq["field"].append({"ti": ti, "k": k, "crew": crew})
+
+
+## WEC 내 차 크루 [3명] (slot 0/1)
+func my_crew(slot: int) -> Array:
+	for e in hq.get("field", []):
+		if int(e["ti"]) == my_team() and int(e["k"]) == slot:
+			return e["crew"]
+	return []
 
 
 func my_team() -> int:
@@ -152,15 +217,50 @@ func tier() -> int:
 
 func tier_meta(t: int = -1) -> Dictionary:
 	var tt := tier() if t < 0 else t
-	return D["tiers"][str(tt)]
+	return SD()["tiers"][str(tt)]
 
 
 func tier_scale() -> float:
-	return float(tier_meta()["cap"]) / float(D["econ"]["topCap"]["f1"])
+	return float(tier_meta()["cap"]) / float(D["econ"]["topCap"][ser()])
 
 
 func calendar() -> Array:
-	return D["calendar"]
+	return SD()["calendar"]
+
+
+## 레이스 형식: f1 / f2(스프린트+피처, 피처는 의무 피트) / f3(피트 없이 한 경기, 드라이버 육성) / wec
+func race_format() -> String:
+	if is_wec():
+		return "wec"
+	if not is_spec_tier():
+		return "f1"
+	return "f3" if tier() == 1 else "f2"
+
+
+func has_sprint() -> bool:
+	return race_format() == "f2"
+
+
+## 형식별 규칙: F3 는 타이어가 한 경기를 버티고(피트 불필요), F2 스프린트는 의무 피트 없음, 피처는 두 컴파운드 의무
+func race_rules(sprint: bool = false) -> Dictionary:
+	match race_format():
+		"f3":
+			return {"two_compounds": false, "wear_mult": 0.3, "no_pits": true}
+		"f2":
+			return {"two_compounds": false, "wear_mult": 0.5, "no_pits": true, "points": SPRINT_POINTS} if sprint else {"two_compounds": true, "wear_mult": 1.0}
+	return {}
+
+
+## 이번 레이스 랩 수 (F1 15랩, F2 피처 15·스프린트 10, F3 12, WEC 는 서킷별 '짧게')
+func race_laps(sprint: bool = false) -> int:
+	if is_wec():
+		return int(DB.circuits[next_circuit()]["lapsOpt"]["short"])
+	match race_format():
+		"f3":
+			return 12
+		"f2":
+			return 10 if sprint else 15
+	return int(hq["laps"])
 
 
 func cal_len() -> int:
@@ -184,6 +284,8 @@ func is_spec_tier() -> bool:
 
 
 func is_works() -> bool:
+	if is_wec():
+		return true
 	if hq["entry"] == "create":
 		return false
 	return D["works"].has(my_team_dict()["name"])
@@ -242,7 +344,7 @@ func races_left() -> int:
 
 
 func projected_spend() -> float:
-	return r2(hq["spent_cap"] + float(D["econ"]["ops"]["f1"]) * tier_scale() * races_left())
+	return r2(hq["spent_cap"] + float(D["econ"]["ops"][ser()]) * tier_scale() * races_left())
 
 
 func cap_limit_now() -> float:
@@ -258,6 +360,8 @@ func reg_year() -> int:
 func standings() -> Array:
 	var rows: Array = []
 	for t in race_teams():
+		if t.get("traffic", false):
+			continue
 		var nm: String = t["name"]
 		rows.append({"name": nm, "color": t["color"], "pts": int(hq["team_pts"].get(nm, 0)), "mine": nm == hq["team_name"]})
 	rows.sort_custom(func(a, b): return a["pts"] > b["pts"] if a["pts"] != b["pts"] else (not a["mine"] and b["mine"]))
@@ -276,7 +380,10 @@ func initial_rank() -> int:
 	var arr: Array = []
 	var teams: Array = hq["teams"]
 	for i in teams.size():
-		arr.append([i, float(teams[i]["aero"]) + float(teams[i]["chassis"])])
+		if is_wec():
+			arr.append([i, float(teams[i]["perf"])])
+		else:
+			arr.append([i, float(teams[i]["aero"]) + float(teams[i]["chassis"])])
 	arr.sort_custom(func(a, b): return a[1] > b[1])
 	for i in arr.size():
 		if arr[i][0] == my_team():
@@ -287,7 +394,9 @@ func initial_rank() -> int:
 func pre_rank() -> int:
 	if int(hq["last_rank"]) > 0:
 		return int(hq["last_rank"])
-	return 6 if is_spec_tier() else initial_rank()
+	if is_spec_tier():
+		return 6
+	return 5 if is_wec() else initial_rank()
 
 
 func atr_rank() -> int:
@@ -301,7 +410,7 @@ func atr_pct(rank: int) -> float:
 
 
 func atr_mult() -> float:
-	if is_spec_tier():
+	if is_spec_tier() or is_wec():
 		return 1.0
 	return atr_pct(atr_rank()) * (1.0 - float(hq["atr_pen"]))
 
@@ -317,7 +426,7 @@ func mission_reward(k: String) -> float:
 
 
 func prize_for(rank: int) -> float:
-	var t: Array = D["econ"]["prize"]["f1"]
+	var t: Array = D["econ"]["prize"][ser()]
 	var v: float = t[clampi(rank - 1, 0, t.size() - 1)]
 	return r2(v * float(tier_meta()["prizeM"]) * tier_scale())
 
@@ -340,7 +449,11 @@ func hq_bonus(stat: String) -> float:
 		s_rel += float(e.get("relMod", 0.0))
 	var syn := 0.005 if all_high else 0.0
 	var b: Dictionary = hq["base"]
-	var dv: Dictionary = hq["dev"]
+	var dv: Dictionary = hq["dev"].duplicate()
+	if is_wec():
+		# WEC: BoP 가 성능 개발 이점의 40%를 상쇄 (신뢰성은 제외)
+		for k in ["aero", "engine", "chassis"]:
+			dv[k] = float(dv[k]) * (1.0 - float(D["econ"]["bopAbsorb"]))
 	match stat:
 		"aero":
 			return float(dv["aero"]) + (int(b["wind"]) - 1) * 0.006 + s_aero + syn - CE0["aero"]
@@ -364,6 +477,9 @@ func hq_extra() -> Dictionary:
 ## 레이스 시뮬레이션에 넘길 내 차 보정치
 func my_mods() -> Dictionary:
 	var ex := hq_extra()
+	if is_wec():
+		var perf: float = (hq_bonus("aero") + hq_bonus("engine") + hq_bonus("chassis") + ex["aero"] + ex["engine"] + ex["chassis"]) * 0.45
+		return {"perf": perf, "rel": hq_bonus("rel") + ex["rel"], "crew": hq_bonus("crew"), "bop": float(hq.get("wec_bop", 0.0))}
 	return {
 		"aero": hq_bonus("aero") + ex["aero"], "engine": hq_bonus("engine") + ex["engine"],
 		"chassis": hq_bonus("chassis") + ex["chassis"], "rel": hq_bonus("rel") + ex["rel"], "crew": hq_bonus("crew"),
@@ -376,6 +492,8 @@ func spec_engine() -> float:
 
 ## 이번 리그에서 달리는 팀 목록 (스펙 하위 리그면 실제 F2/F3 팀 + 내 팀)
 func race_teams() -> Array:
+	if is_wec():
+		return _wec_race_teams()
 	if not is_spec_tier():
 		return hq["teams"]
 	var out: Array = []
@@ -394,6 +512,79 @@ func race_teams() -> Array:
 	return out
 
 
+## WEC 리그 팀 목록 (순위표용). 하위 리그는 실제 LMGT3/LMP2 팀 + 내 팀, LMP2 는 GT3 를 트래픽으로 같이 달린다.
+func _wec_race_teams() -> Array:
+	if not is_spec_tier():
+		var out0: Array = []
+		for t in hq["teams"]:
+			out0.append(t)
+		return out0
+	var out: Array = []
+	for r in DB.wec["rosters"][str(tier())]:
+		out.append({"name": r["name"], "color": r["color"], "rim": "#ffffff", "perf": r["perf"], "rel": r["rel"], "crew": 0.82, "strategy": 0.8, "crew_names": r["crew_names"]})
+	out.append(my_team_dict())
+	return out
+
+
+func _hash01(sv: String, i: int) -> float:
+	var h := 2166136261
+	for ch in (sv + str(i)):
+		h = ((h ^ ch.unicode_at(0)) * 16777619) & 0x7fffffff
+	return float(h % 10000) / 10000.0
+
+
+## 하위 리그 로스터 크루를 등급제로 만든다 (이름 기반 고정 난수라 매번 같은 실력)
+func _roster_crew(names: Array) -> Array:
+	var grades: Array = WEC_TIER_GRADES[str(tier())]
+	var out: Array = []
+	for i in 3:
+		var g: String = grades[i]
+		var nm: String = names[i] if i < names.size() else "M. Brundle"
+		var rg: Array = GRADE_RANGE[g]
+		out.append({"name": nm, "grade": g, "speed": rg[0] + (rg[1] - rg[0]) * _hash01(nm, 0), "cons": 0.66 + 0.26 * _hash01(nm, 1), "tyreMgmt": 0.7 + 0.2 * _hash01(nm, 2), "aggr": 0.3 + 0.5 * _hash01(nm, 3), "def": 0.6 + 0.25 * _hash01(nm, 4), "wet": 0.55 + 0.4 * _hash01(nm, 5)})
+	return out
+
+
+## 레이스 시뮬레이션에 넘길 옵션 (팀·엔진·내 차 보정·WEC 엔트리)
+func race_opts(sprint: bool = false) -> Dictionary:
+	if not is_wec():
+		return {"teams": race_teams(), "engines": hq["engines"], "my_mods": my_mods(), "rules": race_rules(sprint)}
+	if not is_spec_tier():
+		return {"wec_hy": hq["teams"], "wec_field": {"hy": hq["field"], "gt": DB.wec["field"]["gt"]}, "my_mods": my_mods()}
+	var cls := "GT" if tier() == 1 else "P2"
+	var entries: Array = []
+	var rs: Array = DB.wec["rosters"][str(tier())]
+	for ri in rs.size():
+		var r: Dictionary = rs[ri]
+		var team := {"name": r["name"], "color": r["color"], "rim": "#ffffff", "perf": r["perf"], "rel": r["rel"], "crew": 0.82, "strategy": 0.8}
+		var names: Array = r["crew_names"]
+		for k in 2:
+			# 2번 차는 크루 순서를 돌려서 다른 라인업으로
+			var nm2: Array = [names[(0 + k) % 3], names[(1 + k) % 3], names[(2 + k) % 3]]
+			entries.append({"cls": cls, "team": team, "k": k, "ti": ri, "crew": _roster_crew(nm2), "mine": false})
+	var me: Dictionary = my_team_dict()
+	var eng: Dictionary = DB.wec["engines"].get(me.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+	var my_t := {"name": me["name"], "color": me["color"], "rim": me.get("rim", "#ffffff"), "perf": float(me["perf"]), "rel": clampf(float(me["rel"]) + float(eng["relMod"]), 0.75, 0.98), "crew": float(me["crew"]), "strategy": float(me["strategy"]), "eng_eff": float(eng["eff"])}
+	for k in 2:
+		entries.append({"cls": cls, "team": my_t, "k": k, "ti": 99, "crew": my_crew(k), "mine": true})
+	if tier() == 2:
+		# 유러피언 LMP2 시리즈: LMGT3 가 함께 달리는 멀티클래스
+		var gt: Array = DB.wec["gt"]
+		for e in DB.wec["field"]["gt"]:
+			var t2: Dictionary = gt[int(e["ti"])]
+			entries.append({"cls": "GT", "team": {"name": t2["name"], "color": t2["color"], "perf": t2["perf"], "rel": t2["rel"], "crew": t2["crew"], "strategy": t2["strategy"]}, "k": int(e["k"]), "ti": 100 + int(e["ti"]), "crew": e["crew"], "mine": false})
+	return {"wec_entries": entries, "my_mods": my_mods(), "min_drive": WEC_MIN_DRIVE[str(tier())]}
+
+
+## 내 차가 속한 클래스
+func my_class() -> String:
+	if not is_wec():
+		return "F1"
+	if not is_spec_tier():
+		return "HY"
+	return "GT" if tier() == 1 else "P2"
+
+
 func race_my_index() -> int:
 	return race_teams().size() - 1 if is_spec_tier() else my_team()
 
@@ -402,6 +593,24 @@ func race_my_index() -> int:
 func car_stats() -> Dictionary:
 	var t := my_team_dict()
 	var ex := hq_extra()
+	if is_wec():
+		var eng: Dictionary = DB.wec["engines"].get(t.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+		var pf: float = float(t["perf"])
+		var rows_w := [
+			["에어로(공력)", 0.76 + pf * 0.16, hq_bonus("aero") + ex["aero"]],
+			["파워트레인", float(eng["pwr"]), hq_bonus("engine") + ex["engine"]],
+			["섀시·그립", 0.77 + pf * 0.16, hq_bonus("chassis") + ex["chassis"]],
+			["신뢰도", float(t["rel"]) + float(eng["relMod"]), hq_bonus("rel") + ex["rel"]],
+			["피트 크루", float(t["crew"]), hq_bonus("crew")],
+		]
+		var out_w: Array = []
+		var ovr_w := 0.0
+		for i in rows_w.size():
+			var v := mini(99, int(round((float(rows_w[i][1]) + float(rows_w[i][2])) * 100.0)))
+			out_w.append([rows_w[i][0], v, int(round(float(rows_w[i][2]) * 100.0))])
+			if i < 4:
+				ovr_w += v
+		return {"rows": out_w, "ovr": int(round(ovr_w / 4.0))}
 	var eng_base: float = spec_engine() if is_spec_tier() else float(hq["engines"].get(t["engine"], 0.88))
 	var rows := [
 		["에어로(공력)", float(t["aero"]), hq_bonus("aero") + ex["aero"]],
@@ -424,6 +633,8 @@ func car_stats() -> Dictionary:
 func proj_lock(k: String) -> String:
 	if is_spec_tier() and (k == "aero" or k == "engine"):
 		return "스펙 시리즈 (공통 섀시·엔진)"
+	if is_wec() and not is_spec_tier() and k != "rel" and hq["dev_target"] != "next" and int(hq.get("jokers", 0)) <= 0:
+		return "EVO 조커 소진 (다음 호몰로게이션까지 성능 개발 불가)"
 	return ""
 
 
@@ -437,7 +648,7 @@ func dev_lead(sz: String) -> int:
 
 
 func frontier_gap(k: String) -> float:
-	if is_spec_tier() or k == "rel" or k == "engine":
+	if is_wec() or is_spec_tier() or k == "rel" or k == "engine":
 		return 0.0
 	var col := "aero" if k == "aero" else "chassis"
 	var top := 0.0
@@ -501,6 +712,8 @@ func start_project(k: String, sz: String) -> bool:
 	hq["cash"] = r2(hq["cash"] - cost)
 	hq["spent_cap"] = r2(hq["spent_cap"] + cost)
 	book("rnd", cost)
+	if is_wec() and not is_spec_tier() and k != "rel" and not next:
+		hq["jokers"] = int(hq.get("jokers", 0)) - 1
 	hq["proj"][k] = {"size": sz, "due": int(hq["race_count"]) + dev_lead(sz), "next": next}
 	news("🛠 %s %s%s 개발 착수 — %d경기 후 투입 (%.2fM)" % [D["dev_ko"][k], D["dev"][sz]["ko"], " (차세대)" if next else "", dev_lead(sz), cost])
 	return true
@@ -551,12 +764,20 @@ func build_facility(k: String) -> bool:
 
 # ═════════ AI 팀 개발·규정 변경 ═════════
 func budget_of_team(name: String) -> float:
-	var ib: Array = D["init_budget"].get(name, [9.0, 0.6])
+	var ib: Array = SD()["init_budget"].get(name, [9.0, 0.6])
 	return float(ib[0])
 
 
 func _ai_develop(frac: float) -> void:
 	if is_spec_tier():
+		return
+	if is_wec():
+		for ti in hq["teams"].size():
+			if ti == my_team():
+				continue
+			var tw: Dictionary = hq["teams"][ti]
+			tw["perf"] = minf(0.95, snappedf(float(tw["perf"]) + 0.003 * frac, 0.0001))
+			tw["rel"] = minf(0.97, snappedf(float(tw["rel"]) + 0.004 * frac, 0.0001))
 		return
 	var st := standings()
 	var teams: Array = hq["teams"]
@@ -586,6 +807,12 @@ func _regulation_reset(notes: Array) -> void:
 		if hq["proj"][k] != null and hq["proj"][k]["next"]:
 			hq["proj"][k]["next"] = false
 	hq["dev_target"] = "cur"
+	hq["jokers"] = int(D["econ"]["jokersPerCycle"])
+	if is_wec():
+		var mw := "📜 신규 호몰로게이션 주기 (시즌 %d): 현행 개발 30%% 승계, 차세대 100%% 반영 · EVO 조커 재지급" % int(hq["season"])
+		news(mw)
+		notes.append(mw)
+		return
 	var b: Dictionary = hq["base"]
 	var my_infra := (int(b["wind"]) + int(b["bench"]) + int(b["rig"]) + int(b["sim"]) + int(b["factory"])) / 5.0
 	var teams: Array = hq["teams"]
@@ -642,6 +869,23 @@ func _cost_cap_audit(notes: Array) -> void:
 
 # ═════════ 엔진 공급 (정치) ═════════
 func evaluate_engine_politics() -> void:
+	if is_wec():
+		hq["politics"] = {}
+		return
+	_evaluate_engine_politics_f1()
+
+
+## WEC 신규 팀: 시즌 전에 하이퍼카 패키지 교체
+func change_package(pkg: String) -> bool:
+	if not is_wec() or hq["entry"] != "create" or not is_preseason() or not WEC_PKGS.has(pkg):
+		return false
+	hq["engine_supplier"] = pkg
+	my_team_dict()["engine"] = pkg
+	news("🔧 하이퍼카 패키지 계약: %s" % WEC_PKGS[pkg])
+	return true
+
+
+func _evaluate_engine_politics_f1() -> void:
 	var pol := {
 		"Mercedes": {"blocked": false, "reason": "공급 가능 (1.2M)", "fee": 1.2},
 		"Ferrari": {"blocked": false, "reason": "공급 가능 (1.5M)", "fee": 1.5},
@@ -822,6 +1066,9 @@ func sell_junior(i: int) -> bool:
 # ── 페이 드라이버 (새 기능): 실력은 낮지만 시즌 후원금을 들고 온다. 하위 리그·약팀 중심 ──
 func _refresh_pay_pool() -> void:
 	var pool: Array = []
+	if is_wec():
+		hq["pay_pool"] = pool
+		return
 	var n := 2 if (tier() < 3 or pre_rank() >= 8) else 1
 	var sn: Array = D["surnames"]
 	for i in n:
@@ -1063,6 +1310,14 @@ func _mission_ok(k: String, mine: Array, classified: Array) -> bool:
 
 
 # ═════════ 레이스 정산 (HTML finish() 커리어 부분) ═════════
+## 내 드라이버 (F1: 팀 드라이버 / WEC: 각 차의 첫 번째 크루)
+func salary_driver(slot: int) -> Dictionary:
+	if is_wec():
+		var cr: Array = my_crew(slot)
+		return cr[0] if not cr.is_empty() else {"name": "-", "speed": 0.8}
+	return my_driver(slot)
+
+
 func driver_salary(d: Dictionary) -> float:
 	var nm: String = d["name"]
 	if hq["salaries"].has(nm):
@@ -1076,14 +1331,16 @@ func after_race(sim) -> Dictionary:
 	var notes: Array = []
 	var ord: Array = sim.order()
 	var classified: Array = []
+	var mcls := my_class()
 	for c in ord:
-		if c.dnf == "":
+		if c.dnf == "" and c.cls == mcls:
 			classified.append(c)
 	var mine: Array = sim.my_cars()
 	var total := 0
+	var mult := 2 if (is_wec() and sim.circ_key == "lemans") else 1
 	for i in classified.size():
 		var c = classified[i]
-		var pv: int = (POINTS[i] if i < POINTS.size() else 0) + (1 if (sim.fastest_id == c.id and i < 10) else 0)
+		var pv: int = (POINTS[i] if i < POINTS.size() else 0) * mult + (1 if (not is_wec() and sim.fastest_id == c.id and i < 10) else 0)
 		if pv > 0:
 			hq["team_pts"][c.team] = int(hq["team_pts"].get(c.team, 0)) + pv
 			if c.mine:
@@ -1096,14 +1353,24 @@ func after_race(sim) -> Dictionary:
 	var step := int(ceil(cl / 3.0))
 	if ri != 0 and ri % step == 0:
 		_ai_develop(1.0 / 3.0)
-	# 드라이버 성장(25세 이하) · 노화(33세 이상)
-	for slot in 2:
+	if is_wec():
+		# WEC BoP: 성적이 좋으면 다음 경기 핸디캡, 부진하면 완화
+		var best := 99
+		for c in mine:
+			var p := classified.find(c)
+			if c.dnf == "" and p >= 0:
+				best = mini(best, p + 1)
+		var adj := 0.0025 if best == 1 else (0.0012 if best <= 3 else (-0.0012 if best >= 6 else 0.0))
+		hq["wec_bop"] = clampf(snappedf(float(hq.get("wec_bop", 0.0)) * 0.8 + adj, 0.0001), -0.006, 0.008)
+	# 드라이버 성장(25세 이하) · 노화(33세 이상) — F1. 하위 리그는 육성 중심이라 성장이 빠르다 (F3 ×2, F2 ×1.5)
+	var gm := 2.0 if race_format() == "f3" else (1.5 if race_format() == "f2" else 1.0)
+	for slot in (0 if is_wec() else 2):
 		var d := my_driver(slot)
 		var age := int(d.get("age", 25))
 		var dnf: bool = slot < mine.size() and mine[slot].dnf != ""
 		if age <= 25 and not dnf:
-			d["speed"] = minf(0.96, snappedf(float(d["speed"]) + 0.025 / cl, 0.0001))
-			d["cons"] = minf(0.95, snappedf(float(d["cons"]) + 0.02 / cl, 0.0001))
+			d["speed"] = minf(0.96, snappedf(float(d["speed"]) + 0.025 * gm / cl, 0.0001))
+			d["cons"] = minf(0.95, snappedf(float(d["cons"]) + 0.02 * gm / cl, 0.0001))
 		elif age >= 33:
 			d["speed"] = maxf(0.72, snappedf(float(d["speed"]) - 0.003, 0.001))
 	var rep := 0.08 if total >= 25 else (0.04 if total >= 10 else (0.02 if total > 0 else -0.02))
@@ -1114,6 +1381,25 @@ func after_race(sim) -> Dictionary:
 	ec["total"] = total
 	save()
 	return ec
+
+
+## F2 스프린트: 포인트(8위까지 10-8-6-5-4-3-2-1)와 평판만 반영. 돈 정산은 피처 레이스 뒤에 한 번.
+func after_sprint(sim) -> Dictionary:
+	var classified: Array = []
+	for c in sim.order():
+		if c.dnf == "":
+			classified.append(c)
+	var total := 0
+	for i in mini(classified.size(), SPRINT_POINTS.size()):
+		var c = classified[i]
+		var pv: int = SPRINT_POINTS[i]
+		hq["team_pts"][c.team] = int(hq["team_pts"].get(c.team, 0)) + pv
+		if c.mine:
+			total += pv
+	if total > 0:
+		hq["pop"] = clampf(r2(hq["pop"] + (0.02 if total >= 10 else 0.01)), 0.15, 0.98)
+	save()
+	return {"total": total}
 
 
 func _settle(mine: Array, classified: Array, total: int) -> Dictionary:
@@ -1146,9 +1432,9 @@ func _settle(mine: Array, classified: Array, total: int) -> Dictionary:
 				c["sat"] = maxf(0.0, float(c["sat"]) - 0.06)
 	var salary := 0.0
 	for slot in 2:
-		salary += driver_salary(my_driver(slot)) * (0.15 if is_spec_tier() else 1.0) / cl
-	var ops: float = float(D["econ"]["ops"]["f1"]) * ts
-	var overhead: float = float(D["econ"]["overhead"]["f1"]) * ts
+		salary += driver_salary(salary_driver(slot)) * (0.15 if is_spec_tier() else 1.0) / cl
+	var ops: float = float(D["econ"]["ops"][ser()]) * ts
+	var overhead: float = float(D["econ"]["overhead"][ser()]) * ts
 	var fac_red := 1.0 - 0.1 * (int(hq["base"]["factory"]) - 1)
 	var repair := 0.0
 	for c in mine:
@@ -1188,7 +1474,7 @@ func _season_end(notes: Array) -> void:
 	_sponsor_season_end(rank, notes)
 	hq["pay_drivers"] = {}
 	for t in hq["teams"]:
-		for d in t["drivers"]:
+		for d in t.get("drivers", []):
 			d["age"] = int(d.get("age", 25)) + 1
 	_season_lifecycle(rank, notes)
 	hq["season"] = int(hq["season"]) + 1
@@ -1258,8 +1544,8 @@ func _season_lifecycle(rank: int, notes: Array) -> void:
 		var m3 := "⚠ 최하위(P%d) 부진으로 보드진 경고, 평판 -6%%" % rank
 		news(m3)
 		notes.append(m3)
-	# 2) 고참 노화·은퇴 → 유망주·루키 세대교체
-	var teams: Array = hq["teams"]
+	# 2) 고참 노화·은퇴 → 유망주·루키 세대교체 (F1)
+	var teams: Array = hq["teams"] if not is_wec() else []
 	for ti in teams.size():
 		for k in 2:
 			var d: Dictionary = teams[ti]["drivers"][k]

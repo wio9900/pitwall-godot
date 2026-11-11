@@ -156,7 +156,9 @@ func _tab_home() -> void:
 	var nk: String = cr.next_circuit()
 	var nc: Dictionary = DB.circuits[nk]
 	var c3 = K.card(_body, "다음 레이스 · R%d %s" % [cr.round_idx() + 1, nc["full"]], K.AMBER)
-	_txt(c3, "%s · %s · 강우 확률 [color=#3b82f6]%d%%[/color] · %d랩\n[color=#8b98a5]%s[/color]" % [nc["dir"], nc["desc"], int(float(nc["rain"]) * 100), int(h["laps"]), nc["setupHint"]])
+	_txt(c3, "%s · %s · 강우 확률 [color=#3b82f6]%d%%[/color] · %d랩\n[color=#8b98a5]%s[/color]" % [nc["dir"], nc["desc"], int(float(nc["rain"]) * 100), cr.race_laps(), nc["setupHint"]])
+	if cr.is_wec():
+		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "GT": "LMGT3"}[cr.my_class()], _min_drive_txt()], 13)
 	_txt(c3, "[b]스폰서 미션 약속[/b] — 레이스 전에 목표를 약속해요. 달성하면 보너스, 못 하면 평판과 스폰서 만족도가 떨어져요.", 14)
 	_mission_seg(c3)
 	var cal := ""
@@ -183,6 +185,13 @@ func _tab_home() -> void:
 			break
 		nt += "• %s\n" % s
 	_txt(c5, nt, 13)
+
+
+func _min_drive_txt() -> String:
+	var md: Variant = CS.WEC_MIN_DRIVE.get(str(cr.tier())) if cr.is_spec_tier() else null
+	if md == null:
+		return "최소 주행 규정 없음"
+	return "%s 드라이버 최소 %d%% 주행 (미달 시 60초)" % [{"B": "브론즈", "S": "실버"}[md["grade"]], int(float(md["pct"]) * 100)]
 
 
 func _mission_seg(parent: Control) -> void:
@@ -221,7 +230,9 @@ func _finance(parent: Control) -> void:
 func _tab_rnd() -> void:
 	var h := _h()
 	var c0 = K.card(_body, "개발 환경 · 규정 주기 %d/%d년차" % [cr.reg_year(), int(cr.D["econ"]["regCycle"])])
-	if cr.is_spec_tier():
+	if cr.is_wec() and not cr.is_spec_tier():
+		_txt(c0, "하이퍼카는 호몰로게이션으로 차가 고정돼서 성능 개발(공력·파워트레인·섀시)에 [b]EVO 조커[/b]가 필요해요. 남은 조커 [color=#ffc53d][b]%d/%d[/b][/color]. 신뢰성 개선은 조커 없이 가능해요. [b]BoP가 성능 이점의 40%%를 상쇄[/b]하고, 성적에 따라 매 경기 조정돼요 (현재 내 팀 BoP %+.2f%%)." % [int(h.get("jokers", 0)), int(cr.D["econ"]["jokersPerCycle"]), float(h.get("wec_bop", 0.0)) * 100])
+	elif cr.is_spec_tier():
 		_txt(c0, "%s는 [b]공통 섀시·엔진[/b]을 쓰는 스펙 시리즈라 공력·파워트레인 개발이 금지돼요. 섀시와 신뢰성만 개선할 수 있고, 여기서 쌓은 [b]설비와 인력은 상위 리그로 그대로 이어져요.[/b]" % cr.tier_meta()["short"])
 	else:
 		_txt(c0, "공력 개발 효율은 [b]ATR(공력 시험 제한)[/b]을 따라요. 기준 순위 P%d → 풍동·CFD 허용량 [color=#ffc53d][b]%d%%[/b][/color]%s. 시즌 전반은 지난 시즌 순위, 후반은 현재 순위로 정해요. %s" % [
@@ -263,6 +274,23 @@ func _tab_rnd() -> void:
 func _engine_card() -> void:
 	var h := _h()
 	var c = K.card(_body, "파워유닛 공급")
+	if cr.is_wec():
+		var eng: Dictionary = DB.wec["engines"].get(h["engine_supplier"], {"pwr": 0.88, "eff": 1.0})
+		_txt(c, "현재 [b]%s[/b] · 출력 %d · 연비 %d%%" % [h["engine_supplier"], int(float(eng["pwr"]) * 100), int(float(eng["eff"]) * 100)])
+		if h["entry"] == "create":
+			var hb2 = K.hbox(4)
+			c.add_child(hb2)
+			for pk in CS.WEC_PKGS:
+				var b2 = K.btn(CS.WEC_PKGS[pk], 13)
+				b2.toggle_mode = true
+				b2.button_pressed = pk == h["engine_supplier"]
+				b2.disabled = not cr.is_preseason()
+				b2.pressed.connect(_on_pkg.bind(pk))
+				hb2.add_child(b2)
+			_txt(c, "[color=#8b98a5]하이퍼카 패키지는 시즌 개막 전에만 바꿀 수 있어요.[/color]", 13)
+		else:
+			_txt(c, "[color=#8b98a5]제조사 워크스 팀은 자사 파워유닛으로 호몰로게이션이 고정돼요.[/color]", 13)
+		return
 	if cr.is_spec_tier():
 		_txt(c, "스펙 시리즈 공통 엔진 사용 중 (성능 %d)" % int(cr.spec_engine() * 100))
 		return
@@ -284,6 +312,10 @@ func _engine_card() -> void:
 		hb.add_child(b)
 		reasons += "[color=%s]• %s: %s (성능 %d)[/color]\n" % ["#ef4444" if p["blocked"] else "#8b98a5", e, p["reason"], int(float(h["engines"].get(e, 0.86)) * 100)]
 	_txt(c, reasons, 13)
+
+
+func _on_pkg(pk) -> void:
+	_act(cr.change_package(pk))
 
 
 func _on_dev_target(v) -> void:
@@ -353,6 +385,9 @@ func _tab_staff() -> void:
 	var h := _h()
 	var pre: bool = cr.is_preseason()
 	_txt(_body, ("[color=#22c55e]🟢 이적 시장 열림 (시즌 개막 전)[/color] — 자금·평판에 맞춰 엔지니어와 드라이버를 영입하세요." if pre else "[color=#ffc53d]🔒 시즌 중: 외부 영입은 다음 시즌 개막 전에만 가능해요. 리저브·유망주 교체는 언제든 가능해요.[/color]"), 14)
+	if cr.is_wec():
+		_staff_wec()
+		return
 	var c1 = K.card(_body, "주전 드라이버")
 	for slot in 2:
 		var d: Dictionary = cr.my_driver(slot)
@@ -410,6 +445,33 @@ func _tab_staff() -> void:
 		var trained: bool = int(j.get("last_train", -1)) == int(h["race_count"])
 		K.row(c5, "[b]%s[/b] (%d세)\n[color=#8b98a5]현재 %d / 잠재력 %d · 이적 가치 %.1fM[/color]" % [j["name"], int(j["age"]), int(float(j["cur"]) * 100), int(float(j["pot"]) * 100), float(j["value"])],
 			[K.sbtn("훈련 완료" if trained else "훈련 0.8M", _on_train.bind(i), cr.can_train_junior(i)), K.sbtn("#1 승격", _on_promote.bind(0, i), true, K.PURPLE), K.sbtn("#2 승격", _on_promote.bind(1, i), true, K.PURPLE), K.sbtn("리저브", _on_jres.bind(i), true, K.GOOD), K.sbtn("판매", _on_sell.bind(i))], 13)
+
+
+func _staff_wec() -> void:
+	var h := _h()
+	var c1 = K.card(_body, "드라이버 라인업 (차당 3명 · 등급제)")
+	_txt(c1, "[color=#8b98a5]등급: 플래티넘 > 골드 > 실버 > 브론즈. %s 한 드라이버가 세 스틴트 이상 연속으로 타면 피로로 실수가 늘어요.[/color]" % _min_drive_txt(), 13)
+	for slot in 2:
+		var t := "[b]#%d[/b]  " % (slot + 1)
+		for d in cr.my_crew(slot):
+			var g: String = d.get("grade", "-")
+			var gc: String = {"P": "#a855f7", "G": "#ffc53d", "S": "#cbd5e1", "B": "#c2410c"}.get(g, "#8b98a5")
+			t += "[color=%s][%s][/color] %s (속도 %d)   " % [gc, g, d["name"], int(float(d["speed"]) * 100)]
+		_txt(c1, t, 14)
+	var c2 = K.card(_body, "수석 엔지니어")
+	var ce: Dictionary = h["chief"]
+	_txt(c2, "공력 [b]%s[/b] [%s] · 파워 [b]%s[/b] [%s] · 섀시 [b]%s[/b] [%s]" % [ce["aero"]["name"], ce["aero"]["tier"], ce["power"]["name"], ce["power"]["tier"], ce["chassis"]["name"], ce["chassis"]["tier"]], 14)
+	var pre: bool = cr.is_preseason()
+	for i in h["eng_pool"].size():
+		var en: Dictionary = h["eng_pool"][i]
+		var lab := "%.1fM 영입" % float(en["cost"])
+		if en["hired"]:
+			lab = "재직 중"
+		elif not pre:
+			lab = "시즌 전"
+		elif float(h["pop"]) < float(en["reqPop"]):
+			lab = "평판 %d%% 필요" % int(float(en["reqPop"]) * 100)
+		K.row(c2, "[%s] [b]%s[/b] %s" % [en["tier"], en["name"], en["deptKo"]], [K.sbtn(lab, _on_hire_eng.bind(i), cr.can_hire_engineer(i), K.GOOD)], 13)
 
 
 func _on_swap(slot) -> void:

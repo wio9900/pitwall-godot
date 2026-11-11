@@ -39,6 +39,9 @@ var circ_info: RichTextLabel
 var menu_cols: BoxContainer
 # 모드: quick(퀵 레이스) / career(커리어)
 var mode := "quick"
+var qseries := "f1"        # 퀵 레이스 시리즈 f1 / wec
+var quick_keys: Array = [] # 현재 시리즈의 서킷 키
+var quick_teams: Array = [] # 현재 시리즈의 팀 인덱스
 var mode_btns: Array = []
 var quick_left: Control
 var quick_right: Control
@@ -49,14 +52,19 @@ var wk = null
 var hq_view
 var wk_view
 var new_entry := "select"
+var new_series := "f1"
 var new_opts := {"name": "Korea GP Racing", "color": "#00d2be", "rim": "#ffffff", "engine": "Mercedes", "region": "uk", "tier": 1}
 var new_team := 6
+var new_team_list: Array = []
 var del_armed := false
 var result_title: Label
 var btn_again: Button
 var btn_menu: Button
 var btn_hq: Button
 var settled := false
+var sprint_mode := false   # F2 스프린트 레이스 중
+var feature_sim = null     # 스프린트 뒤에 달릴 피처 레이스 (예선 그리드)
+var btn_feature: Button
 
 # 레이스
 var race_box: Control
@@ -264,23 +272,16 @@ func _build_menu() -> void:
 	v.add_child(quick_left)
 	career_left = KitS.vbox(10)
 	v.add_child(career_left)
+	KitS.seg(quick_left, [["f1", "F1 그랑프리"], ["wec", "WEC 내구 (하이퍼카 + LMGT3)"]], qseries, _on_series, 17)
 	var grid = GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 12)
 	quick_left.add_child(grid)
 	opt_circuit = OptionButton.new()
-	for k in DB.circuit_keys:
-		opt_circuit.add_item("%s  (%s)" % [DB.circuits[k]["name"], DB.circuits[k]["full"]])
-	opt_circuit.item_selected.connect(func(_i): _update_circ_info())
+	opt_circuit.item_selected.connect(_on_circ_pick)
 	opt_team = OptionButton.new()
-	for t in DB.teams:
-		opt_team.add_item("%s  ·  %s / %s" % [t["name"], t["drivers"][0]["name"], t["drivers"][1]["name"]])
-	opt_team.select(6)
 	opt_laps = OptionButton.new()
-	for n in [10, 15, 20]:
-		opt_laps.add_item("%d랩" % n)
-	opt_laps.select(1)
 	opt_weather = OptionButton.new()
 	for w in ["자동 (서킷 강우 확률)", "맑음", "비"]:
 		opt_weather.add_item(w)
@@ -319,15 +320,76 @@ func _build_menu() -> void:
 	start.custom_minimum_size = Vector2(0, 44)
 	start.pressed.connect(_on_start)
 	quick_right.add_child(start)
+	_fill_quick_options()
+
+
+func _on_series(v) -> void:
+	qseries = v
+	_fill_quick_options()
+
+
+func _on_circ_pick(_i: int) -> void:
+	_fill_laps()
 	_update_circ_info()
 
 
+## 시리즈에 맞춰 서킷·팀·레이스 길이 목록을 다시 채운다
+func _fill_quick_options() -> void:
+	quick_keys = DB.wec_keys if qseries == "wec" else DB.circuit_keys
+	opt_circuit.clear()
+	for k in quick_keys:
+		opt_circuit.add_item("%s  (%s)" % [DB.circuits[k]["name"], DB.circuits[k]["full"]])
+	opt_team.clear()
+	quick_teams = []
+	if qseries == "wec":
+		var hy: Array = DB.wec["hy"]
+		for i in hy.size():
+			if int(hy[i]["cars"]) > 1:
+				quick_teams.append(i)
+				opt_team.add_item("%s  ·  %s" % [hy[i]["name"], String(hy[i]["engine"]).split(" ")[0]])
+		opt_team.select(0)
+	else:
+		for i in DB.teams.size():
+			var t: Dictionary = DB.teams[i]
+			quick_teams.append(i)
+			opt_team.add_item("%s  ·  %s / %s" % [t["name"], t["drivers"][0]["name"], t["drivers"][1]["name"]])
+		opt_team.select(6)
+	_fill_laps()
+	_update_circ_info()
+
+
+func _fill_laps() -> void:
+	var prev := opt_laps.selected
+	opt_laps.clear()
+	if qseries == "wec":
+		var lo: Dictionary = DB.circuits[quick_keys[maxi(0, opt_circuit.selected)]]["lapsOpt"]
+		opt_laps.add_item("짧게 %d랩" % int(lo["short"]))
+		opt_laps.add_item("표준 %d랩" % int(lo["std"]))
+		opt_laps.select(0 if prev < 0 or prev > 1 else prev)
+	else:
+		for n in [10, 15, 20]:
+			opt_laps.add_item("%d랩" % n)
+		opt_laps.select(1 if prev < 0 or prev > 2 else prev)
+
+
+func _quick_laps() -> int:
+	if qseries == "wec":
+		var lo: Dictionary = DB.circuits[quick_keys[opt_circuit.selected]]["lapsOpt"]
+		return int(lo["short"]) if opt_laps.selected == 0 else int(lo["std"])
+	return [10, 15, 20][opt_laps.selected]
+
+
 func _update_circ_info() -> void:
-	var k: String = DB.circuit_keys[opt_circuit.selected]
+	if opt_circuit.selected < 0:
+		return
+	var k: String = quick_keys[opt_circuit.selected]
 	var c: Dictionary = DB.circuits[k]
 	var wear_txt = "높음" if c["wear"] >= 1.12 else ("낮음" if c["wear"] <= 0.95 else "보통")
-	circ_info.text = "[b]%s[/b] · %s\n[color=#8b98a5]%s\n타이어 마모 %s · 피트 손실 %.1f초 · 강우 확률 %d%%%s[/color]" % [
-		c["full"], c["desc"], c["setupHint"], wear_txt, c["pitLoss"], int(c["rain"] * 100), (" · 야간 레이스" if c.get("night") != null else "")]
+	var pit_txt := "피트 손실 %.1f초" % float(c["pitLoss"]) if c.has("pitLoss") else "%d시간 레이스 · 스틴트 5랩마다 급유" % int(c.get("hours", 6))
+	circ_info.text = "[b]%s[/b] · %s\n[color=#8b98a5]%s\n타이어 마모 %s · %s · 강우 확률 %d%%%s[/color]" % [
+		c["full"], c["desc"], c["setupHint"], wear_txt, pit_txt, int(c["rain"] * 100), (" · 야간 구간 있음" if c.get("night") != null else "")]
+	if qseries == "wec":
+		circ_info.text += "\n[color=#8b98a5]WEC: 하이퍼카(내 팀)와 LMGT3가 함께 달려요. 박스 때 타이어·급유·드라이버 교대를 골라요. 연료는 약 5랩마다 채워야 하고, 한 드라이버가 오래 타면 피로로 실수가 늘어요.[/color]"
 
 
 func _show_menu() -> void:
@@ -377,14 +439,33 @@ func _render_career_menu() -> void:
 			var del = KitS.btn("⚠ 한 번 더 누르면 삭제" if del_armed else "저장 삭제", 15, _delete_save)
 			hb.add_child(del)
 	var c1 = KitS.card(career_left, "새 커리어")
-	KitS.seg(c1, [["select", "기존 팀으로 (F1)"], ["create", "신규 팀 창단"]], new_entry, _on_entry, 16)
+	KitS.seg(c1, [["f1", "F1"], ["wec", "WEC 내구"]], new_series, _on_new_series, 16)
+	var top_name := "Hypercar" if new_series == "wec" else "F1"
+	KitS.seg(c1, [["select", "기존 팀으로 (%s)" % top_name], ["create", "신규 팀 창단"]], new_entry, _on_entry, 16)
 	if new_entry == "select":
 		var ob = OptionButton.new()
-		for i in DB.teams.size():
-			var t: Dictionary = DB.teams[i]
-			var ib: Array = DB.career["init_budget"].get(t["name"], [8.5, 0.6])
-			ob.add_item("%s · 초기 자금 %.1fM · 평판 %d%%" % [t["name"], float(ib[0]), int(float(ib[1]) * 100)])
-		ob.select(new_team)
+		var idx := 0
+		var sel_i := 0
+		new_team_list = []
+		if new_series == "wec":
+			var hy: Array = DB.wec["hy"]
+			for i in hy.size():
+				if int(hy[i]["cars"]) < 2:
+					continue
+				var ib0: Array = DB.wec["init_budget"].get(hy[i]["name"], [9.0, 0.7])
+				ob.add_item("%s · 초기 자금 %.1fM · 평판 %d%%" % [hy[i]["name"], float(ib0[0]), int(float(ib0[1]) * 100)])
+				new_team_list.append(i)
+		else:
+			for i in DB.teams.size():
+				var t: Dictionary = DB.teams[i]
+				var ib: Array = DB.career["init_budget"].get(t["name"], [8.5, 0.6])
+				ob.add_item("%s · 초기 자금 %.1fM · 평판 %d%%" % [t["name"], float(ib[0]), int(float(ib[1]) * 100)])
+				new_team_list.append(i)
+		for i in new_team_list.size():
+			if new_team_list[i] == new_team:
+				sel_i = i
+		ob.select(sel_i)
+		new_team = new_team_list[sel_i]
 		ob.item_selected.connect(_on_new_team)
 		c1.add_child(ob)
 	else:
@@ -404,9 +485,17 @@ func _render_career_menu() -> void:
 		for col in DB.career["swatch_rim"]:
 			sw2.add_child(_swatch(col, new_opts["rim"] == col, _on_new_rim.bind(col)))
 		c1.add_child(KitS.label("출발 리그", 14, DIM))
-		KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
-		c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
-		KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
+		if new_series == "wec":
+			KitS.seg(c1, [["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+			c1.add_child(KitS.label("하이퍼카 패키지 (승격 후 사용)", 14, DIM))
+			var pk_items: Array = []
+			for pk in CareerS.WEC_PKGS:
+				pk_items.append([pk, String(CareerS.WEC_PKGS[pk]).split(" ")[0]])
+			KitS.seg(c1, pk_items, new_opts["engine"], _on_new_engine, 14)
+		else:
+			KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+			c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
+			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
 		c1.add_child(KitS.label("본부 지역", 14, DIM))
 		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
 	var info = KitS.rtl(15)
@@ -440,7 +529,14 @@ func _on_entry(v) -> void:
 
 
 func _on_new_team(i: int) -> void:
-	new_team = i
+	new_team = new_team_list[i]
+
+
+func _on_new_series(v) -> void:
+	new_series = v
+	new_team = 0 if v == "wec" else 6
+	new_opts["engine"] = "Ferrari F163 3.0L V6 Twin-Turbo Hybrid" if v == "wec" else "Mercedes"
+	_render_career_menu()
 
 
 func _on_new_name(t: String) -> void:
@@ -488,6 +584,7 @@ func _new_career() -> void:
 	if nm == "":
 		nm = "Korea GP Racing"
 	new_opts["name"] = nm
+	new_opts["series"] = new_series
 	career.new_career(new_entry, new_team, new_opts)
 	career.save()
 	mode = "career"
@@ -509,9 +606,9 @@ func _open_hq() -> void:
 # ═════════ 레이스 주말 ═════════
 func _read_quick_settings() -> void:
 	last_settings = {
-		"circ": DB.circuit_keys[opt_circuit.selected],
-		"team": opt_team.selected,
-		"laps": [10, 15, 20][opt_laps.selected],
+		"circ": quick_keys[opt_circuit.selected],
+		"team": quick_teams[opt_team.selected],
+		"laps": _quick_laps(),
 		"wx": ["auto", "dry", "rain"][opt_weather.selected],
 		"start": [["S", "M", "H"][opt_start[0].selected], ["S", "M", "H"][opt_start[1].selected]],
 	}
@@ -532,8 +629,8 @@ func _start_weekend_quick() -> void:
 func _start_weekend_career() -> void:
 	mode = "career"
 	sim = RaceSimS.new()
-	var opts := {"teams": career.race_teams(), "engines": career.hq["engines"], "my_mods": career.my_mods()}
-	sim.new_race(career.next_circuit(), career.race_my_index(), int(career.hq["laps"]), "auto", ["M", "M"], 0, opts)
+	var opts: Dictionary = career.race_opts()
+	sim.new_race(career.next_circuit(), career.race_my_index(), career.race_laps(), "auto", ["M", "M"], 0, opts)
 	wk = WeekendS.new()
 	wk.setup(sim, career.duty_laps())
 	_show_only(wk_view)
@@ -547,8 +644,32 @@ func _weekend_back() -> void:
 		_show_menu()
 
 
-## 주말(연습·예선)을 마친 sim 으로 결승 시작
+## 주말(연습·예선)을 마친 sim 으로 결승 시작. F2 라운드면 스프린트(예선 상위 10대 리버스 그리드)부터.
 func _begin_race() -> void:
+	if mode == "career" and career.has_sprint():
+		feature_sim = sim
+		var sp = RaceSimS.new()
+		sp.new_race(career.next_circuit(), career.race_my_index(), career.race_laps(true), "auto", ["M", "M"], 0, career.race_opts(true))
+		var keys: Array = feature_sim.grid_keys()
+		var top: Array = keys.slice(0, 10)
+		top.reverse()
+		sp.apply_grid(top + keys.slice(10))
+		sim = sp
+		sprint_mode = true
+		sim.event("F2 스프린트: 예선 상위 10대 리버스 그리드, 의무 피트 없음")
+		sim.prepare_start()
+		_launch_race()
+		return
+	sprint_mode = false
+	sim.prepare_start()
+	_launch_race()
+
+
+func _start_feature() -> void:
+	sim = feature_sim
+	feature_sim = null
+	sprint_mode = false
+	sim.event("F2 피처 레이스: 예선 그리드, 두 컴파운드 의무 (피트 1회 이상)")
 	sim.prepare_start()
 	_launch_race()
 
@@ -580,10 +701,16 @@ func _launch_race() -> void:
 	_show_only(race_box)
 	_set_speed(4)
 	_set_cam(-1)
+	var wec: bool = sim.is_wec()
 	for i in 2:
 		var cp: Dictionary = car_panels[i]
 		_press_only(cp["pace"], 1)
 		_press_only(cp["ers"], 1)
+		_press_only(cp["fuel"], 1)
+		cp["box_row"].visible = not wec
+		cp["ers_row"].visible = not wec
+		cp["wec_row"].visible = wec
+		cp["fuel_row"].visible = wec
 	_refresh_ui()
 
 
@@ -704,9 +831,33 @@ func _build_car_panel(parent: Control, slot: int) -> Dictionary:
 	var cancel = _btn("취소", 16)
 	cancel.pressed.connect(_on_cancel.bind(slot))
 	box_row.add_child(cancel)
+	# WEC 박스: 타이어 선택(또는 유지) + 급유 + 드라이버 교대
+	var wrow = HBoxContainer.new()
+	wrow.add_theme_constant_override("separation", 4)
+	v.add_child(wrow)
+	wrow.add_child(_label("박스", 16, DIM))
+	var wbtns = []
+	for comp in ["S", "M", "H", "W"]:
+		var wb = _btn(comp, 16)
+		wb.add_theme_color_override("font_color", Color(RaceSimS.TYRE_HEX[comp]))
+		wb.pressed.connect(_on_wec_box.bind(comp, slot))
+		wrow.add_child(wb)
+		wbtns.append(wb)
+	var fuel_only = _btn("급유만", 14)
+	fuel_only.pressed.connect(_on_wec_box.bind("keep", slot))
+	wrow.add_child(fuel_only)
+	wbtns.append(fuel_only)
+	var drv_t = _btn("교대", 14)
+	drv_t.toggle_mode = true
+	wrow.add_child(drv_t)
+	var wcancel = _btn("취소", 14)
+	wcancel.pressed.connect(_on_cancel.bind(slot))
+	wrow.add_child(wcancel)
 	var pace = _toggle_row(v, "페이스", [["save", "세이브"], ["standard", "표준"], ["attack", "공격"]], _on_pace.bind(slot))
 	var ers = _toggle_row(v, "ERS", [["harvest", "충전"], ["balance", "밸런스"], ["deploy", "오버"]], _on_ers.bind(slot))
-	return {"panel": pc, "head": head, "status": status, "box": box_btns, "cancel": cancel, "pace": pace, "ers": ers}
+	var fuel = _toggle_row(v, "연료", [["lean", "세이브"], ["std", "표준"], ["rich", "리치"]], _on_fuel_mode.bind(slot))
+	return {"panel": pc, "head": head, "status": status, "box": box_btns, "cancel": cancel, "pace": pace, "ers": ers,
+		"box_row": box_row, "wec_row": wrow, "wec_btns": wbtns, "drv": drv_t, "wcancel": wcancel, "fuel": fuel, "ers_row": ers[0].get_parent(), "fuel_row": fuel[0].get_parent()}
 
 
 func _toggle_row(parent: Control, title: String, items: Array, cb: Callable) -> Array:
@@ -769,6 +920,25 @@ func _on_pace(p: String, slot: int) -> void:
 	var c: Variant = _my(slot)
 	if c != null:
 		sim.set_pace(c, p)
+
+
+func _on_wec_box(comp: String, slot: int) -> void:
+	var c: Variant = _my(slot)
+	if c == null:
+		return
+	var drv: bool = car_panels[slot]["drv"].button_pressed
+	if comp == "keep":
+		sim.request_pit_wec(c, c.comp, false, true, drv)
+	else:
+		sim.request_pit_wec(c, comp, true, true, drv)
+	car_panels[slot]["drv"].set_pressed_no_signal(false)
+	_refresh_ui()
+
+
+func _on_fuel_mode(m: String, slot: int) -> void:
+	var c: Variant = _my(slot)
+	if c != null:
+		sim.set_fuel_mode(c, m)
 
 
 func _on_ers(m: String, slot: int) -> void:
@@ -846,8 +1016,13 @@ func _refresh_ui() -> void:
 	var sc_txt = ""
 	if sim.sc:
 		sc_txt = " · [color=#f59e0b][b]%s[/b][/color]" % sim.sc_kind
+	var fmt_tag := ""
+	if mode == "career" and career != null and career.has_sprint():
+		fmt_tag = "[color=#a855f7]스프린트[/color] " if sprint_mode else "[color=#a855f7]피처[/color] "
+	elif mode == "career" and career != null and career.race_format() == "f3":
+		fmt_tag = "[color=#a855f7]F3[/color] "
 	if not starting:
-		top_label.text = "[b]%s[/b]  [color=#ffc53d]L%d/%d[/color]  · %s%s%s%s" % [sim.CIRC["name"], lap_now, sim.laps, wx, fc_txt, sc_txt, " · 야간" if sim.night else ""]
+		top_label.text = fmt_tag + "[b]%s[/b]  [color=#ffc53d]L%d/%d[/color]  · %s%s%s%s" % [sim.CIRC["name"], lap_now, sim.laps, wx, fc_txt, sc_txt, " · 야간" if sim.night else ""]
 	# 내 차
 	var mine: Array = sim.my_cars()
 	for i in 2:
@@ -859,7 +1034,10 @@ func _refresh_ui() -> void:
 		var c = mine[i]
 		var pos = ord.find(c) + 1
 		var head_col = _hex(c.color)
-		cp["head"].text = "[color=%s]■[/color] [b]P%d  %s[/b]  [color=#8b98a5]%s[/color]" % [head_col, pos, c.code, c.name]
+		if sim.is_wec():
+			cp["head"].text = "[color=%s]■[/color] [b]HY P%d  #%d[/b]  [color=#8b98a5]%s · %s[/color]" % [head_col, sim.class_pos(c), c.slot + 1, c.name, "등급 " + String(c.drivers[c.drv].get("grade", "-"))]
+		else:
+			cp["head"].text = "[color=%s]■[/color] [b]P%d  %s[/b]  [color=#8b98a5]%s[/color]" % [head_col, pos, c.code, c.name]
 		var st = ""
 		if c.dnf != "":
 			st = "[color=#ef4444]리타이어 (%s)[/color]" % c.dnf
@@ -875,13 +1053,27 @@ func _refresh_ui() -> void:
 				gtxt += "앞 %s %s" % [ahead.code, sim.gap_to(c, ahead).replace("+", "-")]
 			if behind != null and behind.dnf == "" and behind.is_running():
 				gtxt += ("  " if gtxt != "" else "") + "뒤 %s %s" % [behind.code, sim.gap_to(behind, c)]
+			if sim.is_wec():
+				gtxt = _wec_gaps(c)
 			st += "\n[color=#8b98a5]%s[/color]" % gtxt
-			st += "\n[color=#8b98a5]ERS %d%% · 연료 %.1f랩분 · 피트 %d회[/color]" % [int(c.ers * 100), c.fuel / RaceSimS.FPL, c.pits]
+			if sim.is_wec():
+				var fl: float = sim.fuel_laps(c)
+				var fcol := "#ef4444" if fl < 1.5 else ("#facc15" if fl < 2.5 else "#8b98a5")
+				st += "\n[color=%s]연료 %.1f랩분[/color] [color=#8b98a5]· 타이어 %d스틴트째 · %s %d스틴트째%s · 피트 %d회[/color]" % [fcol, fl, c.stint_tyre + 1, c.name, c.stint_drv + 1, " [color=#ef4444](피로)[/color]" if c.stint_drv >= 2 else "", c.pits]
+				if sim.min_drive != null:
+					var short: int = sim.min_drive_short(c)
+					var gk: String = RaceSimS.GRADE_KO.get(sim.min_drive["grade"], "")
+					st += ("\n[color=#22c55e]%s 최소 주행 충족[/color]" % gk) if short <= 0 else ("\n[color=#f59e0b]%s 드라이버가 %d랩 더 달려야 해요 (미달 시 60초)[/color]" % [gk, short])
+			else:
+				st += "\n[color=#8b98a5]ERS %d%% · 연료 %.1f랩분 · 피트 %d회[/color]" % [int(c.ers * 100), c.fuel / RaceSimS.FPL, c.pits]
 			if c.boxing != null:
 				st += "\n[color=#ffc53d][b]▶ 피트 진입 중 → %s[/b][/color]" % RaceSimS.TYRE_KO[c.boxing["comp"]]
 			elif c.pit_req != "":
-				st += "\n[color=#ffc53d]박스 예약: %s (피트 입구 전까지 취소 가능)[/color]" % RaceSimS.TYRE_KO[c.pit_req]
-			if c.used_slicks() < 2 and not sim.ever_wet:
+				var what: String = RaceSimS.TYRE_KO[c.pit_req]
+				if c.wec_req != null:
+					what = ("%s 교체" % what if c.wec_req["tyres"] else "타이어 유지") + (" + 급유" if c.wec_req["fuel"] else "") + (" + 교대" if c.wec_req["driver"] else "")
+				st += "\n[color=#ffc53d]박스 예약: %s (피트 입구 전까지 취소 가능)[/color]" % what
+			if sim.need_two() and c.used_slicks() < 2:
 				st += "\n[color=#f59e0b]두 번째 컴파운드 미사용[/color]"
 		cp["status"].text = st
 		var can_box: bool = c.is_running() and c.boxing == null
@@ -891,11 +1083,31 @@ func _refresh_ui() -> void:
 			var comp: String = ["S", "M", "H"][bi]
 			b.text = comp if c.tyre_sets == null else "%s 새%d" % [comp, int(c.tyre_sets[comp])]
 		cp["cancel"].disabled = c.pit_req == "" or c.boxing != null
+		for wb in cp["wec_btns"]:
+			wb.disabled = not can_box
+		cp["wcancel"].disabled = c.pit_req == "" or c.boxing != null
 	_refresh_tower(ord, leader)
 	_refresh_radio()
 
 
+func _wec_gaps(c) -> String:
+	var same: Array = []
+	for o in sim.order():
+		if o.cls == c.cls:
+			same.append(o)
+	var i := same.find(c)
+	var t := ""
+	if i >= 1 and same[i - 1].dnf == "":
+		t += "앞 #%s %s" % [same[i - 1].code, sim.gap_to(c, same[i - 1]).replace("+", "-")]
+	if i + 1 < same.size() and same[i + 1].is_running():
+		t += ("  " if t != "" else "") + "뒤 %s %s" % [same[i + 1].code, sim.gap_to(same[i + 1], c)]
+	return t
+
+
 func _refresh_tower(ord: Array, leader) -> void:
+	if sim.is_wec():
+		_refresh_tower_wec(ord)
+		return
 	var s = "[table=5]"
 	s += "[cell][color=#8b98a5]P[/color][/cell][cell][color=#8b98a5]드라이버[/color][/cell][cell][color=#8b98a5]간격[/color][/cell][cell][color=#8b98a5]타이어[/color][/cell][cell][color=#8b98a5]피트[/color][/cell]"
 	var pos = 0
@@ -919,6 +1131,39 @@ func _refresh_tower(ord: Array, leader) -> void:
 			tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			pos, _hex(c.color), name_col, c.code, c.team, gap, tyre, c.pits]
+	s += "[/table]"
+	tower.text = s
+
+
+func _short_team(n: String) -> String:
+	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo"]:
+		n = n.replace(w, "")
+	return n
+
+
+func _refresh_tower_wec(ord: Array) -> void:
+	var s = "[table=5]"
+	for cls in ["HY", "GT"]:
+		s += "[cell][color=#ffc53d][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell][cell][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
+		var lead: Variant = null
+		var pos := 0
+		for c in ord:
+			if c.cls != cls:
+				continue
+			pos += 1
+			if lead == null:
+				lead = c
+			var name_col := "#ffc53d" if c.mine else "#e6edf3"
+			var gap: String = "선두" if c == lead else sim.gap_to(c, lead)
+			if c.dnf != "":
+				gap = "[color=#ef4444]DNF[/color]"
+			if c.boxing != null or c.pit_phase == 2:
+				gap += " [color=#ffc53d]PIT[/color]"
+			var tyre := "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
+			if c.mine:
+				tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
+			var nm: String = _short_team(c.team) + (" #%d" % (c.slot + 1))
+			s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [pos, _hex(c.color), name_col, nm, c.code, gap, tyre, c.pits]
 	s += "[/table]"
 	tower.text = s
 
@@ -976,6 +1221,9 @@ func _build_result() -> void:
 	btn_hq = _btn("본부(HQ)로 ▶", 22)
 	btn_hq.pressed.connect(_open_hq)
 	h.add_child(btn_hq)
+	btn_feature = _btn("피처 레이스 ▶", 22)
+	btn_feature.pressed.connect(_start_feature)
+	h.add_child(btn_feature)
 
 
 func _career_summary(ec: Dictionary) -> String:
@@ -992,10 +1240,23 @@ func _career_summary(ec: Dictionary) -> String:
 
 func _show_result() -> void:
 	var res: Array = sim.results()
+	if sim.is_wec():
+		var hy: Array = []
+		var gt: Array = []
+		for r in res:
+			if r["cls"] == "HY":
+				hy.append(r)
+			else:
+				gt.append(r)
+		res = hy + gt
 	var s = "[table=5]"
 	s += "[cell][color=#8b98a5]P[/color][/cell][cell][color=#8b98a5]드라이버[/color][/cell][cell][color=#8b98a5]기록[/color][/cell][cell][color=#8b98a5]전략[/color][/cell][cell][color=#8b98a5]PTS[/color][/cell]"
+	var last_cls := ""
 	for r in res:
 		var c = r["car"]
+		if sim.is_wec() and c.cls != last_cls:
+			last_cls = c.cls
+			s += "[cell][color=#ffc53d][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell][cell][/cell]" % ("HYPERCAR" if c.cls == "HY" else "LMGT3")
 		var name_col = "#ffc53d" if c.mine else "#e6edf3"
 		var strat = ""
 		var hist: Array = c.lap_hist.duplicate()
@@ -1011,7 +1272,7 @@ func _show_result() -> void:
 			strat += _tyre_bb(seq[i]) + (" " if i < seq.size() - 1 else "")
 		var pen = " [color=#ef4444]+30s[/color]" if c.penalty > 0 else ""
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
-			r["pos"], _hex(c.color), name_col, c.code, c.team, r["gap"], pen, strat, r["points"]]
+			r["pos"], _hex(c.color), name_col, (_short_team(c.team) + " #%d" % (c.slot + 1)) if sim.is_wec() else c.code, c.code if sim.is_wec() else c.team, r["gap"], pen, strat, r["points"]]
 	s += "[/table]"
 	if sim.fastest_id >= 0:
 		var fc = sim.cars.filter(func(x): return x.id == sim.fastest_id)
@@ -1019,11 +1280,16 @@ func _show_result() -> void:
 			s += "\n[color=#a855f7]최고 랩[/color] %s %.3f초" % [fc[0].code, sim.fastest_t]
 	btn_again.visible = mode != "career"
 	btn_menu.visible = mode != "career"
-	btn_hq.visible = mode == "career"
-	result_title.text = "레이스 결과 · %s" % sim.CIRC["name"]
+	btn_hq.visible = mode == "career" and not sprint_mode
+	btn_feature.visible = mode == "career" and sprint_mode
+	result_title.text = "%s · %s" % ["스프린트 결과" if sprint_mode else "레이스 결과", sim.CIRC["name"]]
 	if mode == "career" and not settled:
 		settled = true
-		var ec: Dictionary = career.after_race(sim)
-		s = _career_summary(ec) + "\n" + s
+		if sprint_mode:
+			var sp: Dictionary = career.after_sprint(sim)
+			s = "[b][color=#ffc53d]스프린트[/color][/b] 내 팀 [b]%d점[/b] (상위 8위까지 10-8-6-5-4-3-2-1). 상금·스폰서 정산은 피처 레이스 뒤에 해요.\n\n" % sp["total"] + s
+		else:
+			var ec: Dictionary = career.after_race(sim)
+			s = _career_summary(ec) + "\n" + s
 	result_text.text = s
 	result_box.visible = true

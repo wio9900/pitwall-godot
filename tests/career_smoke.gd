@@ -7,6 +7,11 @@ const WeekendS = preload("res://scripts/sim/weekend.gd")
 const CareerS = preload("res://scripts/sim/career.gd")
 
 var team_pts_by_rank := {}
+var sprint_pts := 0
+var sprint_stops := 0
+var sprint_n := 0
+var f3_stops := 0
+var f3_n := 0
 
 
 func _bot_preseason(cr) -> void:
@@ -42,31 +47,63 @@ func _bot_round(cr) -> void:
 
 func _run_race(cr) -> Dictionary:
 	var sim = RaceSimS.new()
-	var opts := {"teams": cr.race_teams(), "engines": cr.hq["engines"], "my_mods": cr.my_mods()}
-	sim.new_race(cr.next_circuit(), cr.race_my_index(), int(cr.hq["laps"]), "auto", ["M", "M"], 0, opts)
+	var opts: Dictionary = cr.race_opts()
+	sim.new_race(cr.next_circuit(), cr.race_my_index(), cr.race_laps(), "auto", ["M", "M"], 0, opts)
 	var wk = WeekendS.new()
 	wk.setup(sim, cr.duty_laps())
 	wk.auto_practice()
 	wk.start_quali()
 	wk.auto_quali()
+	if cr.has_sprint():
+		var sp = RaceSimS.new()
+		sp.new_race(cr.next_circuit(), cr.race_my_index(), cr.race_laps(true), "auto", ["M", "M"], 0, cr.race_opts(true))
+		var keys: Array = sim.grid_keys()
+		var top: Array = keys.slice(0, 10)
+		top.reverse()
+		sp.apply_grid(top + keys.slice(10))
+		sp.prepare_start()
+		_drive(sp)
+		var spr: Dictionary = cr.after_sprint(sp)
+		sprint_pts += int(spr["total"])
+		sprint_stops += _total_stops(sp)
+		sprint_n += 1
 	sim.prepare_start()
+	_drive(sim)
+	if cr.race_format() == "f3":
+		f3_stops += _total_stops(sim)
+		f3_n += 1
+	return cr.after_race(sim)
+
+
+func _total_stops(sim) -> int:
+	var n := 0
+	for c in sim.cars:
+		n += c.pits
+	return n
+
+
+func _drive(sim) -> void:
 	var guard = 0
 	while not sim.done and guard < 300000:
 		sim.advance(2.0)
 		guard += 1
 		for c in sim.my_cars():
-			if c.is_running() and c.boxing == null and c.pit_req == "" and sim.wet < 0.2 and c.wear > 0.58 and c.lap < sim.laps - 2:
+			if sim.is_wec():
+				if c.is_running() and c.boxing == null and c.pit_req == "" and sim.fuel_laps(c) < 1.6 and c.lap < sim.laps - 1:
+					sim.request_pit_wec(c, "M" if sim.wet < 0.27 else "W", c.wear > 0.4, true, c.stint_drv >= 1)
+			elif c.is_running() and c.boxing == null and c.pit_req == "" and sim.wet < 0.2 and c.wear > 0.58 and c.lap < sim.laps - 2:
 				sim.request_pit(c, "H" if c.comp != "H" else "M")
-	return cr.after_race(sim)
 
 
 func _init() -> void:
 	var fails = 0
-	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["select", 8, {}, "Haas"]]
+	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["create", 0, {"tier": 2, "name": "Test F2"}, "신규 F2"], ["select", 3, {"series": "wec"}, "WEC Peugeot"], ["create", 0, {"tier": 1, "name": "Test WEC", "series": "wec"}, "WEC 신규 LMGT3"]]
 	for sc in scenarios:
 		var cr = CareerS.new()
 		cr.new_career(sc[0], sc[1], sc[2], 4242)
-		var seasons = 4
+		var seasons = 4 if sc[2].get("series", "f1") == "f1" else 3
+		if sc[3] == "신규 F2":
+			seasons = 1
 		var t0 = Time.get_ticks_msec()
 		for s in seasons:
 			_bot_preseason(cr)
@@ -89,5 +126,6 @@ func _init() -> void:
 		if float(cr.hq["cash"]) != float(cr.hq["cash"]):
 			fails += 1
 	CareerS.delete_save()
+	print("F2 스프린트 %d회: 내 팀 %d점, 전체 피트 %.1f회/경기 · F3 %d경기: 전체 피트 %.1f회/경기" % [sprint_n, sprint_pts, sprint_stops / maxf(1.0, sprint_n), f3_n, f3_stops / maxf(1.0, f3_n)])
 	print("커리어 테스트 실패 %d" % fails)
 	quit(1 if fails > 0 else 0)

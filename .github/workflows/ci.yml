@@ -30,6 +30,8 @@ jobs:
           exit $bad
       - name: 시뮬레이션 스모크 테스트
         run: timeout 240 ./godot --headless --path . --script res://tests/sim_smoke.gd 2>&1 | tee sim.log; test ${PIPESTATUS[0]} -eq 0
+      - name: WEC 테스트
+        run: timeout 240 ./godot --headless --path . --script res://tests/wec_smoke.gd 2>&1 | tee wec.log; test ${PIPESTATUS[0]} -eq 0
       - name: 주말(연습·예선) 테스트
         run: timeout 240 ./godot --headless --path . --script res://tests/weekend_smoke.gd 2>&1 | tee weekend.log; test ${PIPESTATUS[0]} -eq 0
       - name: 커리어 테스트

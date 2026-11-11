@@ -27,10 +27,12 @@ func _shot(name: String) -> void:
 	shot_n += 1
 
 
-func _race(circ: String, wx: String, w: int, h: int) -> void:
+func _race(circ: String, wx: String, w: int, h: int, series: String = "f1") -> void:
 	root.size = Vector2i(w, h)
 	main._on_resize()
-	main.opt_circuit.select(DB.circuit_keys.find(circ))
+	main._on_series(series)
+	main.opt_circuit.select(main.quick_keys.find(circ))
+	main._on_circ_pick(0)
 	main.opt_weather.select(2 if wx == "rain" else 1)
 	main._on_start()
 
@@ -185,6 +187,37 @@ func _process(_delta: float) -> bool:
 			step = 25
 		25:
 			_shot("hq_after")
+			main._show_menu()
+			main._on_mode("quick")
+			_race("lemans", "dry", 1280, 720, "wec")
+			main._update_start(10.0)
+			step = 26
+		26:
+			main.sim.advance(3.0)
+			if main.sim.leader_lap >= 4:
+				main._refresh_ui()
+				wait = 4
+				step = 27
+		27:
+			_shot("wec_race")
+			main._set_cam(0)
+			main._set_speed(0)
+			wait = 40
+			step = 28
+		28:
+			_shot("wec_follow")
+			main._set_speed(4)
+			main._set_cam(-1)
+			step = 29
+		29:
+			main.sim.advance(4.0)
+			if main.sim.done:
+				main._refresh_ui()
+				main._show_result()
+				wait = 3
+				step = 30
+		30:
+			_shot("wec_result")
 			print("SHOTS DONE %d" % shot_n)
 			return true
 	return frames > 40000

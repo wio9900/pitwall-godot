@@ -245,7 +245,11 @@ func _run_practice(kind: String) -> void:
 func _render_quali() -> void:
 	var st: int = wk.Q["stage"]
 	var sub: String = ["", "P16 이하 탈락", "P11~15 결정 · 상위 10대 Q3 진출", "상위 10대 폴 포지션 결정전"][st]
-	_title("%s 예선 Q%d" % [sim.CIRC["name"], st], sub)
+	var ttl := "%s 예선 Q%d" % [sim.CIRC["name"], st]
+	if sim.is_wec():
+		sub = "클래스 상위 8대 하이퍼폴 진출 · 다른 클래스는 기록순 그리드" if st == 1 else "클래스 상위 8대 폴 포지션 결정전"
+		ttl = "%s %s" % [sim.CIRC["name"], "예선" if st == 1 else "하이퍼폴"]
+	_title(ttl, sub)
 	var c: Variant = wk.current_car()
 	if c != null:
 		var card = K.card(_side, "[Q%d] #%d %s 어택 준비" % [st, c.slot + 1, c.name], K.AMBER)
@@ -288,6 +292,8 @@ func _render_q_table() -> void:
 	var t := ""
 	var i := 0
 	for c in ord:
+		if sim.is_wec() and c.cls != wk.main_cls():
+			continue
 		i += 1
 		var r: Variant = wk.Q["res"].get(c.id)
 		var g := "대기"
@@ -303,7 +309,8 @@ func _render_q_table() -> void:
 		var comp := ""
 		if r != null:
 			comp = "[color=%s]%s[/color]" % [RS.TYRE_HEX[r["q_comp"]], r["q_comp"]]
-		t += "%2d  [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  %s %s  [color=#8b98a5]Q%s[/color]%s\n" % [i, K.hex(c.color), nm_col, c.code, c.team, g, comp, str(r["stage"]) if r != null else "-", out]
+		var who: String = ("%s #%d" % [c.team, c.slot + 1]) if sim.is_wec() else c.code
+		t += "%2d  [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  %s %s  [color=#8b98a5]Q%s[/color]%s\n" % [i, K.hex(c.color), nm_col, who, c.code if sim.is_wec() else c.team, g, comp, str(r["stage"]) if r != null else "-", out]
 	var rr = K.rtl(14)
 	rr.text = t
 	tc.add_child(rr)
@@ -331,9 +338,9 @@ func _render_secs(res: Variant, upto: int) -> void:
 
 # ── 그리드 확정 ──
 func _render_grid() -> void:
-	_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 Q3 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요.")
+	_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. %s 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요." % ("하이퍼폴" if sim.is_wec() else "Q3"))
 	for c in wk.my_cars():
-		var card = K.card(_side, "#%d %s · 그리드 P%d" % [c.slot + 1, c.name, c.grid + 1], K.AMBER)
+		var card = K.card(_side, "#%d %s · 그리드 P%d" % [c.slot + 1, c.name, (sim.class_pos(c) if false else c.grid + 1)], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
 		var info = K.rtl(14)
 		info.text = "윙 W%.1f 고정 · %s" % [c.wing, _sets_txt(c.slot)]
