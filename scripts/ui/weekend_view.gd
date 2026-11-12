@@ -53,6 +53,7 @@ func _build_shell() -> void:
 	for side in ["left", "right", "top", "bottom"]:
 		mc.add_theme_constant_override("margin_" + side, 10)
 	add_child(mc)
+	K.center_col(mc, 1500.0)
 	_box = BoxContainer.new()
 	_box.add_theme_constant_override("separation", 10)
 	mc.add_child(_box)
@@ -64,6 +65,7 @@ func _build_shell() -> void:
 	_live = K.rtl(18)
 	left.add_child(_live)
 	_secs = K.hbox(4)
+	_secs.alignment = BoxContainer.ALIGNMENT_CENTER
 	left.add_child(_secs)
 	_view = RaceViewS.new()
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL

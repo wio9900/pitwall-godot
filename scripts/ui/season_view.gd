@@ -96,6 +96,7 @@ func _build_shell() -> void:
 	for side in ["left", "right", "top", "bottom"]:
 		mc.add_theme_constant_override("margin_" + side, 12)
 	add_child(mc)
+	K.center_col(mc, 960.0, 12)
 	var v = K.vbox(8)
 	mc.add_child(v)
 	_body = K.scroll_v(v)

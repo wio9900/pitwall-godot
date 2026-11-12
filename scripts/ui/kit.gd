@@ -171,6 +171,16 @@ static func fmt_lap(t: float) -> String:
 
 
 ## 스크롤 가능한 세로 영역
+## 넓은 화면에서 내용을 가운데 기둥(최대 max_w)으로: 바깥 MarginContainer 의 좌우 여백을 크기에 맞춰 조정
+static func center_col(mc: MarginContainer, max_w: float, min_side := 10) -> void:
+	var fit = func():
+		var side: int = maxi(min_side, int((mc.size.x - max_w) / 2.0))
+		mc.add_theme_constant_override("margin_left", side)
+		mc.add_theme_constant_override("margin_right", side)
+	mc.resized.connect(fit)
+	fit.call()
+
+
 static func scroll_v(parent: Control) -> VBoxContainer:
 	var sc = ScrollContainer.new()
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

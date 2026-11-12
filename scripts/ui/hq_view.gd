@@ -40,11 +40,13 @@ func _build_shell() -> void:
 	for side in ["left", "right", "top", "bottom"]:
 		mc.add_theme_constant_override("margin_" + side, 10)
 	add_child(mc)
+	K.center_col(mc, 1180.0)
 	var v = K.vbox(8)
 	mc.add_child(v)
 	_head = K.vbox(4)
 	v.add_child(_head)
 	_tabs_row = K.hbox(4)
+	_tabs_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	v.add_child(_tabs_row)
 	_body = K.scroll_v(v)
 	_foot = K.hbox(8)
@@ -109,7 +111,8 @@ func _render_head() -> void:
 	_head.add_child(hr)
 	var r = K.rtl(20)
 	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	r.text = "[color=%s]■[/color] [b]%s[/b] [color=#8b98a5]HQ · %s · 시즌 %d · R%d/%d[/color]" % [h["team_color"], h["team_name"], cr.tier_meta()["short"], int(h["season"]), cr.round_idx() + 1, cr.cal_len()]
+	r.text = "[center][color=%s]■[/color] [b]%s[/b] [color=#8b98a5]HQ · %s · 시즌 %d · R%d/%d[/color]" % [h["team_color"], h["team_name"], cr.tier_meta()["short"], int(h["season"]), cr.round_idx() + 1, cr.cal_len()]
+	r.text += "[/center]"
 	hr.add_child(r)
 	var tab_ko: String = "개요"
 	for tt in TABS:
@@ -121,7 +124,8 @@ func _render_head() -> void:
 	var proj: float = cr.projected_spend()
 	var r2 = K.rtl(15)
 	var proj_col := "#ef4444" if proj > cap else ("#f59e0b" if cap - proj < 1.5 else "#22c55e")
-	r2.text = "자금 [b][color=#ffc53d]%.2fM[/color][/b] · 평판 [color=#a855f7]%d%%[/color] · 코스트캡 [b]%.2f / %.1fM[/b] · 남은 경기 운영비 포함 예상 [color=%s]%.2fM[/color]" % [float(h["cash"]), int(round(float(h["pop"]) * 100)), spent, cap, proj_col, proj]
+	r2.text = "[center]자금 [b][color=#ffc53d]%.2fM[/color][/b] · 평판 [color=#a855f7]%d%%[/color] · 코스트캡 [b]%.2f / %.1fM[/b] · 남은 경기 운영비 포함 예상 [color=%s]%.2fM[/color]" % [float(h["cash"]), int(round(float(h["pop"]) * 100)), spent, cap, proj_col, proj]
+	r2.text += "[/center]"
 	_head.add_child(r2)
 	var frac := spent / maxf(0.1, cap)
 	K.bar(_head, frac, K.BAD if frac >= 0.9 else (K.WARN if frac >= 0.75 else K.GOOD), 6.0)
