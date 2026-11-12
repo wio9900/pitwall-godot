@@ -124,6 +124,7 @@ func _init() -> void:
 		var b = K.btn(t[1], 15)
 		b.toggle_mode = true
 		b.button_group = grp
+		b.clip_text = true
 		# 탭: 선택되면 흰 글씨 + 빨간 밑줄
 		var tn = StyleBoxFlat.new()
 		tn.bg_color = Color(0, 0, 0, 0)

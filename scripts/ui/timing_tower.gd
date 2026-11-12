@@ -130,7 +130,7 @@ func _draw() -> void:
 			if c.id == sim.fastest_id:
 				gcol = Color("#a855f7")
 		elif c == lead:
-			g = "LEADER"
+			g = "LEADER" if not wec else "선두"
 		elif gap_mode == 0 and prev != null:
 			g = sim.gap_to(c, prev)
 		else:

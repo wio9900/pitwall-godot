@@ -1168,7 +1168,7 @@ func _build_race_ui() -> void:
 	port_track.add_theme_constant_override("separation", 6)
 	land_left = VBoxContainer.new()
 	land_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	land_left.size_flags_stretch_ratio = 1.55
+	land_left.size_flags_stretch_ratio = 1.15
 	land_left.add_theme_constant_override("separation", 6)
 	land_box.add_child(land_left)
 	land_right = VBoxContainer.new()
@@ -1249,6 +1249,7 @@ func _build_race_ui() -> void:
 	tw.name = "상세 순위"
 	tabs.add_child(tw)
 	gap_btn = _btn("", 14)
+	gap_btn.clip_text = true # 긴 글자가 오른쪽 기둥을 넓혀 화면 밖으로 밀어내지 않게
 	gap_btn.tooltip_text = "누를 때마다 앞차 간격 → 선두와 차이 → 직전 랩타임. 순위표에서 이름을 누르면 라이벌 분석"
 	gap_btn.pressed.connect(_on_gap_mode)
 	tw.add_child(gap_btn)
@@ -1373,7 +1374,7 @@ func _on_radio_prompt() -> void:
 
 
 func _gap_text() -> void:
-	gap_btn.text = "⇄  보기: %s   (눌러서 바꾸기 · 이름 누르면 라이벌 분석)" % ["앞차 간격", "선두와 차이", "직전 랩타임"][gap_mode]
+	gap_btn.text = "⇄ 보기: %s · 이름 누르면 라이벌 분석" % ["앞차 간격", "선두와 차이", "직전 랩타임"][gap_mode]
 
 
 func _on_gap_mode() -> void:
