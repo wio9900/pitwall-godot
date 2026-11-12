@@ -58,6 +58,10 @@ var qseries := "f1"        # 퀵 레이스 시리즈 f1 / wec
 var quick_keys: Array = [] # 현재 시리즈의 서킷 키
 var quick_teams: Array = [] # 현재 시리즈의 팀 인덱스
 var mode_btns: Array = []
+var menu_page := "home"      # home(버튼 2개) · quick(퀵 레이스 설정) · slots(커리어 저장 슬롯) · new(새 커리어 설정)
+var home_box: VBoxContainer
+var nav_row: HBoxContainer
+var nav_title: Label
 var quick_left: Control
 var quick_right: Control
 var career_left: VBoxContainer
@@ -414,24 +418,15 @@ func _build_menu() -> void:
 	resume_btn.pressed.connect(_resume_race)
 	resume_btn.visible = false
 	v.add_child(resume_btn)
-	# 모드: 큰 카드 버튼 두 개
-	var mrow = KitS.hbox(10)
-	v.add_child(mrow)
-	mode_btns = []
-	var grp = ButtonGroup.new()
-	for it in [["quick", "🏁  퀵 레이스", "단판 · 연습 → 예선 → 결승"], ["career", "🏆  커리어", "팀 운영 · 시즌 · 승격"]]:
-		var mb = Button.new()
-		mb.toggle_mode = true
-		mb.button_group = grp
-		mb.button_pressed = it[0] == mode
-		mb.text = "%s\n%s" % [it[1], it[2]]
-		mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		mb.add_theme_font_size_override("font_size", 19)
-		mb.custom_minimum_size = Vector2(0, 76)
-		mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		mb.pressed.connect(_on_mode.bind(it[0]))
-		mrow.add_child(mb)
-		mode_btns.append(mb)
+	# 하위 화면 위쪽: ◀ 뒤로 + 화면 이름
+	nav_row = KitS.hbox(10)
+	v.add_child(nav_row)
+	var back = _btn("◀ 뒤로", 18)
+	back.custom_minimum_size = Vector2(110, 44)
+	back.pressed.connect(_menu_back)
+	nav_row.add_child(back)
+	nav_title = _label("", 24, AMBER)
+	nav_row.add_child(nav_title)
 	quick_left = KitS.vbox(12)
 	v.add_child(quick_left)
 	career_left = KitS.vbox(10)
@@ -472,6 +467,30 @@ func _build_menu() -> void:
 	v2.add_child(quick_right)
 	career_right = KitS.vbox(10)
 	v2.add_child(career_right)
+	# 메인 화면: 큰 버튼 두 개만 (가로 화면에서는 오른쪽, 세로 화면에서는 로고 아래)
+	home_box = KitS.vbox(16)
+	home_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v2.add_child(home_box)
+	var hs = Control.new()
+	hs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	home_box.add_child(hs)
+	for it in [["career", "🏆  커리어", "팀 운영 · 시즌 · 승격 — 저장 슬롯 3개"], ["quick", "🏁  퀵 레이스", "단판 레이스 · 연습 → 예선 → 결승"]]:
+		var mb = Button.new()
+		mb.text = "%s\n%s" % [it[1], it[2]]
+		mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		mb.add_theme_font_size_override("font_size", 24)
+		mb.custom_minimum_size = Vector2(0, 124)
+		mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if it[0] == "career":
+			_primary(mb)
+		else:
+			mb.add_theme_stylebox_override("normal", _sb(PANEL, AMBER.darkened(0.2), 10, 10, 6, true))
+			mb.add_theme_stylebox_override("hover", _sb(PANEL.lightened(0.06), AMBER, 10, 10, 8, true))
+		mb.pressed.connect(_on_mode.bind(it[0]))
+		home_box.add_child(mb)
+	var hs2 = Control.new()
+	hs2.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	home_box.add_child(hs2)
 	var tcard = PanelContainer.new()
 	quick_right.add_child(tcard)
 	var tv = KitS.vbox(8)
@@ -590,6 +609,7 @@ func _update_circ_info() -> void:
 
 func _show_menu() -> void:
 	_show_only(menu_box)
+	menu_page = "home"
 	_render_career_menu()
 	_update_resume_btn()
 
@@ -598,7 +618,7 @@ func _update_resume_btn() -> void:
 	if resume_btn == null:
 		return
 	var m: Dictionary = RaceSaveS.peek()
-	resume_btn.visible = not m.is_empty()
+	resume_btn.visible = not m.is_empty() and menu_page == "home"
 	if not m.is_empty():
 		var who: String = ("커리어 슬롯 %d" % int(m.get("slot", 1))) if m.get("mode", "") == "career" else "퀵 레이스"
 		resume_btn.text = "▶ 레이스 이어하기 — %s · %s · L%d/%d" % [m.get("circ", "?"), who, int(m.get("lap", 0)), int(m.get("laps", 0))]
@@ -682,8 +702,25 @@ func _show_only(node: Control) -> void:
 		sfx.set_engine(0.0)
 
 
+## 메인 화면의 두 버튼: 퀵 레이스 설정 / 커리어 저장 슬롯
 func _on_mode(v) -> void:
 	mode = v
+	menu_page = "quick" if v == "quick" else "slots"
+	del_armed = 0
+	_render_career_menu()
+
+
+func _menu_back() -> void:
+	menu_page = "slots" if menu_page == "new" else "home"
+	del_armed = 0
+	_render_career_menu()
+
+
+## 슬롯을 골라 새 커리어 설정 화면으로
+func _open_new_career(sl: int) -> void:
+	new_slot = sl
+	mode = "career"
+	menu_page = "new"
 	_render_career_menu()
 
 
@@ -691,39 +728,22 @@ func _on_mode(v) -> void:
 func _render_career_menu() -> void:
 	if career_left == null:
 		return
-	if mode_btns.size() == 2:
-		mode_btns[0].set_pressed_no_signal(mode == "quick")
-		mode_btns[1].set_pressed_no_signal(mode == "career")
-	quick_left.visible = mode == "quick"
-	quick_right.visible = mode == "quick"
-	career_left.visible = mode == "career"
-	career_right.visible = mode == "career"
+	home_box.visible = menu_page == "home"
+	nav_row.visible = menu_page != "home"
+	nav_title.text = {"quick": "퀵 레이스", "slots": "커리어 · 저장 슬롯", "new": "새 커리어 · 슬롯 %d" % new_slot}.get(menu_page, "")
+	quick_left.visible = menu_page == "quick"
+	quick_right.visible = menu_page == "quick"
+	career_left.visible = menu_page == "slots" or menu_page == "new"
+	career_right.visible = menu_page == "slots" or menu_page == "new"
+	_update_resume_btn()
 	KitS.clear(career_left)
 	KitS.clear(career_right)
-	if mode != "career":
+	if menu_page == "slots":
+		_render_slots()
 		return
-	var c0 = KitS.card(career_left, "저장 슬롯", AMBER)
-	for sl in range(1, CareerS.SLOTS + 1):
-		var hb = KitS.hbox(6)
-		c0.add_child(hb)
-		var r = KitS.rtl(15)
-		r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		hb.add_child(r)
-		var tmp = CareerS.new()
-		if CareerS.has_save(sl) and tmp.load_save(sl):
-			var h: Dictionary = tmp.hq
-			r.text = "[b]%d[/b]  [color=%s]■[/color] [b]%s[/b] · %s · 시즌 %d R%d\n[color=#8b98a5]자금 %.1fM · 평판 %d%% · 난이도 %s[/color]" % [sl, h["team_color"], h["team_name"], tmp.tier_meta()["short"], int(h["season"]), tmp.round_idx() + 1, float(h["cash"]), int(float(h["pop"]) * 100), RaceSimS.DIFF_KO[clampi(int(h.get("difficulty", 1)), 0, 3)]]
-			hb.add_child(KitS.sbtn("이어하기 ▶", _continue_career.bind(sl), true, GOOD))
-			hb.add_child(KitS.sbtn("⚠ 한 번 더" if del_armed == sl else "삭제", _delete_save.bind(sl), true, BAD))
-		else:
-			r.text = "[b]%d[/b]  [color=#5d6674]빈 슬롯[/color]" % sl
-	var c1 = KitS.card(career_left, "새 커리어")
-	c1.add_child(KitS.label("저장할 슬롯", 14, DIM))
-	var s_items: Array = []
-	for sl in range(1, CareerS.SLOTS + 1):
-		s_items.append([str(sl), "슬롯 %d%s" % [sl, " (덮어씀)" if CareerS.has_save(sl) else ""]])
-	KitS.seg(c1, s_items, str(new_slot), _on_new_slot, 14)
-	KitS.seg(c1, [["f1", "F1"], ["wec", "WEC 내구"]], new_series, _on_new_series, 16)
+	if menu_page != "new":
+		return
+	var c1 = KitS.card(career_left, "새 커리어 설정")
 	var top_name := "Hypercar" if new_series == "wec" else "F1"
 	KitS.seg(c1, [["select", "기존 팀으로 (%s)" % top_name], ["create", "신규 팀 창단"]], new_entry, _on_entry, 16)
 	if new_entry == "select":
@@ -790,12 +810,45 @@ func _render_career_menu() -> void:
 	var info = KitS.rtl(15)
 	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n• [b]코스트캡[/b] 안에서 R&D와 설비에 투자하세요. 넘기면 벌금과 제재.\n• [b]스폰서[/b]는 시즌 전 제안 중 카테고리마다 하나를 골라요. 안정형·성과연동형·단기 고액은 성과 조항과 홍보 의무가 달라요.\n• 레이스 전에 [b]미션을 약속[/b]하면 보너스, 실패하면 평판 하락.\n• 신규 팀은 F3부터 시작해 승격을 노려요 (오너가 5시즌 동안 자본 지원).[/color]"
 	career_right.add_child(info)
-	var go = _btn("새 커리어 시작 ▶", 24)
+	var go = _btn("슬롯 %d 에 새 커리어 시작 ▶" % new_slot, 24)
 	go.custom_minimum_size = Vector2(0, 60)
 	go.pressed.connect(_new_career)
 	career_right.add_child(go)
 	if CareerS.has_save(new_slot):
 		career_right.add_child(KitS.label("※ 슬롯 %d 에 저장된 커리어를 덮어써요." % new_slot, 13, BAD))
+
+
+## 커리어 첫 화면: 저장 슬롯 3칸 (이어하기 / 새로 시작 / 삭제)
+func _render_slots() -> void:
+	for sl in range(1, CareerS.SLOTS + 1):
+		var tmp = CareerS.new()
+		var has: bool = CareerS.has_save(sl) and tmp.load_save(sl)
+		var card = KitS.card(career_left, "슬롯 %d" % sl, AMBER if has else LINE)
+		var r = KitS.rtl(17)
+		card.add_child(r)
+		var row = KitS.hbox(8)
+		card.add_child(row)
+		if has:
+			var h: Dictionary = tmp.hq
+			r.text = "[color=%s]■[/color] [b]%s[/b] · %s · 시즌 %d 라운드 %d\n[color=#8b98a5]자금 %.1fM · 평판 %d%% · 난이도 %s · 트로피 %d개[/color]" % [h["team_color"], h["team_name"], tmp.tier_meta()["short"], int(h["season"]), tmp.round_idx() + 1, float(h["cash"]), int(float(h["pop"]) * 100), RaceSimS.DIFF_KO[clampi(int(h.get("difficulty", 1)), 0, 3)], h.get("trophies", []).size()]
+			var cont = _btn("이어하기 ▶", 20)
+			cont.custom_minimum_size = Vector2(0, 50)
+			cont.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_primary(cont)
+			cont.pressed.connect(_continue_career.bind(sl))
+			row.add_child(cont)
+			row.add_child(KitS.sbtn("새로 시작", _open_new_career.bind(sl), true, DIM))
+			row.add_child(KitS.sbtn("⚠ 한 번 더" if del_armed == sl else "삭제", _delete_save.bind(sl), true, BAD))
+		else:
+			r.text = "[color=#5d6674]빈 슬롯[/color]"
+			var nb = _btn("＋ 새 커리어 시작", 20)
+			nb.custom_minimum_size = Vector2(0, 50)
+			nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			nb.pressed.connect(_open_new_career.bind(sl))
+			row.add_child(nb)
+	var info = KitS.rtl(15)
+	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n저장 슬롯은 3개예요. 슬롯마다 다른 팀·다른 시리즈(F1 / WEC)로 커리어를 따로 굴릴 수 있어요.\n'새로 시작'을 누르면 그 슬롯의 커리어를 지우고 새로 만들어요 (시작 버튼을 누르기 전까지는 그대로예요).[/color]"
+	career_right.add_child(info)
 
 
 func _swatch(col: String, on: bool, cb: Callable) -> Button:

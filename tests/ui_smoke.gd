@@ -156,6 +156,21 @@ func _process(_delta: float) -> bool:
 	main.settings_view._on_engine("on")
 	main.settings_view._on_speed("4")
 	main.settings_view._on_close()
+	# 메인 화면 흐름: 홈 → 커리어 슬롯 → 새 커리어 → 뒤로 → 뒤로 → 퀵 레이스
+	main._show_menu()
+	main._on_mode("career")
+	main._open_new_career(3)
+	main._menu_back()
+	if main.menu_page != "slots":
+		print("  ! 뒤로 가기가 슬롯 화면으로 가지 않음")
+		quit(1)
+		return true
+	main._menu_back()
+	main._on_mode("quick")
+	if not main.quick_left.visible or main.home_box.visible:
+		print("  ! 퀵 레이스 화면 전환 실패")
+		quit(1)
+		return true
 	main._open_records()
 	main.records_view._on_tab("log")
 	main.records_view._on_tab("career")

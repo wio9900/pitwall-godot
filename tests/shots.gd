@@ -167,6 +167,10 @@ func _process(_delta: float) -> bool:
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
 			main._show_menu()
+			wait = 3
+			step = 60
+		60:
+			_shot("menu_home")
 			main._on_mode("career")
 			wait = 3
 			step = 12
@@ -185,7 +189,7 @@ func _process(_delta: float) -> bool:
 			_shot("records")
 			main.records_view.visible = false
 			main.new_entry = "create"
-			main._render_career_menu()
+			main._open_new_career(main.new_slot)
 			wait = 3
 			step = 13
 		13:
