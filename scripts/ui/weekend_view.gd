@@ -296,6 +296,7 @@ func _render_quali() -> void:
 		ttl = "%s %s" % [sim.CIRC["name"], "예선" if st == 1 else "하이퍼폴"]
 	_title(ttl, sub)
 	_q_ver = int(wk.Q["ver"])
+	_live.text = "[color=#8b98a5]라이브 예선 — 내 차가 어택하면 섹터 기록이 여기 떠요[/color]"
 	# 세션 상태 · 진행 속도
 	var hc = K.card(_side, "", K.RED)
 	_q_head = K.rtl(17)
