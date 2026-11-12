@@ -1553,7 +1553,7 @@ func _fit_tabs() -> void:
 
 
 func _short_team(n: String) -> String:
-	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo", " THOR", " JOTA", " WRT", " Corse"]:
+	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo", " THOR", " JOTA", " WRT"]:
 		n = n.replace(w, "")
 	return n
 
