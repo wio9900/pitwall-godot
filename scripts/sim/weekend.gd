@@ -92,7 +92,7 @@ func set_fuel_load(slot: int, f: String) -> void:
 	var c = my_cars()[slot]
 	c.fuel_load = f
 	setups[slot]["fuel_load"] = f
-	c.fuel = sim.laps * RS.FPL * (1.0 + float(RS.FUEL_LOAD[f]))
+	c.fuel = sim.laps * RS.FPL * (1.0 + float(RS.FUEL_LOAD[f])) * c.fuel_burn_rate
 
 
 # ═════════ 세부 셋업 · 엔지니어 추천 범위 ═════════

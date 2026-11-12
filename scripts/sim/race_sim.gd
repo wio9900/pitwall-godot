@@ -14,7 +14,7 @@ const WEAR_SCALE := 60.0
 const H_CLIFF := 0.62
 const SPEED_BASE := 4.0 # 화면 1× = 시뮬레이션 4배속
 
-const COMP := {"S": [-1.05, 0.048, 4.0], "M": [0.0, 0.032, 3.3], "H": [0.50, 0.025, 2.6], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
+const COMP := {"S": [-1.05, 0.048, 4.0], "M": [0.0, 0.032, 3.3], "H": [0.50, 0.027, 2.6], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
 const SLICK := {"S": true, "M": true, "H": true}
 const TYRE_KO := {"S": "소프트", "M": "미디엄", "H": "하드", "I": "인터", "W": "웻"}
 const TYRE_HEX := {"S": "#ef4444", "M": "#facc15", "H": "#f1f5f9", "I": "#22c55e", "W": "#3b82f6"}
@@ -217,7 +217,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 			if c.mine:
 				var sc_ = String(start_comps[k]) if k < start_comps.size() else "M"
 				c.plan = {"start": sc_, "stops": []}
-				c.fuel = laps * FPL * 1.02
+				c.fuel = laps * FPL * 1.02 * c.fuel_burn_rate # 드라이버 연비에 맞춰 싣는다
 				c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
 				c.press = "std"
 				if k < setups.size():
@@ -225,7 +225,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 					c.wing = float(su.get("wing", c.wing))
 					c.press = su.get("press", "std")
 					c.fuel_load = su.get("fuel_load", "std")
-					c.fuel = laps * FPL * (1.0 + float(FUEL_LOAD[c.fuel_load]))
+					c.fuel = laps * FPL * (1.0 + float(FUEL_LOAD[c.fuel_load])) * c.fuel_burn_rate
 				if k < sets.size():
 					c.tyre_sets = sets[k]
 				c.sc_early = false
@@ -1734,8 +1734,14 @@ func on_leader_lap() -> void:
 			say(c, "라인이 말랐어요. 슬릭으로 바꿔야 해요" if it == "slick" else "노면이 젖었어요. %s 필요해요" % TYRE_KO[it])
 			if not c.auto_plan:
 				trigger_radio(c, "WET")
-		elif not is_wec() and c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) - FPL * 0.2 and left > 0:
-			say(c, "연료가 부족해요. 세이브 필요")
+		elif not is_wec() and left > 0 and c.lap >= 2 and c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate - FPL * 0.3:
+			# 드라이버 연비까지 반영해 계산. 연비 모드로도 못 버티면 강하게, 아니면 얼마나 모자란지 알려준다
+			var short_std: float = (left * FPL * float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate - c.fuel) / (FPL * c.fuel_burn_rate)
+			var short_lean: float = (left * FPL * float(FUEL["lean"][1]) * c.fuel_burn_rate - c.fuel) / (FPL * c.fuel_burn_rate)
+			if short_lean > 0.1:
+				say(c, "연료가 %.1f랩분 모자라요! 연비 모드에 리프트 앤 코스트까지 써야 해요" % short_std)
+			elif c.fuel_mode != "lean":
+				say(c, "지금 페이스면 연료가 %.1f랩분 모자라요. 'ERS·연료' 탭에서 세이브로 바꿔주세요" % short_std)
 		elif c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF):
 			say(c, "타이어가 다 됐어요 (%d%%)" % int(round(c.wear * 100)))
 			if not c.auto_plan and c.pit_req == "" and c.boxing == null:

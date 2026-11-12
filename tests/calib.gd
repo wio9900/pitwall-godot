@@ -73,6 +73,63 @@ func _init() -> void:
 				tp += r2["pos"].get(6, 22.0)
 				nn += 1
 		print("난이도 %s: 윌리엄스 봇(주말) 평균 순위 %.1f (%d판) · 레이스당 페널티 %.2f건 · AI 리타이어 %.2f대" % [RaceSimS.DIFF_KO[diff], tp / nn, nn, pen_n / float(nn), dnf_n / float(nn)])
+	# 타이어 수명: AI 차 스틴트 길이·끝 마모 (마른 레이스, 15랩) + 컴파운드별 랩당 마모
+	var st_len := {"S": [], "M": [], "H": []}
+	var st_wear := {"S": [], "M": [], "H": []}
+	var lap_w := {"S": [], "M": [], "H": []}
+	for ci in CIRCS.size():
+		for s3 in 2:
+			var sim = RaceSimS.new()
+			sim.new_race(CIRCS[ci], -1, 15, "dry", ["M", "M"], 8100 + ci * 10 + s3)
+			sim.prepare_start()
+			var prev_w := {}
+			var guard = 0
+			while not sim.done and guard < 300000:
+				sim.advance(2.0)
+				guard += 1
+				for c in sim.cars:
+					if c.dnf != "" or not RaceSimS.SLICK.has(c.comp):
+						continue
+					var key: String = "%d|%d" % [c.id, c.pits]
+					if c.stint_laps >= 1 and not prev_w.has(key + "|" + str(c.stint_laps)):
+						prev_w[key + "|" + str(c.stint_laps)] = true
+						if c.stint_laps >= 2:
+							lap_w[c.comp].append(c.wear / float(c.stint_laps))
+			for c in sim.cars:
+				if c.dnf != "":
+					continue
+				var runs: Array = []
+				var cur_c := ""
+				var n := 0
+				for r in c.lap_times:
+					if r["comp"] != cur_c:
+						if cur_c != "" and RaceSimS.SLICK.has(cur_c):
+							runs.append([cur_c, n])
+						cur_c = r["comp"]
+						n = 0
+					n += 1
+				if cur_c != "" and RaceSimS.SLICK.has(cur_c):
+					runs.append([cur_c, n])
+				for ru in runs:
+					st_len[ru[0]].append(ru[1])
+				if RaceSimS.SLICK.has(c.comp):
+					st_wear[c.comp].append(c.wear)
+	var tt := ""
+	for k in ["S", "M", "H"]:
+		var a: Array = st_len[k]
+		var b: Array = lap_w[k]
+		var e: Array = st_wear[k]
+		var sa := 0.0
+		for x in a:
+			sa += float(x)
+		var sb := 0.0
+		for x in b:
+			sb += float(x)
+		var se := 0.0
+		for x in e:
+			se += float(x)
+		tt += "%s 스틴트 평균 %.1f랩(%d개) · 랩당 마모 %.1f%% · 완주 시 마모 %.0f%%(%d대) / " % [k, sa / maxf(1.0, a.size()), a.size(), sb / maxf(1.0, b.size()) * 100.0, se / maxf(1.0, e.size()) * 100.0, e.size()]
+	print("타이어 수명 (15랩 마른 레이스, AI): " + tt)
 	# 팀별 레이스당 포인트 (AI만)
 	var agg := {}
 	var n2 = 0
