@@ -19,7 +19,9 @@ const COLD := Color("#38bdf8")
 var sim = null
 var sel := 0
 var tab := "drive"
-var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": false}, {"comp": "", "tyres": true, "fuel": true, "driver": false}]
+## 피트 설정 초안 (WEC 드라이버는 기본 '교대' — 주행 시간 규정 때문에 보통 교대가 맞다)
+var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true}, {"comp": "", "tyres": true, "fuel": true, "driver": true}]
+var _pits_seen: Array = [0, 0]
 var _seen_seq := -1
 
 var _prompt: PanelContainer
@@ -359,7 +361,8 @@ func reset_for(sim_) -> void:
 		d["comp"] = ""
 		d["tyres"] = true
 		d["fuel"] = true
-		d["driver"] = false
+		d["driver"] = true
+	_pits_seen = [0, 0]
 	_press(_order_btns, [["free"], ["hold"]], "free")
 	_on_tab("drive")
 
@@ -556,6 +559,10 @@ func _refresh_pit(c) -> void:
 		_w_fuel_fill.anchor_right = clampf(c.fuel / RS.TANK, 0.0, 1.0)
 		_press(_w_tyre_btns, [["yes"], ["no"]], "yes" if d["tyres"] else "no")
 		_press(_w_fuel_btns, [["yes"], ["no"]], "yes" if d["fuel"] else "no")
+		# 피트를 한 번 마치면 다음 피트는 다시 기본값(교대)으로
+		if c.pits != int(_pits_seen[sel]):
+			_pits_seen[sel] = c.pits
+			d["driver"] = true
 		_press(_w_drv_btns, [["no"], ["yes"]], "yes" if d["driver"] else "no")
 	# 상태줄 · 확정/철수
 	var booked: bool = c.pit_req != "" or c.boxing != null
