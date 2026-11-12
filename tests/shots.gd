@@ -274,6 +274,28 @@ func _process(_delta: float) -> bool:
 			step = 43
 		43:
 			_shot("hq_wec_staff")
+			# WEC 하위 리그(LMP2) 레이스: 내 클래스만 자세한 모델, 다른 클래스는 간단 모델
+			main._on_new_series("wec")
+			main.new_entry = "create"
+			main.new_opts["tier"] = 2
+			main._new_career()
+			main._start_weekend_career()
+			main.wk.auto_practice()
+			main.wk.start_quali()
+			main.wk.auto_quali()
+			main._begin_race()
+			main._update_start(10.0)
+			step = 70
+		70:
+			main.sim.advance(3.0)
+			if main.sim.leader_lap >= 3:
+				main._refresh_ui()
+				main._set_cam(0)
+				wait = 40
+				step = 71
+		71:
+			_shot("wec_lmp2")
+			main._set_cam(-1)
 			main._show_menu()
 			main._on_mode("quick")
 			_race("lemans", "dry", 1280, 720, "wec")

@@ -32,6 +32,7 @@ var banner_kind := ""
 var banner_t := -10.0
 ## 연습·예선 화면용: 차 한 대만 그린다 {car, dist(트랙 거리)}. null 이면 레이스 모드.
 var solo: Variant = null
+var _fcls := ""   # 자세히 그릴 클래스 (WEC 에서 내 차 클래스)
 
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0
@@ -322,6 +323,7 @@ func _draw() -> void:
 		return
 	var T = sim.T
 	var font = get_theme_default_font()
+	_fcls = _focus_cls()
 	_draw_yellow(T)
 	_draw_stalls(T)
 	if solo != null:
@@ -681,8 +683,21 @@ func _car_scale(is_mine: bool) -> float:
 	return base * (1.15 if is_mine else 0.98) * clampf(sqrt(_cam_zoom), 1.0, 1.7)
 
 
+## WEC: 내가 플레이하는 클래스만 자세한 모델, 다른 클래스는 간단한 모델 (그리기 부하 ↓)
+func _focus_cls() -> String:
+	if sim == null or not sim.is_wec():
+		return ""
+	for c in sim.cars:
+		if c.mine:
+			return c.cls
+	return ""
+
+
 func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	var sc := _car_scale(c.mine)
+	if _fcls != "" and c.cls != _fcls and not c.mine:
+		_draw_car_simple(pos, ang, c, sc * 0.92, night)
+		return
 	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
 	if night:
 		var beam := Color(1, 0.97, 0.78, 0.38)
@@ -722,9 +737,33 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## WEC 하이퍼카(풀 카울 + 눈물방울 캐노피 + 샤크핀) / LMGT3(박스형 쿠페 + 스포일러)
+## 간단 모델: 클래스별 실루엣 크기만 다른 둥근 사각형 + 앞쪽 표시 (그리기 3번)
+func _draw_car_simple(pos: Vector2, ang: float, c, sc: float, night: bool) -> void:
+	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
+	var sz: Vector2 = {"HY": Vector2(13.0, 8.0), "P2": Vector2(12.0, 7.2), "GT": Vector2(10.2, 6.6)}.get(c.cls, Vector2(11.0, 7.0))
+	var r := Rect2(-sz.x * 0.5, -sz.y * 0.5, sz.x, sz.y)
+	_ci.draw_rect(r, c.color.darkened(0.15))
+	_ci.draw_rect(Rect2(r.position.x + sz.x * 0.62, -sz.y * 0.3, sz.x * 0.2, sz.y * 0.6), Color(1, 1, 1, 0.55) if night else Color("#0f172a"))
+	_ci.draw_rect(Rect2(r.position.x, -sz.y * 0.5, 1.2, sz.y), c.rim)
+	_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+## WEC 하이퍼카(풀 카울 + 눈물방울 캐노피 + 샤크핀) / LMP2(좁은 프로토타입 + 센터 핀 + 큰 리어 윙) / LMGT3(박스형 쿠페 + 스포일러)
 func _draw_wec_body(c) -> void:
 	var tcol: Color = Color(sim.TYRE_HEX[c.comp])
+	if c.cls == "P2":
+		# 앞이 뾰족한 프로토타입: 노즈 → 넓은 사이드 → 좁은 꼬리
+		var body := PackedVector2Array([Vector2(7.2, 0), Vector2(5.0, -2.6), Vector2(1.0, -3.9), Vector2(-5.2, -3.6), Vector2(-6.6, -2.2), Vector2(-6.6, 2.2), Vector2(-5.2, 3.6), Vector2(1.0, 3.9), Vector2(5.0, 2.6)])
+		_ci.draw_colored_polygon(body, c.color)
+		_ci.draw_polyline(body + PackedVector2Array([body[0]]), c.rim, 0.5)
+		_fill_ellipse(Vector2(1.2, 0), Vector2(2.4, 1.5), Color("#0f172a"))
+		_ci.draw_line(Vector2(-1.2, 0), Vector2(-6.4, 0), c.rim, 0.8) # 센터 핀
+		_ci.draw_rect(Rect2(-7.4, -4.2, 1.5, 8.4), Color("#111827")) # 큰 리어 윙
+		_ci.draw_rect(Rect2(-7.4, -4.2, 1.5, 1.0), c.rim)
+		_ci.draw_rect(Rect2(-7.4, 3.2, 1.5, 1.0), c.rim)
+		_ci.draw_rect(Rect2(2.6, -4.2, 1.6, 0.6), tcol)
+		_ci.draw_rect(Rect2(2.6, 3.6, 1.6, 0.6), tcol)
+		return
 	if c.cls == "HY":
 		_round_rect(Rect2(-6.8, -4.2, 13.6, 8.4), 3.2, c.color)
 		_round_rect_line(Rect2(-6.8, -4.2, 13.6, 8.4), 3.2, c.rim, 0.6)
