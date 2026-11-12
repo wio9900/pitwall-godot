@@ -10,7 +10,7 @@ signal tab_changed(t: String)  # 랩타임 탭에서만 상세 순위·무전을
 const K = preload("res://scripts/ui/kit.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 
-const TABS := [["drive", "주행"], ["pit", "피트"], ["power", "ERS · 연료"], ["laps", "랩타임"]]
+const TABS := [["drive", "주행"], ["pit", "피트"], ["power", "ERS·연료"], ["laps", "랩타임"]]
 const INSTR := [["free", "자유"], ["attack", "추월"], ["defend", "방어"], ["hold", "유지"], ["lift", "연비"]]
 const PACE_ITEMS := [["attack", "공격"], ["standard", "표준"], ["save", "세이브"]]
 const ERS_ITEMS := [["harvest", "충전"], ["balance", "밸런스"], ["deploy", "오버테이크"]]
@@ -480,13 +480,16 @@ func refresh() -> void:
 			var lim: float = RS.H_CLIFF if c.comp == "H" else 0.70
 			var rem_t := "-"
 			if c.stint_laps >= 1 and rate > 0.0005 and RS.SLICK.has(c.comp):
-				rem_t = "약 %d랩 더" % maxi(0, int((lim - c.wear) / rate))
-			line3 = "%d랩째 · %s · 최근 %s" % [c.stint_laps, rem_t, K.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"]
+				rem_t = "+%d" % maxi(0, int((lim - c.wear) / rate))
+			# 칸이 좁아서 짧게: "3랩째(+5) 1:18.7" = 이 타이어 3랩째, 약 5랩 더, 최근 랩
+			var lt: float = c.last_lap_t
+			var lt_t: String = ("%d:%04.1f" % [int(lt) / 60, fmod(lt, 60.0)]) if lt > 0.0 else "-"
+			line3 = "%d랩째(%s) %s" % [c.stint_laps, rem_t, lt_t]
 		_chip_txt[i].text = "[font_size=30][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]\n[color=#e6edf3]%s[/color]" % [pos, code, badge, line2, line3]
 	var c = car()
 	if c == null:
 		return
-	_tab_btns[2].text = "연료 · 드라이버" if wec else "ERS · 연료"
+	_tab_btns[2].text = "연료" if wec else "ERS·연료"
 	match tab:
 		"drive":
 			_refresh_drive(c, ord)
