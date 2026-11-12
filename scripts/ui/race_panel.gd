@@ -463,12 +463,12 @@ func refresh() -> void:
 		elif c.pit_req != "" or c.boxing != null:
 			badge = "[bgcolor=#ffc53d][color=#111827] BOX [/color][/bgcolor]"
 		else:
+			# 카드는 짧게: 집중력은 낮을 때만 경고 (자세한 건 주행 탭)
 			var fv := int(round(c.focus))
-			var fc := "#a855f7" if fv >= 85 else ("#ef4444" if fv <= 55 else "#8b98a5")
-			badge = "[color=%s]집중 %d%%[/color]" % [fc, fv]
+			badge = ("[color=#ef4444]집중 %d%%[/color]" % fv) if fv <= 55 else ""
 		var temp_col := "#38bdf8" if c.tt < 0.42 else ("#ef4444" if c.tt > 0.8 else "#22c55e")
 		var extra: String = ("연료 %.1f랩" % sim.fuel_laps(c)) if wec else ("ERS " + _pct(c.ers))
-		var line2: String = c.dnf if c.dnf != "" else "%s %s [color=%s]●[/color] %s" % [RS.TYRE_KO[c.comp], _pct(c.wear), temp_col, extra]
+		var line2: String = c.dnf if c.dnf != "" else "[color=%s][b]%s[/b][/color] %s [color=%s]●[/color] %s" % [RS.TYRE_HEX[c.comp], c.comp, _pct(c.wear), temp_col, extra]
 		if c.mech_trouble != "":
 			line2 += " [color=#ef4444]⚠%s[/color]" % c.mech_trouble
 		if c.time_pen > 0.0:
