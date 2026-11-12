@@ -14,11 +14,57 @@ var _body: RichTextLabel
 var _spark: Spark
 
 
-## 최근 6랩 랩타임 막대 (스틴트 최고 대비 느려진 정도)
+## 최근 6랩 랩타임 표: 한 줄에 랩 · 타이어 · 랩타임 · 가장 빠른 랩보다 느린 만큼 막대.
+## 피트 들른 랩은 회색 '피트'로 따로 표시 (막대 기준에서 뺀다)
 class Spark extends Control:
-	var vals: Array = []  # [{lap, d}]
+	var vals: Array = []  # [{lap, t, pit, comp}] 오래된 랩 → 최근 랩
+	const ROW := 30.0
 
 	func _init() -> void:
+		custom_minimum_size = Vector2(0, ROW * 6 + 4)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color("#0f141b"))
+		var font: Font = get_theme_default_font()
+		if vals.is_empty():
+			draw_string(font, Vector2(10, 26), "아직 랩 데이터가 부족해요", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#8b98a5"))
+			return
+		var best := INF
+		for v in vals:
+			if not v["pit"]:
+				best = minf(best, float(v["t"]))
+		var span := 1.0 # 막대 최대 = 1초 이상 느림 (그보다 크면 꽉 참)
+		for v in vals:
+			if not v["pit"] and best < INF:
+				span = maxf(span, float(v["t"]) - best)
+		span = minf(span, 3.0)
+		var bar_x: float = size.x * 0.52
+		var bar_w: float = size.x - bar_x - 70.0
+		for i in vals.size():
+			var v: Dictionary = vals[i]
+			var y: float = 2.0 + i * ROW
+			var by: float = y + ROW * 0.5 + 6.0
+			if i % 2 == 0:
+				draw_rect(Rect2(0, y, size.x, ROW), Color("#151b24"))
+			draw_string(font, Vector2(8, by), "L%d" % int(v["lap"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#8b98a5"))
+			draw_string(font, Vector2(size.x * 0.13, by), String(v["comp"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(RS.TYRE_HEX.get(v["comp"], "#ffffff")))
+			var t: float = float(v["t"])
+			draw_string(font, Vector2(size.x * 0.20, by), "%d:%06.3f" % [int(t) / 60, fmod(t, 60.0)], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#e6edf3"))
+			if v["pit"]:
+				draw_string(font, Vector2(bar_x, by), "피트 들른 랩", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#6b7280"))
+				continue
+			var d: float = t - best
+			if d < 0.005:
+				draw_string(font, Vector2(bar_x, by), "가장 빠름", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#22c55e"))
+				continue
+			var col := Color("#ef4444") if d > 1.2 else (Color("#f59e0b") if d > 0.5 else Color("#22c55e"))
+			var bw: float = clampf(d / span, 0.04, 1.0) * bar_w
+			draw_rect(Rect2(bar_x, y + 8, bw, ROW - 16), col)
+			draw_string(font, Vector2(bar_x + bw + 6, by), "+%.2f" % d, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, col)
+
+
+func _init() -> void:
 		custom_minimum_size = Vector2(0, 92)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
@@ -68,7 +114,7 @@ func _init() -> void:
 	v.add_child(_title)
 	_body = K.rtl(14)
 	v.add_child(_body)
-	v.add_child(K.label("최근 랩 페이스 (스틴트 최고 대비)", 13, K.DIM))
+	v.add_child(K.label("최근 랩타임 (막대 = 가장 빠른 랩보다 느린 만큼)", 14, K.DIM))
 	_spark = Spark.new()
 	v.add_child(_spark)
 	v.add_child(K.btn("닫기", 16, close_card))
@@ -110,16 +156,6 @@ func refresh() -> void:
 	if c.dnf != "":
 		t += "[color=#ef4444]리타이어: %s[/color]\n" % c.dnf
 	t += "현재 [b]P%d[/b] · 타이어 [color=%s][b]%s[/b][/color] [b]%d랩째[/b] · 피트 %d회\n" % [pos, RS.TYRE_HEX[c.comp], RS.TYRE_KO[c.comp], c.stint_laps, c.pits]
-	var me: Variant = null
-	for m in sim.my_cars():
-		if m.is_running():
-			me = m
-			break
-	if me != null and me != c and c.dnf == "":
-		var ord: Array = sim.order_ui()
-		var ahead: bool = ord.find(c) < ord.find(me)
-		var g: float = sim.gap_seconds(me, c) if ahead else sim.gap_seconds(c, me)
-		t += "내 차(%s)와 간격: [b]%s %.1f초[/b]\n" % [me.code, "내 앞" if ahead else "내 뒤", g]
 	t += "피트월 크루: %s\n" % ("[bgcolor=#ef4444][color=#ffffff] CREW OUT [/color][/bgcolor] 곧 박스할 수 있어요!" if c.crew_out else "차고 대기")
 	# 피트 이력·사용한 타이어
 	var ph: PackedStringArray = []
@@ -137,9 +173,6 @@ func refresh() -> void:
 		if lh["pit"]:
 			break
 		recent.append(lh)
-	var best := INF
-	for lh in recent:
-		best = minf(best, float(lh["t"]))
 	if recent.size() >= 3:
 		var slope: float = (float(recent[0]["t"]) - float(recent[2]["t"])) / 2.0
 		t += "페이스 추이: 랩당 [b]%+.2f초[/b] (%s)\n" % [slope, "⚠ 급격한 그립 저하·절벽 의심" if slope > 0.35 else ("완만한 마모 진행" if slope > 0.15 else "페이스 일정")]
@@ -155,7 +188,7 @@ func refresh() -> void:
 	var hist: Array = c.lap_hist.slice(0, 6)
 	hist.reverse()
 	for lh in hist:
-		sp.append({"lap": int(lh["lap"]), "d": maxf(0.0, float(lh["t"]) - (best if best < INF else float(lh["t"])))})
+		sp.append({"lap": int(lh["lap"]), "t": float(lh["t"]), "pit": bool(lh.get("pit", false)), "comp": String(lh.get("comp", c.comp))})
 	_spark.vals = sp
 	_spark.queue_redraw()
 

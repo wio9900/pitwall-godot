@@ -47,10 +47,11 @@ func _list() -> Array:
 	return ord.filter(func(c): return c.cls == mc)
 
 
+## 띠가 좁아서 랩타임은 소수 첫째 자리까지 (1:23.4)
 func _fmt_lap(t: float) -> String:
 	if t <= 0.0:
 		return "-"
-	return "%d:%06.3f" % [int(t) / 60, fmod(t, 60.0)]
+	return "%d:%04.1f" % [int(t) / 60, fmod(t, 60.0)]
 
 
 func _draw() -> void:
@@ -114,8 +115,9 @@ func _draw() -> void:
 		# 팀 색 막대
 		draw_rect(Rect2(36, y + row_h * 0.18, 5, row_h * 0.64), c.color if not out else c.color.darkened(0.6))
 		# 이니셜 (WEC 는 차 번호까지)
-		var code: String = c.code if not wec else "%s%d" % [c.code, c.slot + 1]
+		var code: String = c.code
 		draw_string(bold, Vector2(48, base_y), code, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
+		var name_end: float = 48.0 + font.get_string_size(code, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 6.0
 		# 간격
 		var g := ""
 		var gcol := Color("#e6edf3")
@@ -135,10 +137,17 @@ func _draw() -> void:
 			g = sim.gap_to(c, prev)
 		else:
 			g = sim.gap_to(c, lead)
-		if c.time_pen > 0.0 and not out:
-			g += " +%d" % int(c.time_pen)
 		var tyre_w: float = fs * 1.1
-		draw_string(font, Vector2(48, base_y), g, HORIZONTAL_ALIGNMENT_RIGHT, w - 48 - tyre_w - 8, fs, gcol)
+		# 간격 글자가 이름과 겹치지 않게: 남은 칸에 맞춰 글자를 줄인다
+		var g_right: float = w - tyre_w - 8.0
+		var room: float = maxf(12.0, g_right - name_end)
+		var gfs: int = fs
+		while gfs > 10 and font.get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, gfs).x > room:
+			gfs -= 1
+		draw_string(font, Vector2(name_end, base_y), g, HORIZONTAL_ALIGNMENT_RIGHT, room, gfs, gcol)
+		# 페널티는 이름 위 작은 빨간 표시 (간격 칸을 차지하지 않게)
+		if c.time_pen > 0.0 and not out:
+			draw_string(font, Vector2(48, y + fs * 0.62), "+%d" % int(c.time_pen), HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs * 0.55), Color("#ef4444"))
 		# 타이어 한 글자
 		if not out:
 			draw_string(bold, Vector2(w - tyre_w - 4, base_y), c.comp, HORIZONTAL_ALIGNMENT_CENTER, tyre_w, fs, Color(sim.TYRE_HEX[c.comp]))

@@ -14,6 +14,7 @@ const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 const SeasonViewS = preload("res://scripts/ui/season_view.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RacePanelS = preload("res://scripts/ui/race_panel.gd")
+const StandS = preload("res://scripts/ui/standings.gd")
 const TrackArtS = preload("res://scripts/ui/track_art.gd")
 const DebriefS = preload("res://scripts/ui/debrief.gd")
 const RivalS = preload("res://scripts/ui/rival_card.gd")
@@ -113,7 +114,7 @@ var race_panel            # 내 차 지시판 (race_panel.gd)
 var info_label: RichTextLabel
 var gap_mode := 0         # 순위표: 0 앞차 간격 / 1 선두와 차이 / 2 직전 랩타임
 var gap_btn: Button
-var tower: RichTextLabel
+var tower   # 상세 순위 (standings.gd, 직접 그린 표)
 var radio: RichTextLabel
 var result_box: Control
 var result_text: RichTextLabel
@@ -1258,12 +1259,9 @@ func _build_race_ui() -> void:
 	gap_btn.pressed.connect(_on_gap_mode)
 	tw.add_child(gap_btn)
 	_gap_text()
-	tower = _rtl(false)
-	tower.meta_underlined = false
-	tower.meta_clicked.connect(_on_tower_click)
-	tower.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	KitS.drag_scroll(tower)
-	_small_text(tower, 16)
+	tower = StandS.new()
+	tower.car_clicked.connect(func(id): _on_tower_click(str(id)))
+	tower.head_clicked.connect(_on_gap_mode)
 	tw.add_child(tower)
 	radio = _rtl(false)
 	radio.name = "무전"
@@ -1558,47 +1556,9 @@ func _wec_gaps(c) -> String:
 	return t
 
 
-func _refresh_tower(ord: Array, leader) -> void:
-	if sim.is_wec():
-		_refresh_tower_wec(ord)
-		return
-	var s = "[table=5]"
-	s += _tower_head()
-	var pos = 0
-	var prev: Variant = null
-	for c in ord:
-		pos += 1
-		var name_col = "#ffc53d" if c.mine else "#e6edf3"
-		var gap = ""
-		if c.dnf != "":
-			gap = "[color=#ef4444]DNF[/color]"
-		elif gap_mode == 2:
-			gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
-			if c.id == sim.fastest_id:
-				gap = "[color=#a855f7]%s[/color]" % gap
-		elif c == leader:
-			gap = "[color=#a855f7]◆[/color] 선두"
-		elif gap_mode == 0 and prev != null:
-			gap = sim.gap_to(c, prev)
-		else:
-			gap = sim.gap_to(c, leader)
-		if c.time_pen > 0.0 and c.dnf == "":
-			gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
-		if c.boxing != null or c.pit_phase == 2:
-			gap += " [color=#ffc53d]PIT[/color]"
-		elif c.crew_out and c.dnf == "":
-			gap += " [bgcolor=#ef4444][color=#ffffff] CREW [/color][/bgcolor]"
-		elif c.drs and not sim.sc:
-			gap += " [color=#22c55e]DRS[/color]"
-		prev = c
-		# 라이벌 타이어 마모는 숨기고 스틴트 나이만 공개 (관측 가능한 정보)
-		var tyre = "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
-		if c.mine:
-			tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-		s += _tower_row(pos, c, "[color=%s][b]%s[/b][/color] [color=#8b98a5]%s[/color]" % [name_col, c.code, _short_team(c.team)], gap, tyre)
-	s += "[/table]"
-	if tower.text != s:
-		tower.text = s
+func _refresh_tower(_ord: Array, _leader) -> void:
+	tower.sim = sim
+	tower.refresh(gap_mode)
 
 
 ## 지시판 탭이 바뀌면: 랩타임 탭에서만 상세 순위·무전 (다른 탭에선 그 공간을 비워 둔다)
@@ -1608,12 +1568,13 @@ func _on_panel_tab(t: String) -> void:
 		_refresh_ui()
 
 
-## 가로 화면: 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)
+## 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)
 func _fit_tabs() -> void:
-	if landscape != 1 or race_scroll == null:
+	if race_scroll == null or not tabs.visible:
 		return
+	# 가로·세로 모두: 지시판 아래 남은 높이를 꽉 채운다 (줄이 더 많으면 표 높이만큼 늘어나 스크롤)
 	var h: float = race_scroll.size.y - panels_box.size.y - 12.0
-	var want: float = maxf(330.0, h)
+	var want: float = maxf(300.0, h)
 	if absf(tabs.custom_minimum_size.y - want) > 2.0:
 		tabs.custom_minimum_size = Vector2(0, want)
 
@@ -1622,67 +1583,6 @@ func _short_team(n: String) -> String:
 	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo", " THOR", " JOTA", " WRT", " Competition", " Autosports", " Oreca", " LMP2"]:
 		n = n.replace(w, "")
 	return n
-
-
-## 순위표 머리줄 · 한 줄 (열 너비: 이름이 넓게, 나머지는 내용만큼)
-func _tower_head() -> String:
-	var g: String = ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
-	return "[cell padding=4,2,4,4][color=#6b7280]P[/color][/cell][cell expand=4 padding=4,2,4,4][color=#6b7280]팀 · 드라이버[/color][/cell][cell expand=2 padding=4,2,4,4][color=#6b7280]%s[/color][/cell][cell expand=1 padding=4,2,4,4][color=#6b7280]타이어[/color][/cell][cell padding=4,2,4,4][color=#6b7280]피트[/color][/cell]" % g
-
-
-func _tower_row(pos: int, c, name_txt: String, gap: String, tyre: String) -> String:
-	# 중계 화면처럼 줄마다 번갈아 바탕색, 내 차 줄은 호박색 바탕
-	var pc: String = "#ffc53d" if c.mine else "#ffffff"
-	var bg: String = "#2a2410" if c.mine else ("#181b22" if pos % 2 == 1 else "#111319")
-	var cl: String = "[cell bg=%s padding=4,3,4,3]" % bg
-	var cx: String = "[cell bg=%s padding=4,3,4,3 expand=%%d]" % bg
-	return (cl + "[color=%s][b]%d[/b][/color][/cell]" + (cx % 4) + "[url=%d][color=%s]▌[/color] %s[/url][/cell]" + (cx % 2) + "%s[/cell]" + (cx % 1) + "%s[/cell]" + cl + "[color=#9aa1ad]%d[/color][/cell]") % [pc, pos, c.id, _hex(c.color), name_txt, gap, tyre, c.pits]
-
-
-func _refresh_tower_wec(ord: Array) -> void:
-	var s = "[table=5]"
-	s += _tower_head()
-	var present := {}
-	for c in ord:
-		present[c.cls] = true
-	for cls in ["HY", "P2", "GT"]:
-		if not present.has(cls):
-			continue
-		# 클래스 이름은 이름 칸에 (첫 칸에 두면 순위 칸이 넓어져 줄이 벌어진다)
-		s += "[cell bg=#e10600][/cell][cell bg=#e10600 expand=4 padding=4,2,4,2][color=#ffffff][b]%s[/b][/color][/cell][cell bg=#e10600 expand=2][/cell][cell bg=#e10600 expand=1][/cell][cell bg=#e10600][/cell]" % CLS_KO.get(cls, cls)
-		var lead: Variant = null
-		var prev: Variant = null
-		var pos := 0
-		for c in ord:
-			if c.cls != cls:
-				continue
-			pos += 1
-			if lead == null:
-				lead = c
-			var gap := ""
-			if c.dnf != "":
-				gap = "[color=#ef4444]DNF[/color]"
-			elif gap_mode == 2:
-				gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
-			elif c == lead:
-				gap = "[color=#a855f7]◆[/color] 선두"
-			elif gap_mode == 0 and prev != null:
-				gap = sim.gap_to(c, prev)
-			else:
-				gap = sim.gap_to(c, lead)
-			if c.time_pen > 0.0 and c.dnf == "":
-				gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
-			if c.boxing != null or c.pit_phase == 2:
-				gap += " [color=#ffc53d]PIT[/color]"
-			prev = c
-			var tyre := "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
-			if c.mine:
-				tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-			var nm: String = "[color=%s]%s #%d[/color] [color=#8b98a5]%s[/color]" % ["#ffc53d" if c.mine else "#e6edf3", _short_team(c.team), c.slot + 1, c.code]
-			s += _tower_row(pos, c, nm, gap, tyre)
-	s += "[/table]"
-	if tower.text != s:
-		tower.text = s
 
 
 func _refresh_radio() -> void:

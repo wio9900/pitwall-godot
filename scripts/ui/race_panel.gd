@@ -74,6 +74,7 @@ var _fuel_head: RichTextLabel
 var _fuel_btns: Array = []
 var _fuel_hint: RichTextLabel
 var _drv_info: RichTextLabel
+var _drv_card: PanelContainer
 # 랩타임
 var _laps_rtl: RichTextLabel
 # 팀 오더
@@ -350,6 +351,12 @@ func _build_pit(pg: VBoxContainer) -> void:
 
 
 func _build_power(pg: VBoxContainer) -> void:
+	# WEC: 드라이버 정보 카드를 맨 위에 크게 (피로 · 주행 시간 · 대기 드라이버)
+	_drv_card = PanelContainer.new()
+	_drv_card.add_theme_stylebox_override("panel", _box(K.PANEL2, Color("#454c59"), 10))
+	pg.add_child(_drv_card)
+	_drv_info = K.rtl(16)
+	_drv_card.add_child(_drv_info)
 	_ers_box = K.vbox(4)
 	pg.add_child(_ers_box)
 	_ers_head = _rt(_ers_box, 14)
@@ -360,7 +367,6 @@ func _build_power(pg: VBoxContainer) -> void:
 	_fuel_head = _rt(pg, 14)
 	_fuel_btns = _seg_row(pg, FUEL_ITEMS, _on_fuel)
 	_fuel_hint = _rt(pg, 12)
-	_drv_info = _rt(pg, 13)
 
 
 # ═════════ 상태 ═════════
@@ -489,7 +495,7 @@ func refresh() -> void:
 	var c = car()
 	if c == null:
 		return
-	_tab_btns[2].text = "연료" if wec else "ERS·연료"
+	_tab_btns[2].text = "드라이버/연료" if wec else "ERS·연료"
 	match tab:
 		"drive":
 			_refresh_drive(c, ord)
@@ -667,7 +673,7 @@ func _refresh_power(c) -> void:
 		_fuel_hint.text = "[color=#8b98a5]세이브는 느린 대신 급유 간격을 늘려요. 리치는 빠르지만 연료를 더 써요. 막판엔 세이브로 마지막 급유를 건너뛸 수도 있어요.[/color]"
 		var fat: float = sim.fatigue(c)
 		var fcol: String = "#ef4444" if fat > 0.45 else ("#f59e0b" if fat > 0.25 else "#22c55e")
-		var t := "[b]드라이버[/b] %s (등급 %s) · 이번 차 %d스틴트째 · 피로 [color=%s][b]%d%%[/b][/color]%s" % [c.name, String(c.drivers[c.drv].get("grade", "-")), c.stint_drv + 1, fcol, int(round(fat * 100)), " [color=#8b98a5](밤엔 빨리 쌓여요)[/color]" if sim.night else ""]
+		var t := "[color=#8b98a5]지금 운전[/color]  [font_size=22][b]%s[/b][/font_size]  [color=#8b98a5]등급 %s · %d스틴트째[/color]\n피로 [font_size=20][color=%s][b]%d%%[/b][/color][/font_size]%s" % [c.name, String(c.drivers[c.drv].get("grade", "-")), c.stint_drv + 1, fcol, int(round(fat * 100)), " [color=#8b98a5](밤엔 빨리 쌓여요)[/color]" if sim.night else ""]
 		var lim: Dictionary = sim.drive_limits()
 		var inw: int = sim.drive_in_window(c, c.drv)
 		var wcol: String = "#ef4444" if sim.must_swap(c) else "#8b98a5"
@@ -689,13 +695,13 @@ func _refresh_power(c) -> void:
 			var gk: String = RS.GRADE_KO.get(sim.min_drive["grade"], "")
 			t += ("\n[color=#22c55e]%s 최소 주행 충족[/color]" % gk) if short <= 0 else ("\n[color=#f59e0b]%s 드라이버가 %d랩 더 달려야 해요 (미달 시 60초)[/color]" % [gk, short])
 		_drv_info.text = t
-		_drv_info.visible = true
+		_drv_card.visible = true
 	else:
 		var need: float = left * RS.FPL * float(RS.FUEL[c.fuel_mode][1]) * c.fuel_burn_rate
 		var margin: float = (c.fuel - need) / (RS.FPL * c.fuel_burn_rate)
 		_fuel_head.text = "[color=#8b98a5]연료 모드[/color]   %s" % ("[color=#22c55e]여유 %+.1f랩[/color]" % margin if margin >= 0 else "[color=#ef4444]부족 %.1f랩 → 세이브 필요[/color]" % -margin)
 		_fuel_hint.text = "[color=#8b98a5]남은 %d랩. 리치는 빠르지만 연료를 약 8%% 더 쓰고, 세이브는 랩당 약 0.5초 느린 대신 10%% 아껴요.[/color]" % left
-		_drv_info.visible = false
+		_drv_card.visible = false
 
 
 func _refresh_laps(c) -> void:
