@@ -64,26 +64,6 @@ class Spark extends Control:
 			draw_string(font, Vector2(bar_x + bw + 6, by), "+%.2f" % d, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, col)
 
 
-func _init() -> void:
-		custom_minimum_size = Vector2(0, 92)
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	func _draw() -> void:
-		draw_rect(Rect2(Vector2.ZERO, size), Color("#0f141b"))
-		var font: Font = get_theme_default_font()
-		if vals.is_empty():
-			draw_string(font, Vector2(10, 24), "아직 랩 데이터가 부족해요", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#8b98a5"))
-			return
-		var n := vals.size()
-		var bw: float = size.x / n
-		for i in n:
-			var d: float = vals[i]["d"]
-			var hh: float = clampf(d / 2.5, 0.08, 1.0) * (size.y - 34)
-			var col := Color("#ef4444") if d > 1.2 else (Color("#f59e0b") if d > 0.5 else Color("#22c55e"))
-			draw_rect(Rect2(i * bw + bw * 0.2, size.y - 30 - hh, bw * 0.6, hh), col)
-			draw_string(font, Vector2(i * bw + bw * 0.18, size.y - 16), "L%d" % int(vals[i]["lap"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#8b98a5"))
-			draw_string(font, Vector2(i * bw + bw * 0.12, size.y - 3), "+%.2f" % d, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#e6edf3"))
-
 
 func _init() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
