@@ -84,26 +84,34 @@ func _draw() -> void:
 	# 열 위치 (폭에 비례): 순위 | 팀 | 드라이버 | 간격 | 최근 랩 | 타이어 | 피트
 	var x_pos := 8.0
 	var x_team := 54.0
+	# 좁으면(가로 화면 오른쪽 칸) 팀 이름 열을 빼고 드라이버만
+	var narrow: bool = w < 640.0
+	if narrow:
+		fs = 16
+	if narrow:
+		x_team = 46.0
 	var x_pit: float = w - 8.0
-	var w_pit := 40.0
-	var w_tyre := 70.0
-	var w_last: float = clampf(w * 0.16, 92.0, 130.0)
-	var w_gap: float = clampf(w * 0.15, 84.0, 130.0)
+	var w_pit: float = 0.0 if narrow else 44.0  # 좁으면 피트 열은 뺀다 (라이벌 카드에 있음)
+	var w_tyre: float = 50.0 if narrow else 72.0
+	var w_last: float = 78.0 if narrow else clampf(w * 0.16, 92.0, 130.0)
+	var w_gap: float = 62.0 if narrow else clampf(w * 0.15, 84.0, 130.0)
 	var x_tyre: float = x_pit - w_pit - w_tyre
-	var x_last: float = x_tyre - 8.0 - w_last
-	var x_gap: float = x_last - 8.0 - w_gap
-	var x_drv: float = x_team + (x_gap - x_team) * 0.62
+	var x_last: float = x_tyre - 6.0 - w_last
+	var x_gap: float = x_last - 6.0 - w_gap
+	var x_drv: float = x_team if narrow else x_team + (x_gap - x_team) * 0.62
 	# 머리줄
 	draw_rect(Rect2(0, 0, w, HEAD_H), Color("#0b0d12"))
 	var hy: float = HEAD_H * 0.5 + 6
-	var gap_t: String = ["앞차 간격 ⇄", "선두와 차이 ⇄", "앞차 간격 ⇄"][gap_mode]
+	var gap_t: String = ["앞차 ⇄", "선두 ⇄", "앞차 ⇄"][gap_mode] if narrow else ["앞차 간격 ⇄", "선두와 차이 ⇄", "앞차 간격 ⇄"][gap_mode]
 	draw_string(font, Vector2(x_pos, hy), "P", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
-	draw_string(font, Vector2(x_team, hy), "팀", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
+	if not narrow:
+		draw_string(font, Vector2(x_team, hy), "팀", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
 	draw_string(font, Vector2(x_drv, hy), "드라이버", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
 	draw_string(font, Vector2(x_gap, hy), gap_t, HORIZONTAL_ALIGNMENT_RIGHT, w_gap, 14, Color("#ffc53d"))
 	draw_string(font, Vector2(x_last, hy), "최근 랩", HORIZONTAL_ALIGNMENT_RIGHT, w_last, 14, DIM)
 	draw_string(font, Vector2(x_tyre, hy), "타이어", HORIZONTAL_ALIGNMENT_CENTER, w_tyre, 14, DIM)
-	draw_string(font, Vector2(x_pit - w_pit, hy), "피트", HORIZONTAL_ALIGNMENT_RIGHT, w_pit, 14, DIM)
+	if not narrow:
+		draw_string(font, Vector2(x_pit - w_pit, hy), "피트", HORIZONTAL_ALIGNMENT_RIGHT, w_pit, 14, DIM)
 	var y: float = HEAD_H
 	var lead: Variant = null
 	var prev: Variant = null
@@ -130,8 +138,10 @@ func _draw() -> void:
 		var team: String = _short_team(c.team)
 		if sim.is_wec():
 			team += " #%d" % (c.slot + 1)
-		draw_string(font, Vector2(x_team, by), team, HORIZONTAL_ALIGNMENT_LEFT, x_drv - x_team - 8, fs, ink)
-		draw_string(font, Vector2(x_drv, by), c.code, HORIZONTAL_ALIGNMENT_LEFT, x_gap - x_drv - 4, fs, ink)
+		if not narrow:
+			draw_string(font, Vector2(x_team, by), team, HORIZONTAL_ALIGNMENT_LEFT, x_drv - x_team - 8, fs, ink)
+		var code: String = c.code if not (narrow and sim.is_wec()) else "%s #%d" % [c.code, c.slot + 1]
+		draw_string(font, Vector2(x_drv, by), code, HORIZONTAL_ALIGNMENT_LEFT, maxf(10.0, x_gap - x_drv - 4), fs, ink)
 		# 간격
 		var g := ""
 		var gcol := Color("#e6edf3")
@@ -150,15 +160,19 @@ func _draw() -> void:
 			g = sim.gap_to(c, prev)
 		if c.time_pen > 0.0 and not out:
 			g += " +%d" % int(c.time_pen)
-		draw_string(font, Vector2(x_gap, by), g, HORIZONTAL_ALIGNMENT_RIGHT, w_gap, fs, gcol)
+		var gfs: int = fs
+		while gfs > 11 and font.get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, gfs).x > w_gap:
+			gfs -= 1
+		draw_string(font, Vector2(x_gap, by), g, HORIZONTAL_ALIGNMENT_RIGHT, w_gap, gfs, gcol)
 		# 최근 랩 (전체 최고는 보라)
 		var lcol: Color = Color("#a855f7") if c.id == sim.fastest_id else Color("#cbd5e1")
 		draw_string(font, Vector2(x_last, by), lap_short(c.last_lap_t) if not out else "-", HORIZONTAL_ALIGNMENT_RIGHT, w_last, fs, lcol)
 		# 타이어 + 그 타이어로 달린 랩
 		if not out:
 			draw_string(font, Vector2(x_tyre + 6, by), c.comp, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(sim.TYRE_HEX[c.comp]))
-			draw_string(font, Vector2(x_tyre + 26, by), "%dL" % c.stint_laps, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
-		draw_string(font, Vector2(x_pit - w_pit, by), str(c.pits), HORIZONTAL_ALIGNMENT_RIGHT, w_pit, fs, DIM)
+			draw_string(font, Vector2(x_tyre + 24, by), "%dL" % c.stint_laps, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
+		if not narrow:
+			draw_string(font, Vector2(x_pit - w_pit, by), str(c.pits), HORIZONTAL_ALIGNMENT_RIGHT, w_pit, fs, DIM)
 		_rows.append([y, y + ROW_H, c.id])
 		prev = c
 		y += ROW_H

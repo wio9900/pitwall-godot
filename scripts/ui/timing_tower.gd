@@ -117,7 +117,14 @@ func _draw() -> void:
 		# 이니셜 (WEC 는 차 번호까지)
 		var code: String = c.code
 		draw_string(bold, Vector2(48, base_y), code, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
-		var name_end: float = 48.0 + font.get_string_size(code, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 6.0
+		var name_end: float = 48.0 + font.get_string_size(code, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 4.0
+		# 페널티는 이름 바로 뒤 작은 빨간 글씨 (간격 칸과 겹치지 않게)
+		if c.time_pen > 0.0 and not out:
+			var pt: String = "+%d" % int(c.time_pen)
+			var pfs: int = int(fs * 0.62)
+			draw_string(font, Vector2(name_end, base_y), pt, HORIZONTAL_ALIGNMENT_LEFT, -1, pfs, Color("#ef4444"))
+			name_end += font.get_string_size(pt, HORIZONTAL_ALIGNMENT_LEFT, -1, pfs).x + 4.0
+		name_end += 2.0
 		# 간격
 		var g := ""
 		var gcol := Color("#e6edf3")
@@ -145,9 +152,6 @@ func _draw() -> void:
 		while gfs > 10 and font.get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, gfs).x > room:
 			gfs -= 1
 		draw_string(font, Vector2(name_end, base_y), g, HORIZONTAL_ALIGNMENT_RIGHT, room, gfs, gcol)
-		# 페널티는 이름 위 작은 빨간 표시 (간격 칸을 차지하지 않게)
-		if c.time_pen > 0.0 and not out:
-			draw_string(font, Vector2(48, y + fs * 0.62), "+%d" % int(c.time_pen), HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs * 0.55), Color("#ef4444"))
 		# 타이어 한 글자
 		if not out:
 			draw_string(bold, Vector2(w - tyre_w - 4, base_y), c.comp, HORIZONTAL_ALIGNMENT_CENTER, tyre_w, fs, Color(sim.TYRE_HEX[c.comp]))

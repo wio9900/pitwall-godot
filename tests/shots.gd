@@ -163,6 +163,11 @@ func _process(_delta: float) -> bool:
 				step = 11
 		11:
 			_shot("portrait_rain_night")
+			main.race_panel._on_tab("laps")
+			wait = 4
+			step = 112
+		112:
+			_shot("portrait_laps")
 			main._autosave() # 메뉴에 '이어하기' 버튼이 보이도록
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
@@ -316,6 +321,13 @@ func _process(_delta: float) -> bool:
 			step = 28
 		28:
 			_shot("wec_follow")
+			main.race_panel._on_tab("laps")
+			main._refresh_ui()
+			wait = 4
+			step = 72
+		72:
+			_shot("wec_laps")
+			main.race_panel._on_tab("drive")
 			main._set_speed(4)
 			main._set_cam(-1)
 			step = 29

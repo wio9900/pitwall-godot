@@ -496,6 +496,16 @@ func refresh() -> void:
 	if c == null:
 		return
 	_tab_btns[2].text = "드라이버/연료" if wec else "ERS·연료"
+	# 탭이 좁으면(가로 화면) 글자를 줄여서 다 보이게
+	for b in _tab_btns:
+		var bw: float = b.size.x - 12.0
+		if bw > 10.0:
+			var f: Font = b.get_theme_font("font")
+			var fs := 16
+			while fs > 11 and f.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > bw:
+				fs -= 1
+			if b.get_theme_font_size("font_size") != fs:
+				b.add_theme_font_size_override("font_size", fs)
 	match tab:
 		"drive":
 			_refresh_drive(c, ord)
