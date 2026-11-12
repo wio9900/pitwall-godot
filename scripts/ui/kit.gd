@@ -38,10 +38,16 @@ static func rtl(fsize := 16, fit := true) -> RichTextLabel:
 	return r
 
 
+## 손가락으로 누르기 좋은 크기: 버튼 높이 최소 48px, 글씨 최소 16
+const TOUCH_H := 48.0
+const MIN_FS := 16
+
+
 static func btn(text: String, fsize := 16, cb: Variant = null) -> Button:
 	var b = Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", fsize)
+	b.add_theme_font_size_override("font_size", maxi(fsize, MIN_FS))
+	b.custom_minimum_size = Vector2(0, TOUCH_H)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if cb != null:
 		b.pressed.connect(cb)
@@ -52,13 +58,95 @@ static func btn(text: String, fsize := 16, cb: Variant = null) -> Button:
 static func sbtn(text: String, cb: Variant = null, enabled := true, col: Color = AMBER) -> Button:
 	var b = Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", 14)
+	b.add_theme_font_size_override("font_size", 15)
+	b.custom_minimum_size = Vector2(56, 44)
 	b.disabled = not enabled
 	if enabled:
 		b.add_theme_color_override("font_color", col)
 	if cb != null:
 		b.pressed.connect(cb)
 	return b
+
+
+## 끌어서만 값이 바뀌는 슬라이더: 톡 건드리거나 세로로 스크롤하면 값이 안 바뀌고, 가로로 끌 때만 움직인 만큼 바뀐다
+class DragSlider extends Control:
+	signal value_changed(v: float)
+	var min_value := 0.0
+	var max_value := 1.0
+	var step := 0.1
+	var value := 0.0
+	var editable := true
+	var _down := false
+	var _drag := false
+	var _x0 := 0.0
+	var _y0 := 0.0
+	var _v0 := 0.0
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(0, 44)
+		mouse_filter = Control.MOUSE_FILTER_STOP
+
+	func set_value(v: float, emit := true) -> void:
+		var nv: float = clampf(snappedf(v, step) if step > 0.0 else v, min_value, max_value)
+		if is_equal_approx(nv, value):
+			return
+		value = nv
+		queue_redraw()
+		if emit:
+			value_changed.emit(value)
+
+	func _frac() -> float:
+		return clampf((value - min_value) / maxf(0.0001, max_value - min_value), 0.0, 1.0)
+
+	func _gui_input(ev: InputEvent) -> void:
+		if not editable:
+			return
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+			if ev.position.x < -50000.0:
+				_down = false
+				_drag = false
+				return
+			_down = ev.pressed
+			if ev.pressed:
+				_drag = false
+				_x0 = ev.position.x
+				_y0 = ev.position.y
+				_v0 = value
+			else:
+				_drag = false
+			queue_redraw()
+		elif ev is InputEventMouseMotion and _down:
+			var dx: float = ev.position.x - _x0
+			var dy: float = ev.position.y - _y0
+			if not _drag and absf(dx) > 10.0 and absf(dx) > absf(dy) * 1.3:
+				_drag = true
+			if _drag:
+				set_value(_v0 + dx / maxf(40.0, size.x - 24.0) * (max_value - min_value))
+				accept_event()
+
+	func _draw() -> void:
+		var y: float = size.y * 0.5
+		var x0 := 12.0
+		var x1: float = size.x - 12.0
+		draw_rect(Rect2(x0, y - 3, x1 - x0, 6), Color("#0b1016"))
+		var gx: float = lerpf(x0, x1, _frac())
+		draw_rect(Rect2(x0, y - 3, gx - x0, 6), RED if editable else Color("#4b5563"))
+		draw_circle(Vector2(gx, y), 12.0 if _drag else 10.0, Color.WHITE if editable else Color("#9aa1ad"))
+		draw_circle(Vector2(gx, y), 4.0, RED if editable else Color("#4b5563"))
+		if _down and not _drag:
+			draw_string(get_theme_default_font(), Vector2(gx - 40, y - 14), "← 끌어서 조절 →", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#9aa1ad"))
+
+
+static func slider(min_v: float, max_v: float, step_v: float, val: float, cb: Callable, editable_ := true) -> Control:
+	var s = DragSlider.new()
+	s.min_value = min_v
+	s.max_value = max_v
+	s.step = step_v
+	s.value = clampf(val, min_v, max_v)
+	s.editable = editable_
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.value_changed.connect(cb)
+	return s
 
 
 static func hbox(sep := 6) -> HBoxContainer:
@@ -110,6 +198,7 @@ static func seg(parent: Control, items: Array, current: String, cb: Callable, fs
 	var out: Array = []
 	for it in items:
 		var b = btn(String(it[1]), fsize)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART # 좁은 화면에선 글자가 두 줄로 (버튼이 화면 밖으로 밀리지 않게)
 		b.toggle_mode = true
 		b.button_group = grp
 		b.button_pressed = String(it[0]) == current

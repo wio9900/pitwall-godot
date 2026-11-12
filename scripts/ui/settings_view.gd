@@ -55,14 +55,7 @@ func _render() -> void:
 	var vol: float = float(ST.get_v("volume"))
 	var vl = K.label("소리 크기  %d%%" % int(round(vol * 100)), 15, K.DIM)
 	_box.add_child(vl)
-	var sl = HSlider.new()
-	sl.min_value = 0.0
-	sl.max_value = 1.0
-	sl.step = 0.05
-	sl.value = vol
-	sl.custom_minimum_size = Vector2(0, 30)
-	sl.value_changed.connect(_on_vol.bind(vl))
-	_box.add_child(sl)
+	_box.add_child(K.slider(0.0, 1.0, 0.05, vol, _on_vol.bind(vl)))
 	_box.add_child(K.label("엔진 소리 (배경 웅웅거림)", 15, K.DIM))
 	K.seg(_box, [["on", "켜기"], ["off", "끄기"]], "on" if ST.get_v("engine") else "off", _on_engine, 15)
 	_box.add_child(K.label("레이스 시작 배속", 15, K.DIM))

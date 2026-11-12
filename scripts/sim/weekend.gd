@@ -46,6 +46,13 @@ var _q_soft_used := {}
 func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	sim = sim_
 	var al: Dictionary = ALLOC_WEC if sim.is_wec() else ALLOC_F1
+	if sim.is_wec():
+		# 이번 대회에 쓸 수 있는 컴파운드만 (2종이면 3세트씩, 르망 3종은 S2·M3·H2)
+		var ok: Array = sim.wec_comps(main_cls())
+		if ok.size() < 3:
+			al = {"S": 0, "M": 0, "H": 0}
+			for k in ok:
+				al[k] = 3
 	sets = [al.duplicate(), al.duplicate()]
 	used_sets = [{"S": 0, "M": 0, "H": 0}, {"S": 0, "M": 0, "H": 0}]
 	setups = []

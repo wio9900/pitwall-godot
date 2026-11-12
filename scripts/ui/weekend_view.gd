@@ -586,15 +586,7 @@ func _setup_slider(card: VBoxContainer, c, key: String, ed: bool) -> void:
 	bar.lo = (float(lh[0]) - float(r[0])) / (float(r[1]) - float(r[0]))
 	bar.hi = (float(lh[1]) - float(r[0])) / (float(r[1]) - float(r[0]))
 	card.add_child(bar)
-	var sl = HSlider.new()
-	sl.min_value = float(r[0])
-	sl.max_value = float(r[1])
-	sl.step = {"wing": 0.1, "susp": 0.1, "bbias": 0.5, "diff": 1.0}[key]
-	sl.value = _setup_val(c, key)
-	sl.editable = ed
-	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sl.custom_minimum_size = Vector2(0, 28)
-	sl.value_changed.connect(_on_setup_val.bind(key, lab))
+	var sl = K.slider(float(r[0]), float(r[1]), {"wing": 0.1, "susp": 0.1, "bbias": 0.5, "diff": 1.0}[key], _setup_val(c, key), _on_setup_val.bind(key, lab), ed)
 	card.add_child(sl)
 	# 양 끝 설명 (띠·슬라이더와 같은 폭이 되도록 슬라이더 아래 한 줄로)
 	var row = K.hbox(6)

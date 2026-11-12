@@ -375,7 +375,8 @@ func _rtl(fit := true) -> RichTextLabel:
 func _btn(text: String, fsize := 18) -> Button:
 	var b = Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", fsize)
+	b.add_theme_font_size_override("font_size", maxi(fsize, 16))
+	b.custom_minimum_size = Vector2(0, 44)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return b
 
