@@ -42,20 +42,40 @@ jobs:
           cat ~/.config/godot/editor_settings-4.7.tres
       - name: 임포트
         run: timeout 300 ./godot --headless --path . --import 2>&1 | tail -5
+      - name: 서명 열쇠 고르기
+        # 저장소 비밀(PITWALL_KEYSTORE · PITWALL_KEY_PASS)이 있으면 늘 같은 열쇠로 서명 → 앱을 지우지 않고 덮어 설치할 수 있다.
+        # 없으면 예전처럼 매번 새 디버그 열쇠 (그때는 설치 전에 앱 삭제 필요)
+        env:
+          KS: ${{ secrets.PITWALL_KEYSTORE }}
+          KP: ${{ secrets.PITWALL_KEY_PASS }}
+        run: |
+          if [ -n "$KS" ] && [ -n "$KP" ]; then
+            echo "$KS" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=pitwall" >> "$GITHUB_ENV"
+            echo "::add-mask::$KP"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KP" >> "$GITHUB_ENV"
+            echo "고정 서명 열쇠 사용"
+          else
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$PWD/debug.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=androiddebugkey" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "::warning::서명 비밀이 없어 임시 열쇠로 서명합니다 (설치 전 앱 삭제 필요)"
+          fi
       - name: APK 내보내기
         env:
           GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
           GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
-          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/debug.keystore
-          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
-          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           mkdir -p build
           # 릴리스 빌드: 디버그 검사가 빠져 더 빠르고 배터리를 덜 쓴다
           timeout 600 ./godot --headless --path . --export-release "Android" build/PitWall.apk 2>&1 | tail -40
           ls -la build
           test -f build/PitWall.apk
+          # 어떤 열쇠로 서명됐는지 기록 (지문이 매번 같으면 덮어 설치 가능)
+          SDK=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
+          $SDK/build-tools/$(ls $SDK/build-tools | tail -1)/apksigner verify --print-certs build/PitWall.apk | grep -i "SHA-256" | head -1
       - name: APK를 apk 브랜치에 올리기
         run: |
           mkdir out && cp build/PitWall.apk out/ && cd out
