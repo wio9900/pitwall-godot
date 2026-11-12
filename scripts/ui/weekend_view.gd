@@ -35,6 +35,7 @@ var _q_car_txt: Array = []
 var _q_table: RichTextLabel
 var _q_log: RichTextLabel
 var _q_tick := 0.0
+var _landscape := -1
 
 
 func open(sim_, wk_) -> void:
@@ -454,6 +455,37 @@ func _q_live_update() -> void:
 		tt += "%2d  [color=%s]▌[/color][color=%s]%s[/color]  %s%s\n" % [i, K.hex(c.color), nm_col, who, g, tag]
 	_q_table.text = tt
 	_q_log.text = "\n".join(PackedStringArray(Q["log"]))
+
+
+func _render_q_table() -> void:
+	var tc = K.card(_side, "예선 순위")
+	var ord: Array = wk.q_order()
+	var pole: Variant = wk.pole()
+	var t := ""
+	var i := 0
+	for c in ord:
+		if sim.is_wec() and c.cls != wk.main_cls():
+			continue
+		i += 1
+		var r: Variant = wk.Q["res"].get(c.id)
+		var g := "대기"
+		if r != null:
+			if r["deleted"]:
+				g = "Q%d 삭제" % r["stage"]
+			elif pole == null or is_same(r, pole) or i == 1:
+				g = K.fmt_lap(r["total"])
+			else:
+				g = "+%.3f" % (r["total"] - pole["total"])
+		var nm_col := "#ffc53d" if c.mine else "#e6edf3"
+		var out := " [color=#ef4444]OUT[/color]" if wk.Q["eliminated"].has(c.id) else ""
+		var comp := ""
+		if r != null:
+			comp = "[color=%s]%s[/color]" % [RS.TYRE_HEX[r["q_comp"]], r["q_comp"]]
+		var who: String = ("%s #%d" % [c.team, c.slot + 1]) if sim.is_wec() else c.code
+		t += "%2d  [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  %s %s  [color=#8b98a5]Q%s[/color]%s\n" % [i, K.hex(c.color), nm_col, who, c.code if sim.is_wec() else c.team, g, comp, str(r["stage"]) if r != null else "-", out]
+	var rr = K.rtl(14)
+	rr.text = t
+	tc.add_child(rr)
 
 
 func _render_secs(res: Variant, upto: int) -> void:
