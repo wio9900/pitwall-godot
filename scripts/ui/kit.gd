@@ -79,8 +79,7 @@ static func card(parent: Control, title: String = "", accent: Color = LINE) -> V
 	var sb = StyleBoxFlat.new()
 	# 각진 상자 + 왼쪽 굵은 색 막대 (중계 그래픽 느낌)
 	sb.bg_color = PANEL
-	sb.border_color = LINE
-	sb.set_border_width_all(1)
+	sb.set_border_width_all(0)
 	sb.border_width_left = 4
 	sb.border_color = accent if accent != LINE else RED
 	sb.set_corner_radius_all(2)

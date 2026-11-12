@@ -92,6 +92,15 @@ func _init() -> void:
 		b.custom_minimum_size = Vector2(0, 62)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_chip.bind(i))
+		# 내 차 카드: 선택되면 왼쪽 호박색 막대 + 밝은 바탕 (글씨 색은 그대로)
+		var cn = _box(K.PANEL2, K.LINE, 6)
+		var cp = _box(Color("#262b35"), K.AMBER, 6)
+		cp.set_border_width_all(0)
+		cp.border_width_left = 5
+		for st in ["normal", "hover", "disabled"]:
+			b.add_theme_stylebox_override(st, cn)
+		for st in ["pressed", "hover_pressed"]:
+			b.add_theme_stylebox_override(st, cp)
 		var r = K.rtl(14)
 		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -115,7 +124,20 @@ func _init() -> void:
 		var b = K.btn(t[1], 15)
 		b.toggle_mode = true
 		b.button_group = grp
-		b.flat = true
+		# 탭: 선택되면 흰 글씨 + 빨간 밑줄
+		var tn = StyleBoxFlat.new()
+		tn.bg_color = Color(0, 0, 0, 0)
+		tn.set_content_margin_all(6)
+		var tp = tn.duplicate()
+		tp.border_width_bottom = 3
+		tp.border_color = K.RED
+		for st in ["normal", "hover", "disabled", "focus"]:
+			b.add_theme_stylebox_override(st, tn)
+		for st in ["pressed", "hover_pressed"]:
+			b.add_theme_stylebox_override(st, tp)
+		b.add_theme_color_override("font_pressed_color", Color.WHITE)
+		b.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_tab.bind(t[0]))
 		tb.add_child(b)
 		_tab_btns.append(b)
@@ -703,7 +725,7 @@ func _on_tab(t: String) -> void:
 	tab = t
 	for i in TABS.size():
 		_tab_btns[i].set_pressed_no_signal(TABS[i][0] == t)
-		_tab_btns[i].add_theme_color_override("font_color", K.AMBER if TABS[i][0] == t else K.DIM)
+		_tab_btns[i].add_theme_color_override("font_color", Color.WHITE if TABS[i][0] == t else K.DIM)
 		_pages[TABS[i][0]].visible = TABS[i][0] == t
 	refresh()
 
