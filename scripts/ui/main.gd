@@ -35,6 +35,7 @@ const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const SPEEDS := [0, 1, 2, 4, 8, 16]
+const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}
 
 var sim: Variant = null
 var speed_x := 4
@@ -1597,9 +1598,14 @@ func _tower_row(pos: int, c, name_txt: String, gap: String, tyre: String) -> Str
 func _refresh_tower_wec(ord: Array) -> void:
 	var s = "[table=5]"
 	s += _tower_head()
-	for cls in ["HY", "GT"]:
+	var present := {}
+	for c in ord:
+		present[c.cls] = true
+	for cls in ["HY", "P2", "GT"]:
+		if not present.has(cls):
+			continue
 		# 클래스 이름은 이름 칸에 (첫 칸에 두면 순위 칸이 넓어져 줄이 벌어진다)
-		s += "[cell bg=#e10600][/cell][cell bg=#e10600 expand=4 padding=4,2,4,2][color=#ffffff][b]%s[/b][/color][/cell][cell bg=#e10600 expand=2][/cell][cell bg=#e10600 expand=1][/cell][cell bg=#e10600][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
+		s += "[cell bg=#e10600][/cell][cell bg=#e10600 expand=4 padding=4,2,4,2][color=#ffffff][b]%s[/b][/color][/cell][cell bg=#e10600 expand=2][/cell][cell bg=#e10600 expand=1][/cell][cell bg=#e10600][/cell]" % CLS_KO.get(cls, cls)
 		var lead: Variant = null
 		var prev: Variant = null
 		var pos := 0
@@ -1742,7 +1748,7 @@ func _show_result() -> void:
 		var c = r["car"]
 		if sim.is_wec() and c.cls != last_cls:
 			last_cls = c.cls
-			s += "[cell][color=#ffc53d][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell][cell][/cell]" % ("HYPERCAR" if c.cls == "HY" else "LMGT3")
+			s += "[cell][/cell][cell][color=#e10600][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell]" % CLS_KO.get(c.cls, c.cls)
 		var name_col = "#ffc53d" if c.mine else "#e6edf3"
 		var strat = ""
 		# 스틴트별 타이어 (같은 컴파운드로 갈아 끼운 것도 따로 센다): M×3 → H×2
