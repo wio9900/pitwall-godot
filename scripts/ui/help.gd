@@ -69,7 +69,15 @@ func open() -> void:
 	close.custom_minimum_size = Vector2(0, 44)
 	close.pressed.connect(close_help)
 	v.add_child(close)
-	get_viewport().add_child(_ov)
+	# 테마(한글 글꼴·버튼 모양)를 물려받도록 테마가 있는 조상 아래에 띄운다
+	var host: Node = self
+	while host != null and not (host is Control and (host as Control).theme != null):
+		host = host.get_parent()
+	if host == null:
+		get_viewport().add_child(_ov)
+	else:
+		host.add_child(_ov)
+		_ov.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 func close_help() -> void:

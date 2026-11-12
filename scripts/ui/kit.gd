@@ -83,6 +83,11 @@ static func card(parent: Control, title: String = "", accent: Color = LINE) -> V
 	sb.content_margin_right = 12
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 10
+	sb.set_corner_radius_all(10)
+	sb.corner_detail = 8
+	sb.shadow_size = 6
+	sb.shadow_color = Color(0, 0, 0, 0.3)
+	sb.shadow_offset = Vector2(0, 3)
 	pc.add_theme_stylebox_override("panel", sb)
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(pc)

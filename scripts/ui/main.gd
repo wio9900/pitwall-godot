@@ -14,6 +14,7 @@ const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 const SeasonViewS = preload("res://scripts/ui/season_view.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RacePanelS = preload("res://scripts/ui/race_panel.gd")
+const TrackArtS = preload("res://scripts/ui/track_art.gd")
 const DebriefS = preload("res://scripts/ui/debrief.gd")
 const RivalS = preload("res://scripts/ui/rival_card.gd")
 const ST = preload("res://scripts/ui/settings.gd")
@@ -44,6 +45,9 @@ var opt_weather: OptionButton
 var opt_diff: OptionButton
 var opt_start: Array = []
 var circ_info: RichTextLabel
+var menu_bg            # 메뉴 배경 (track_art bg)
+var circ_thumb         # 서킷 미리보기 (track_art thumb)
+var circ_stats: VBoxContainer
 var menu_cols: BoxContainer
 # 모드: quick(퀵 레이스) / career(커리어)
 var mode := "quick"
@@ -200,16 +204,24 @@ func _apply_layout() -> void:
 
 
 # ═════════ 테마 ═════════
-func _sb(bg_col: Color, border: Color, radius := 8, pad := 8) -> StyleBoxFlat:
+func _sb(bg_col: Color, border: Color, radius := 8, pad := 8, shadow := 0, depth := false) -> StyleBoxFlat:
 	var s = StyleBoxFlat.new()
 	s.bg_color = bg_col
 	s.border_color = border
 	s.set_border_width_all(1)
+	if depth:
+		s.border_width_bottom = 2 # 아래 테두리를 살짝 두껍게 → 눌리는 버튼 느낌
 	s.set_corner_radius_all(radius)
+	s.corner_detail = 8
+	s.anti_aliasing = true
 	s.content_margin_left = pad
 	s.content_margin_right = pad
 	s.content_margin_top = pad * 0.6
 	s.content_margin_bottom = pad * 0.6
+	if shadow > 0:
+		s.shadow_size = shadow
+		s.shadow_color = Color(0, 0, 0, 0.35)
+		s.shadow_offset = Vector2(0, shadow * 0.4)
 	return s
 
 
@@ -217,31 +229,72 @@ func _make_theme() -> Theme:
 	var th = Theme.new()
 	var f = SystemFont.new()
 	# 한글이 보이도록 OS별 한글 글꼴을 순서대로 시도한다
-	f.font_names = PackedStringArray(["Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", "Droid Sans Fallback", "sans-serif"])
+	f.font_names = PackedStringArray(["Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", "Droid Sans Fallback", "sans-serif"])
+	f.hinting = TextServer.HINTING_LIGHT
+	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_AUTO
+	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	th.default_font = f
 	th.default_font_size = 20
 	for t in ["Button", "OptionButton"]:
-		th.set_stylebox("normal", t, _sb(PANEL2, LINE))
-		th.set_stylebox("hover", t, _sb(PANEL2.lightened(0.06), LINE.lightened(0.2)))
-		th.set_stylebox("pressed", t, _sb(Color("#3a2f12"), AMBER))
-		th.set_stylebox("hover_pressed", t, _sb(Color("#3a2f12"), AMBER))
-		th.set_stylebox("disabled", t, _sb(PANEL, LINE))
+		th.set_stylebox("normal", t, _sb(PANEL2, LINE, 9, 8, 3, true))
+		th.set_stylebox("hover", t, _sb(PANEL2.lightened(0.07), LINE.lightened(0.25), 9, 8, 4, true))
+		th.set_stylebox("pressed", t, _sb(Color("#3a2f12"), AMBER, 9, 8, 0, false))
+		th.set_stylebox("hover_pressed", t, _sb(Color("#45381a"), AMBER, 9, 8, 0, false))
+		th.set_stylebox("disabled", t, _sb(PANEL, LINE.darkened(0.2), 9, 8, 0, false))
 		th.set_stylebox("focus", t, StyleBoxEmpty.new())
 		th.set_color("font_color", t, INK)
+		th.set_color("font_hover_color", t, Color.WHITE)
 		th.set_color("font_pressed_color", t, AMBER)
 		th.set_color("font_hover_pressed_color", t, AMBER)
-		th.set_color("font_disabled_color", t, DIM)
-	th.set_stylebox("panel", "PanelContainer", _sb(PANEL, LINE, 10, 10))
+		th.set_color("font_disabled_color", t, DIM.darkened(0.2))
+	th.set_stylebox("panel", "PanelContainer", _sb(PANEL, LINE, 12, 10, 8))
 	th.set_color("font_color", "Label", INK)
 	th.set_color("default_color", "RichTextLabel", INK)
 	th.set_stylebox("normal", "RichTextLabel", StyleBoxEmpty.new())
-	th.set_stylebox("panel", "TabContainer", _sb(PANEL, LINE, 10, 8))
-	th.set_stylebox("tab_selected", "TabContainer", _sb(PANEL2, AMBER, 6, 10))
-	th.set_stylebox("tab_unselected", "TabContainer", _sb(PANEL, LINE, 6, 10))
-	th.set_stylebox("tab_hovered", "TabContainer", _sb(PANEL2, LINE, 6, 10))
+	th.set_stylebox("panel", "TabContainer", _sb(PANEL, LINE, 12, 8, 6))
+	th.set_stylebox("tab_selected", "TabContainer", _sb(PANEL2, AMBER, 8, 10))
+	th.set_stylebox("tab_unselected", "TabContainer", _sb(PANEL, LINE, 8, 10))
+	th.set_stylebox("tab_hovered", "TabContainer", _sb(PANEL2, LINE, 8, 10))
 	th.set_color("font_selected_color", "TabContainer", AMBER)
 	th.set_color("font_unselected_color", "TabContainer", DIM)
+	# 슬라이더: 얇은 홈 + 호박색 채움
+	var groove = _sb(Color("#0b1016"), LINE, 6, 0)
+	groove.content_margin_top = 3
+	groove.content_margin_bottom = 3
+	th.set_stylebox("slider", "HSlider", groove)
+	var fill = _sb(AMBER.darkened(0.25), AMBER.darkened(0.25), 6, 0)
+	fill.content_margin_top = 3
+	fill.content_margin_bottom = 3
+	th.set_stylebox("grabber_area", "HSlider", fill)
+	th.set_stylebox("grabber_area_highlight", "HSlider", fill)
+	# 스크롤바: 얇고 둥글게
+	var sb_bg = _sb(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 4, 0)
+	sb_bg.set_border_width_all(0)
+	th.set_stylebox("scroll", "VScrollBar", sb_bg)
+	var grab = _sb(Color(1, 1, 1, 0.16), Color(1, 1, 1, 0.0), 4, 0)
+	grab.set_border_width_all(0)
+	grab.content_margin_left = 3
+	grab.content_margin_right = 3
+	th.set_stylebox("grabber", "VScrollBar", grab)
+	var grab_h = grab.duplicate()
+	grab_h.bg_color = Color(1, 1, 1, 0.3)
+	th.set_stylebox("grabber_highlight", "VScrollBar", grab_h)
+	th.set_stylebox("grabber_pressed", "VScrollBar", grab_h)
+	# 드롭다운 목록
+	th.set_stylebox("panel", "PopupMenu", _sb(PANEL2, LINE, 10, 8, 10))
+	th.set_stylebox("hover", "PopupMenu", _sb(Color("#3a2f12"), AMBER, 6, 4))
+	th.set_color("font_hover_color", "PopupMenu", AMBER)
 	return th
+
+
+## 주 버튼 (시작 등): 호박색으로 채워 눈에 띄게
+func _primary(b: Button) -> void:
+	b.add_theme_stylebox_override("normal", _sb(AMBER.darkened(0.08), AMBER.lightened(0.2), 10, 10, 6, true))
+	b.add_theme_stylebox_override("hover", _sb(AMBER, Color.WHITE, 10, 10, 8, true))
+	b.add_theme_stylebox_override("pressed", _sb(AMBER.darkened(0.3), AMBER, 10, 10, 0, false))
+	b.add_theme_color_override("font_color", Color("#1a1204"))
+	b.add_theme_color_override("font_hover_color", Color("#1a1204"))
+	b.add_theme_color_override("font_pressed_color", Color("#1a1204"))
 
 
 func _label(text: String, fsize := 20, col := INK) -> Label:
@@ -275,6 +328,10 @@ func _hex(c: Color) -> String:
 
 # ═════════ 메뉴 ═════════
 func _build_menu() -> void:
+	menu_bg = TrackArtS.new()
+	menu_bg.mode = "bg"
+	menu_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(menu_bg)
 	var mc = MarginContainer.new()
 	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
@@ -299,17 +356,46 @@ func _build_menu() -> void:
 	v2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v2.add_theme_constant_override("separation", 12)
 	menu_cols.add_child(v2)
-	v.add_child(_label("PIT WALL", 52, AMBER))
-	v.add_child(_label("F1 피트월 전략 시뮬레이션 · Godot 프로토타입", 20, DIM))
-	v.add_child(HSeparator.new())
-	var mrow = KitS.hbox(6)
-	v.add_child(mrow)
-	mode_btns = KitS.seg(mrow, [["quick", "퀵 레이스"], ["career", "커리어"]], mode, _on_mode, 20)
-	mrow.add_child(KitS.help("시작 메뉴", HT.QUICK + "\n\n" + HT.CAREER))
+	# 로고: 호박색 막대 + PIT WALL + 부제 · 오른쪽에 도움말·설정
+	var logo = KitS.hbox(14)
+	v.add_child(logo)
+	var bar = ColorRect.new()
+	bar.color = AMBER
+	bar.custom_minimum_size = Vector2(7, 0)
+	logo.add_child(bar)
+	var lv = KitS.vbox(0)
+	lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	logo.add_child(lv)
+	var title = _rtl()
+	title.add_theme_font_size_override("normal_font_size", 54)
+	title.add_theme_font_size_override("bold_font_size", 54)
+	title.text = "[b]PIT[/b] [b][color=#ffc53d]WALL[/color][/b]"
+	lv.add_child(title)
+	lv.add_child(_label("F1 · WEC 피트월 전략 시뮬레이션", 18, DIM))
+	var tools = KitS.vbox(6)
+	logo.add_child(tools)
+	tools.add_child(KitS.help("시작 메뉴", HT.QUICK + "\n\n" + HT.CAREER))
 	var gear = KitS.btn("⚙", 18, _open_settings)
-	gear.size_flags_horizontal = Control.SIZE_SHRINK_END
-	gear.custom_minimum_size = Vector2(44, 0)
-	mrow.add_child(gear)
+	gear.custom_minimum_size = Vector2(36, 32)
+	tools.add_child(gear)
+	# 모드: 큰 카드 버튼 두 개
+	var mrow = KitS.hbox(10)
+	v.add_child(mrow)
+	mode_btns = []
+	var grp = ButtonGroup.new()
+	for it in [["quick", "🏁  퀵 레이스", "단판 · 연습 → 예선 → 결승"], ["career", "🏆  커리어", "팀 운영 · 시즌 · 승격"]]:
+		var mb = Button.new()
+		mb.toggle_mode = true
+		mb.button_group = grp
+		mb.button_pressed = it[0] == mode
+		mb.text = "%s\n%s" % [it[1], it[2]]
+		mb.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		mb.add_theme_font_size_override("font_size", 19)
+		mb.custom_minimum_size = Vector2(0, 76)
+		mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mb.pressed.connect(_on_mode.bind(it[0]))
+		mrow.add_child(mb)
+		mode_btns.append(mb)
 	quick_left = KitS.vbox(12)
 	v.add_child(quick_left)
 	career_left = KitS.vbox(10)
@@ -350,16 +436,23 @@ func _build_menu() -> void:
 	v2.add_child(quick_right)
 	career_right = KitS.vbox(10)
 	v2.add_child(career_right)
+	var tcard = PanelContainer.new()
+	quick_right.add_child(tcard)
+	var tv = KitS.vbox(8)
+	tcard.add_child(tv)
+	circ_thumb = TrackArtS.new()
+	circ_thumb.custom_minimum_size = Vector2(0, 230)
+	tv.add_child(circ_thumb)
 	circ_info = _rtl()
-	quick_right.add_child(circ_info)
-	var hint = _rtl()
-	hint.text = "[color=#8b98a5]내 차는 직접 [b]박스(S/M/H)[/b]를 눌러야만 피트인해요. 드라이 레이스에서는 [b]두 가지 슬릭 컴파운드[/b]를 써야 하고, 안 쓰면 30초 페널티예요. 상대 AI는 서킷·마모를 계산해서 각자 다른 전략을 씁니다.[/color]"
-	quick_right.add_child(hint)
+	tv.add_child(circ_info)
+	circ_stats = KitS.vbox(4)
+	tv.add_child(circ_stats)
 	var spacer = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	quick_right.add_child(spacer)
 	var wkb = _btn("주말 진행 (연습·예선) ▶", 26)
 	wkb.custom_minimum_size = Vector2(0, 64)
+	_primary(wkb)
 	wkb.pressed.connect(_start_weekend_quick)
 	quick_right.add_child(wkb)
 	var start = _btn("바로 레이스 ▶ (그리드 자동)", 18)
@@ -432,8 +525,29 @@ func _update_circ_info() -> void:
 	var c: Dictionary = DB.circuits[k]
 	var wear_txt = "높음" if c["wear"] >= 1.12 else ("낮음" if c["wear"] <= 0.95 else "보통")
 	var pit_txt := "피트 손실 %.1f초" % float(c["pitLoss"]) if c.has("pitLoss") else "%d시간 레이스 · 스틴트 5랩마다 급유" % int(c.get("hours", 6))
-	circ_info.text = "[b]%s[/b] · %s\n[color=#8b98a5]%s\n타이어 마모 %s · %s · 강우 확률 %d%%%s[/color]" % [
-		c["full"], c["desc"], c["setupHint"], wear_txt, pit_txt, int(c["rain"] * 100), (" · 야간 구간 있음" if c.get("night") != null else "")]
+	circ_info.text = "[font_size=24][b]%s[/b][/font_size]  [color=#8b98a5]%s · %s%s[/color]\n[color=#8b98a5]%s[/color]" % [
+		c["full"], c["dir"] if c.has("dir") else "", c["desc"], (" · 🌙 야간" if c.get("night") != null and not String(c["desc"]).contains("야간") else ""), c["setupHint"]]
+	circ_thumb.set_track(k)
+	menu_bg.set_track(k)
+	KitS.clear(circ_stats)
+	var ov: float = float(c.get("overtake", 0.2))
+	var rows: Array = [["타이어 마모", clampf((float(c["wear"]) - 0.75) / 0.5, 0.05, 1.0), wear_txt, BAD],
+		["추월 쉬움", clampf(ov / 0.35, 0.05, 1.0), "%d%%" % int(ov * 100), GOOD],
+		["강우 확률", clampf(float(c["rain"]), 0.03, 1.0), "%d%%" % int(c["rain"] * 100), Color("#3b82f6")]]
+	if c.has("pitLoss"):
+		rows.append(["피트 손실", clampf((float(c["pitLoss"]) - 17.0) / 10.0, 0.05, 1.0), "%.1f초" % float(c["pitLoss"]), AMBER])
+	else:
+		rows.append(["레이스", 1.0, pit_txt, AMBER])
+	for r in rows:
+		var hb = KitS.hbox(8)
+		circ_stats.add_child(hb)
+		var l = _label(r[0], 14, DIM)
+		l.custom_minimum_size = Vector2(84, 0)
+		hb.add_child(l)
+		KitS.bar(hb, float(r[1]), r[3], 8.0)
+		var vl = _label(r[2], 14, INK)
+		vl.custom_minimum_size = Vector2(70, 0)
+		hb.add_child(vl)
 	if qseries == "wec":
 		circ_info.text += "\n[color=#8b98a5]WEC: 하이퍼카(내 팀)와 LMGT3가 함께 달려요. 박스 때 타이어·급유·드라이버 교대를 골라요. 연료는 약 5랩마다 채워야 하고, 한 드라이버가 오래 타면 피로로 실수가 늘어요.[/color]"
 
@@ -451,6 +565,8 @@ func _show_only(node: Control) -> void:
 	for n in [menu_box, race_box, result_box, hq_view, wk_view, season_view]:
 		if n != null:
 			n.visible = n == node
+	if menu_bg != null:
+		menu_bg.visible = node == menu_box
 	if sfx != null and node != race_box:
 		sfx.set_engine(0.0)
 

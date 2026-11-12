@@ -49,6 +49,9 @@ var _stop_t := {}      # car id → 차고 정차 시작 시각(시뮬레이션)
 var _fin_seen := {}    # car id → 체커기 받은 것 확인
 var _flash := {}       # car id → 추월 강조 시작(실시간)
 var _was_finishing := false
+# 서킷 장식 (트랙 좌표로 한 번만 계산): 자갈 트랩·잔디·벽·관중석·피트 건물·그리드 칸·섹터 표시
+var _deco_key := ""
+var _deco := {}
 # 큰 장면 연출: 비 시작 · 폭우(번개) · 세이프티카 출동 · 우승/포디움
 var _prev_wet := -1.0
 var _rain_t := -10.0
@@ -61,6 +64,7 @@ var _confetti: Array = []
 
 
 func reset() -> void:
+	_deco_key = ""
 	_smooth.clear()
 	_pit_seen.clear()
 	_popups.clear()
@@ -304,7 +308,7 @@ func _draw() -> void:
 func _draw_backdrop() -> void:
 	# 은은한 격자 (방송 그래픽 느낌)
 	var step := 48.0
-	var col := Color(1, 1, 1, 0.025)
+	var col := Color(1, 1, 1, 0.018)
 	var x := fposmod(_off.x, step)
 	while x < size.x:
 		draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
@@ -322,7 +326,141 @@ func _poly(pts: Array) -> PackedVector2Array:
 	return out
 
 
+func _is_street() -> bool:
+	return String(sim.CIRC.get("desc", "")).contains("시가지")
+
+
+func _off_pts(T, i0: int, i1: int, off: float, side_of: Callable) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var i := i0
+	var guard := 0
+	while guard <= T.m:
+		var k: int = posmod(i, T.m)
+		out.append(T.pts[k] + T.nrm[k] * (off * float(side_of.call(k))))
+		if k == posmod(i1, T.m):
+			break
+		i += 1
+		guard += 1
+	return out
+
+
+func _corner_side(T, i: int) -> float:
+	var a: Vector2 = T.pts[i]
+	var b: Vector2 = T.pts[(i + 2) % T.m]
+	var c0: Vector2 = T.pts[(i - 2 + T.m) % T.m]
+	var hn := atan2(b.y - a.y, b.x - a.x)
+	var hp := atan2(a.y - c0.y, a.x - c0.x)
+	return -1.0 if wrapf(hn - hp, -PI, PI) > 0 else 1.0
+
+
+## 장식 도형을 트랙 좌표로 미리 만든다 (서킷이 바뀔 때만)
+func _build_deco(T) -> void:
+	_deco_key = sim.circ_key
+	_deco = {"gravel": [], "walls": [], "stand": [], "seats": [], "pitbox": PackedVector2Array(), "grid": [], "secs": []}
+	var street := _is_street()
+	# 느린 코너 바깥 자갈 트랩 (시가지는 벽)
+	var i := 0
+	while i < T.m:
+		if T.spd[i] <= 0.5:
+			var j := i
+			while j < T.m - 1 and T.spd[j + 1] <= 0.5:
+				j += 1
+			var mid: int = (i + j) / 2
+			var side: float = _corner_side(T, mid)
+			var depth: float = 1.0 + 1.6 * (0.5 - float(T.spd[mid])) / 0.22
+			if not street:
+				var g := _off_pts(T, i - 3, j + 3, TRACK_W * (1.0 + depth * 0.5), func(_k): return side)
+				_deco["gravel"].append([g, TRACK_W * depth])
+			i = j + 1
+		else:
+			i += 1
+	# 벽: 시가지는 트랙 바로 옆 양쪽, 그 밖은 런오프 바깥 (방호벽)
+	var wd: float = TRACK_W * (0.95 if street else 2.0)
+	for sd in [-1.0, 1.0]:
+		_deco["walls"].append(_off_pts(T, 0, T.m - 1, wd, func(_k): return sd))
+	# 관중석: 메인 직선 맞은편 (피트 반대쪽)
+	var span: int = mini(60, T.m / 6)
+	var sside: float = -float(T.inward)
+	_deco["stand"] = _off_pts(T, -span, span, TRACK_W * 2.9, func(_k): return sside)
+	for k in range(-span, span, 3):
+		var a: Vector2 = T.pts[posmod(k, T.m)] + T.nrm[posmod(k, T.m)] * (TRACK_W * 2.9 * sside)
+		var b: Vector2 = T.pts[posmod(k + 3, T.m)] + T.nrm[posmod(k + 3, T.m)] * (TRACK_W * 2.9 * sside)
+		_deco["seats"].append([a, b, (k / 3) % 3])
+	# 피트 건물: 피트레인 안쪽
+	var pb := PackedVector2Array()
+	for idx in range(0, T.pit_pts.size(), 2):
+		var pp: Array = T.pit_lane_point(float(idx))
+		var ang: float = pp[1]
+		var nrm: Vector2 = Vector2(-sin(ang), cos(ang)) * float(T.inward)
+		pb.append(pp[0] + nrm * 15.0)
+	_deco["pitbox"] = pb
+	# 출발 그리드 칸 (출발선 뒤로 지그재그)
+	for gi in mini(22, sim.cars.size()):
+		var d: float = T.L - (9.0 + gi * 6.5)
+		var p: Vector2 = T.point_at_dist(d)
+		var h: float = T.head_at_dist(d)
+		var nn := Vector2(-sin(h), cos(h))
+		var lat: float = TRACK_W * 0.22 * (1.0 if gi % 2 == 0 else -1.0)
+		_deco["grid"].append([p + nn * lat, h])
+	# 섹터 경계
+	for si in range(1, T.sec_idx.size() - 1):
+		var k2: int = int(T.sec_idx[si]) % T.m
+		_deco["secs"].append([T.pts[k2] - T.nrm[k2] * TRACK_W * 0.6, T.pts[k2] + T.nrm[k2] * TRACK_W * 0.6, si])
+
+
+## 트랙 바깥 풍경 (트랙 좌표로 그리고 화면 변환은 draw_set_transform 으로)
+func _draw_scenery(T, night: bool) -> void:
+	if _deco_key != sim.circ_key:
+		_build_deco(T)
+	var full: Array = T.pts.duplicate()
+	full.append(T.pts[0])
+	var pl := PackedVector2Array(full)
+	draw_set_transform(_off, 0.0, Vector2(_s, _s))
+	# 잔디 가장자리
+	draw_polyline(pl, Color("#0f1712") if night else Color("#13201a"), TRACK_W * 5.2, true)
+	# 자갈 트랩
+	for g in _deco["gravel"]:
+		draw_polyline(g[0], Color("#2e2a22") if night else Color("#3d3628"), float(g[1]), true)
+	# 관중석
+	draw_polyline(_deco["stand"], Color("#1c222b"), TRACK_W * 1.3, true)
+	var seat_cols := [Color("#3b4b63"), Color("#4a3b5c"), Color("#5c4a3b")]
+	for sd in _deco["seats"]:
+		draw_line(sd[0], sd[1], seat_cols[int(sd[2]) % 3].darkened(0.4 if night else 0.0), TRACK_W * 0.9)
+	# 피트 건물
+	if _deco["pitbox"].size() >= 2:
+		draw_polyline(_deco["pitbox"], Color("#232b36"), 9.0, true)
+		draw_polyline(_deco["pitbox"], Color("#3a4656"), 1.2, true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_track_marks(T, night: bool) -> void:
+	draw_set_transform(_off, 0.0, Vector2(_s, _s))
+	# 방호벽
+	var wall_col := Color("#7d8796") if _is_street() else Color("#5b6574")
+	for wpts in _deco["walls"]:
+		var wp: PackedVector2Array = wpts
+		var cl := wp.duplicate()
+		cl.append(wp[0])
+		draw_polyline(cl, Color(wall_col, 0.35 if night else 0.55), 0.7, true)
+	# 섹터 경계
+	for sc_ in _deco["secs"]:
+		draw_line(sc_[0], sc_[1], Color(1.0, 0.77, 0.24, 0.35), 0.6)
+	# 그리드 칸
+	for gb in _deco["grid"]:
+		var p: Vector2 = gb[0]
+		var h: float = gb[1]
+		var f := Vector2(cos(h), sin(h))
+		var n := Vector2(-sin(h), cos(h))
+		var hw := TRACK_W * 0.17
+		var col := Color(1, 1, 1, 0.45)
+		draw_line(p + f * 1.2 - n * hw, p + f * 1.2 + n * hw, col, 0.45)
+		draw_line(p + f * 1.2 - n * hw, p - f * 1.0 - n * hw, col, 0.45)
+		draw_line(p + f * 1.2 + n * hw, p - f * 1.0 + n * hw, col, 0.45)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func _draw_track(T, night: bool) -> void:
+	_draw_scenery(T, night)
 	var w = TRACK_W * _s
 	var poly = _poly(T.pts)
 	poly.append(poly[0])
@@ -379,6 +517,7 @@ func _draw_track(T, night: bool) -> void:
 			var q: Vector2 = p0 + n0 * (-TRACK_W * 0.5 + cell * k) + d0 * (cell * r)
 			var quad := PackedVector2Array([_X(q), _X(q + n0 * cell), _X(q + n0 * cell + d0 * cell), _X(q + d0 * cell)])
 			draw_colored_polygon(quad, Color.WHITE if (k + r) % 2 == 0 else Color("#111827"))
+	_draw_track_marks(T, night)
 
 
 func _dashed(pts: PackedVector2Array, col: Color, width: float, dash: float, gap: float) -> void:
