@@ -6,6 +6,9 @@ extends RefCounted
 const RS = preload("res://scripts/sim/race_sim.gd")
 const NS := 6
 const STINT := 5
+## 예선 한 랩의 컴파운드 차이 (레이스용 COMP 보다 작다: 실제 예선에서 소프트-미디엄 약 0.5초).
+## 헌 세트 벌점 0.45초와 비슷하게 맞춰, '쓴 소프트 ≈ 새 미디엄'이 되도록 → 새 소프트를 어느 세션에 쓸지 고민하게
+const QCOMP := {"S": -0.55, "M": 0.0, "H": 0.45}
 const QPUSH := {"safe": [0.85, 0.5, 0.0], "std": [1.0, 1.0, 0.012], "limit": [1.15, 2.0, 0.07]}
 const QPUSH_KO := {"safe": "안전하게", "std": "표준", "limit": "한계까지"}
 const QTRAFFIC := {"early": [0.05, 0.12, "즉시 출주"], "clean": [-0.12, 0.04, "클린 에어 대기"], "late": [-0.28, 0.28, "막판 릴리즈"]}
@@ -257,7 +260,7 @@ func q_lap(c, push: String, traffic: String, stage: int, comp: String, used_set:
 	var trf_risk: float = tv[1]
 	var stage_evo := (stage - 1) * -0.18
 	var ws: float = sim.wsc()
-	var comp_delta: float = float(RS.COMP[comp][0]) * ws
+	var comp_delta: float = float(QCOMP.get(comp, RS.COMP[comp][0])) * ws
 	var used_pen: float = 0.45 * ws if used_set else 0.0
 	var note := "헌 타이어 어택 (약 +0.45s)" if used_set else ""
 	var deleted := false

@@ -281,6 +281,7 @@ func _render_quali() -> void:
 				q_comp = al[0]
 			card.add_child(K.label("WEC 규정: 이번 대회 드라이 %s · 하이퍼폴은 미디엄만" % "·".join(PackedStringArray(sim.wec_comps(c.cls))), 13, K.DIM))
 		K.seg(card, qitems, q_comp, _on_qcomp, 14, anim == null)
+		card.add_child(K.label("한 랩 기준: 소프트 약 0.55초 빠름 · 하드 0.45초 느림 · 이미 쓴 세트는 +0.45초 → 쓴 소프트 ≈ 새 미디엄. 새 소프트를 어느 세션에 아낄지 정하세요 (예선에 쓴 세트는 레이스에서 헌 세트예요).", 12, K.DIM))
 		card.add_child(K.label("공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(c.slot), 14, anim == null)
 		card.add_child(K.label("드라이버 어택 강도", 14, K.DIM))
