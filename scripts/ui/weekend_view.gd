@@ -31,6 +31,7 @@ var q_dep := -1.0            # 예선 출발 시각 (세션 시작 후 분). -1 
 var _q_info: RichTextLabel
 var _q_line
 var _q_go: Button
+var _q_lo := 0.0
 
 
 ## 예선 세션 시간 막대: 노면(초록일수록 좋음) · 막판 트래픽(빨간 줄무늬) · 내가 고른 출발 시각 · 이미 달린 시각
@@ -374,15 +375,25 @@ func _render_quali() -> void:
 			dd.append(float(prev_res["dep"]))
 		_q_line.done_deps = dd
 		card.add_child(_q_line)
+		# 슬라이더를 시간 막대와 같은 눈금으로: 0분 ~ 마지막 출발, 오른쪽 3분은 빈칸
+		var srow = K.hbox(0)
+		card.add_child(srow)
 		var sl = HSlider.new()
-		sl.min_value = lo
+		sl.min_value = 0.0
 		sl.max_value = hi
+		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sl.size_flags_stretch_ratio = hi
+		_q_lo = lo
 		sl.step = 0.5
 		sl.value = q_dep
 		sl.editable = anim == null and hi > lo
 		sl.custom_minimum_size = Vector2(0, 30)
-		sl.value_changed.connect(_on_qdep)
-		card.add_child(sl)
+		sl.value_changed.connect(_on_qdep.bind(sl))
+		srow.add_child(sl)
+		var gap = Control.new()
+		gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		gap.size_flags_stretch_ratio = WK.RUN_MIN
+		srow.add_child(gap)
 		_q_info = K.rtl(14)
 		card.add_child(_q_info)
 		var hint = K.rtl(13)
@@ -644,7 +655,10 @@ func _remain_txt(minute: float) -> String:
 
 
 ## 슬라이더를 움직이면 정보 줄·막대·버튼만 바꾼다 (화면 전체를 다시 그리면 끌기가 끊긴다)
-func _on_qdep(v: float) -> void:
+func _on_qdep(v: float, sl: HSlider) -> void:
+	if v < _q_lo:
+		sl.set_value_no_signal(_q_lo) # 이미 달린 시간 이전으로는 못 돌아간다
+		v = _q_lo
 	q_dep = v
 	if _q_line != null:
 		_q_line.dep = v
