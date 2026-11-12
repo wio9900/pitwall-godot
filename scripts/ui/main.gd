@@ -22,6 +22,7 @@ const SettingsViewS = preload("res://scripts/ui/settings_view.gd")
 const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 const RecS = preload("res://scripts/sim/records.gd")
 const RecordsViewS = preload("res://scripts/ui/records_view.gd")
+const TowerS = preload("res://scripts/ui/timing_tower.gd")
 
 # 중계 화면풍 팔레트: 거의 검정 바탕 · 흰 글씨 · 빨강 구조색(제목 막대·선택 밑줄) · 호박색은 '내 차'
 const BG := Color("#090b0f")
@@ -129,6 +130,8 @@ var port_box: VBoxContainer
 var land_box: HBoxContainer
 var land_left: VBoxContainer
 var land_right: VBoxContainer
+var ttower                 # 중계식 순위 띠 (timing_tower.gd)
+var port_track: HBoxContainer
 var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로
 var result_panel: PanelContainer
 # 출발 신호
@@ -228,7 +231,10 @@ func _apply_layout() -> void:
 	_move(panels_box, race_lower)
 	_move(tabs, race_lower)
 	if landscape == 1:
-		# 왼쪽: 상단 바 + 큰 트랙 / 오른쪽: 내 차 지시 + 순위·무전
+		# 왼쪽 끝: 순위 띠 / 가운데: 상단 바 + 트랙 / 오른쪽: 내 차 지시 + 상세 순위·무전
+		_move(ttower, land_box)
+		land_box.move_child(ttower, 0)
+		ttower.custom_minimum_size = Vector2(196, 0)
 		_move(hud_top, land_left)
 		_move(race_view, land_left)
 		_move(race_scroll, land_right)
@@ -238,9 +244,14 @@ func _apply_layout() -> void:
 		port_box.visible = false
 	else:
 		_move(hud_top, port_box)
-		_move(race_view, port_box)
+		_move(port_track, port_box)
+		_move(ttower, port_track)
+		_move(race_view, port_track)
+		ttower.custom_minimum_size = Vector2(172, 0)
 		_move(race_scroll, port_box)
-		race_view.custom_minimum_size = Vector2(0, 520)
+		port_track.custom_minimum_size = Vector2(0, 560)
+		race_view.custom_minimum_size = Vector2(0, 0)
+		race_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tabs.custom_minimum_size = Vector2(0, 520)
 		land_box.visible = false
 		port_box.visible = true
@@ -288,7 +299,8 @@ func _make_theme() -> Theme:
 		th.set_font("font", t, fm)
 	for t in ["Button", "OptionButton"]:
 		# 선택된 버튼은 흰 바탕 + 검은 글씨 (중계 그래픽의 '선택' 표시)
-		th.set_stylebox("normal", t, _sb(PANEL2, LINE, 3, 8, 2, true))
+		# 버튼 경계가 보이게: 바탕보다 밝은 테두리
+		th.set_stylebox("normal", t, _sb(PANEL2, Color("#454c59"), 3, 8, 2, true))
 		th.set_stylebox("hover", t, _sb(PANEL2.lightened(0.07), INK.darkened(0.45), 3, 8, 2, true))
 		th.set_stylebox("pressed", t, _sb(INK, INK, 3, 8, 0, false))
 		th.set_stylebox("hover_pressed", t, _sb(Color.WHITE, Color.WHITE, 3, 8, 0, false))
@@ -1147,6 +1159,13 @@ func _build_race_ui() -> void:
 	land_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	land_box.add_theme_constant_override("separation", 10)
 	root.add_child(land_box)
+	# 중계식 순위 띠: 가로 화면에선 맨 왼쪽 기둥, 세로 화면에선 서킷 왼쪽
+	ttower = TowerS.new()
+	ttower.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ttower.car_clicked.connect(func(id): _on_tower_click(str(id)))
+	ttower.mode_clicked.connect(_on_gap_mode)
+	port_track = HBoxContainer.new()
+	port_track.add_theme_constant_override("separation", 6)
 	land_left = VBoxContainer.new()
 	land_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	land_left.size_flags_stretch_ratio = 1.55
@@ -1227,7 +1246,7 @@ func _build_race_ui() -> void:
 	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var tw = VBoxContainer.new()
-	tw.name = "순위"
+	tw.name = "상세 순위"
 	tabs.add_child(tw)
 	gap_btn = _btn("", 14)
 	gap_btn.tooltip_text = "누를 때마다 앞차 간격 → 선두와 차이 → 직전 랩타임. 순위표에서 이름을 누르면 라이벌 분석"
@@ -1501,6 +1520,9 @@ func _refresh_ui() -> void:
 	race_panel.refresh()
 	rival.refresh()
 	_fit_tabs()
+	ttower.sim = sim
+	ttower.gap_mode = gap_mode
+	ttower.queue_redraw()
 	# 성능: 안 보이는 탭은 건너뛰고, 내용이 같으면 다시 그리지 않는다
 	if tower.is_visible_in_tree():
 		_refresh_tower(ord, leader)

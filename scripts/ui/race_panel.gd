@@ -89,7 +89,7 @@ func _init() -> void:
 	for i in 2:
 		var b = Button.new()
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(0, 62)
+		b.custom_minimum_size = Vector2(0, 76)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_chip.bind(i))
 		# 내 차 카드: 선택되면 왼쪽 호박색 막대 + 밝은 바탕 (글씨 색은 그대로)
@@ -101,7 +101,7 @@ func _init() -> void:
 			b.add_theme_stylebox_override(st, cn)
 		for st in ["pressed", "hover_pressed"]:
 			b.add_theme_stylebox_override(st, cp)
-		var r = K.rtl(14)
+		var r = K.rtl(16)
 		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		r.offset_left = 10
@@ -475,7 +475,7 @@ func refresh() -> void:
 		elif c.tl_warn > 0 and c.dnf == "":
 			line2 += " [color=#f59e0b]TL %d/2[/color]" % c.tl_warn
 		var code: String = ("#%d %s" % [c.slot + 1, c.code]) if wec else c.code
-		_chip_txt[i].text = "[font_size=24][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]" % [pos, code, badge, line2]
+		_chip_txt[i].text = "[font_size=30][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]" % [pos, code, badge, line2]
 	var c = car()
 	if c == null:
 		return
