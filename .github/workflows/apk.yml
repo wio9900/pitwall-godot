@@ -50,7 +50,13 @@ jobs:
           KP: ${{ secrets.PITWALL_KEY_PASS }}
         run: |
           if [ -n "$KS" ] && [ -n "$KP" ]; then
-            echo "$KS" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/release.keystore"
+            # 복사할 때 섞여 들어간 공백·줄바꿈·설명 글자는 버리고 base64 글자만 남긴다
+            CLEAN=$(printf '%s' "$KS" | tr -cd 'A-Za-z0-9+/=')
+            echo "열쇠 글자 수 ${#CLEAN} · 확인값 $(printf '%s' "$CLEAN" | sha256sum | cut -c1-16) (정상: 3512 · f7f84a9f483c781d)"
+            echo "비밀번호 글자 수 ${#KP} · 확인값 $(printf '%s' "$KP" | tr -d ' \r\n' | sha256sum | cut -c1-16) (정상: 32 · 0fbb0fcdc17d3225)"
+            KP=$(printf '%s' "$KP" | tr -d ' \r\n')
+            printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass "$KP" | grep -i pitwall
             echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
             echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=pitwall" >> "$GITHUB_ENV"
             echo "::add-mask::$KP"
