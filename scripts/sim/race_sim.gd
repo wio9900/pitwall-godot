@@ -152,7 +152,8 @@ func drive_limits() -> Dictionary:
 	var h: float = wec_hours()
 	var win: int = maxi(1, int(round(laps * minf(1.0, 6.0 / h))))
 	# 압축된 레이스에서도 연비 주행 한 스틴트(최대 약 STINT+2랩)는 한 명이 탈 수 있게
-	var max_win: int = maxi(STINT + 2, int(floor(laps * minf(1.0, 4.0 / h))))
+	# 랩 단위로 바꿀 때 2랩 여유 (압축된 르망 60랩에선 4시간 ≈ 10랩 = 더블 스틴트라, 연료가 조금 남아 한 랩 더 돌면 억울한 위반이 됐다)
+	var max_win: int = maxi(STINT + 2, int(round(laps * minf(1.0, 4.0 / h))) + 2)
 	var max_total: int = maxi(STINT + 2, int(floor(laps * 14.0 / 24.0))) if h >= 24.0 else laps
 	var min_each: int = int(ceil(laps * 6.0 / 24.0)) if h >= 24.0 else 0
 	return {"win": win, "max_win": max_win, "max_total": max_total, "min_each": min_each}
@@ -775,7 +776,10 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var lift_wear = 0.80 if c.instr == "lift" else (0.92 if c.instr == "hold" else 1.0)
 	var lift_fuel = 0.86 if c.instr == "lift" else 1.0
 	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
-	c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (2.0 - c.eng_eff) * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0))
+	if is_wec():
+		c.fuel -= FPL * sh * wec_fuel_mult(c) * lift_fuel
+	else:
+		c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (2.0 - c.eng_eff) * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0))
 	return {"t": t, "crash": crash}
 
 
@@ -1415,7 +1419,16 @@ func _front_same_class(c) -> Variant:
 
 
 func _wec_burn(c, m: String) -> float:
-	return FPL * float(FUEL[m][1]) * c.fuel_burn_rate * (2.0 - c.eng_eff)
+	return FPL * wec_fuel_mult(c, m)
+
+
+## WEC 랩당 연료 배율. 실제 WEC 는 BoP 로 스틴트당 에너지(가상 에너지 탱크)가 정해져
+## 같은 차끼리 스틴트 길이가 거의 같다 → 드라이버 연비·엔진 효율 차이는 F1 의 35% 만 반영.
+## 주행 페이스(공격 +6% · 세이브 -7%)는 그대로. 화면 표시·AI 판단·실제 소모가 모두 이 값을 쓴다
+func wec_fuel_mult(c, m: String = "") -> float:
+	var mode: String = c.fuel_mode if m == "" else m
+	var pace_m: float = 1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0)
+	return float(FUEL[mode][1]) * (1.0 + (c.fuel_burn_rate - 1.0) * 0.35) * (1.0 + (1.0 - c.eng_eff) * 0.35) * pace_m
 
 
 ## WEC 피트 판단 (HTML wecDecision). 내 차는 지시가 있을 때만, 단 연료가 1랩도 안 남으면 자동 급유
@@ -1423,7 +1436,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	var want_kind := "slick" if want == "slick" else "W"
 	if c.mine:
 		if c.pit_req == "":
-			var fm_m: float = float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0)) * (2.0 - c.eng_eff)
+			var fm_m: float = wec_fuel_mult(c)
 			var one_lap: float = FPL * fm_m
 			var fuel_line: float = c.fuel - one_lap * T.share[NS - 1]
 			if left >= 1 and fuel_line < one_lap * 0.90:
@@ -1438,7 +1451,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		c.wec_req = null
 		c.crew_out = true
 		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true))}
-	var fm: float = float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate
+	var fm: float = wec_fuel_mult(c)
 	var fuel_at_line: float = c.fuel - FPL * T.share[NS - 1] * fm
 	var need_fuel: bool = fuel_at_line < FPL * fm * 0.92 and left >= 1
 	var worn_out: bool = c.wear >= 0.62 and left >= 2

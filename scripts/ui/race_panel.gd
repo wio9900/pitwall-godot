@@ -621,7 +621,9 @@ func _refresh_power(c) -> void:
 	var left: int = maxi(0, sim.laps - c.lap)
 	if wec:
 		var fl: float = sim.fuel_laps(c)
-		_fuel_head.text = "[color=#8b98a5]연료 모드[/color]   남은 연료 [b]%.1f랩분[/b]" % fl
+		var full_s: float = RS.TANK / sim._wec_burn(c, "std")
+		var full_l: float = RS.TANK / sim._wec_burn(c, "lean")
+		_fuel_head.text = "[color=#8b98a5]연료 모드[/color]   남은 연료 [b]%.1f랩분[/b]  [color=#8b98a5]· 가득 채우면 표준 %.1f랩 / 세이브 %.1f랩 (지금 페이스 기준)[/color]" % [fl, full_s, full_l]
 		_fuel_hint.text = "[color=#8b98a5]세이브는 느린 대신 급유 간격을 늘려요. 리치는 빠르지만 연료를 더 써요. 막판엔 세이브로 마지막 급유를 건너뛸 수도 있어요.[/color]"
 		var fat: float = sim.fatigue(c)
 		var fcol: String = "#ef4444" if fat > 0.45 else ("#f59e0b" if fat > 0.25 else "#22c55e")
