@@ -229,12 +229,13 @@ func _process(_delta: float) -> bool:
 			step = 20
 		20:
 			main.wk_view._on_to_quali()
-			main.wk_view._run_quali_lap()
+			main.wk.q_advance(13.0) # 막판: 다들 트랙 위
+			main.wk_view._on_q_go(0)
+			main.wk_view.q_speed = 10
 			wait = 120
 			step = 21
 		21:
 			_shot("wk_quali_lap")
-			main.wk_view.anim = null
 			main.wk_view._on_auto_quali()
 			wait = 3
 			step = 22

@@ -16,7 +16,6 @@ var wk
 var phase := "practice"   # practice / quali / grid
 var sel := 0
 var q_push := "std"
-var q_traffic := "clean"
 var q_comp := "S"
 var anim: Variant = null  # {kind, t, dur, res, car}
 var plan_edit := {}       # slot → {"A": [stops], "B": [stops], "key": "A", "opt": 최적 비용, "edited": bool}
@@ -27,52 +26,15 @@ var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
 var p_comp := "M"            # 연습 주행 타이어
-var q_dep := -1.0            # 예선 출발 시각 (세션 시작 후 분). -1 = 기본값(마지막 출발 2분 전)
-var _q_info: RichTextLabel
-var _q_line
-var _q_go: Button
-var _q_lo := 0.0
-
-
-## 예선 세션 시간 막대: 노면(초록일수록 좋음) · 막판 트래픽(빨간 줄무늬) · 내가 고른 출발 시각 · 이미 달린 시각
-class QTimeline extends Control:
-	var wk
-	var stage := 1
-	var dep := 0.0
-	var lo := 0.0
-	var done_deps: Array = []
-
-	func _init() -> void:
-		custom_minimum_size = Vector2(0, 46)
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	func _draw() -> void:
-		var T: float = wk.q_len(stage)
-		var w: float = size.x
-		var h: float = 22.0
-		var n := 48
-		for i in n:
-			var m: float = T * (float(i) + 0.5) / n
-			var cd: Dictionary = wk.q_cond(stage, minf(m, T - WK.RUN_MIN))
-			var g: float = clampf((0.10 - float(cd["evo"])) / 0.40, 0.0, 1.0)
-			var col := Color("#1c2028").lerp(Color("#15803d"), g)
-			if m > T - WK.RUN_MIN:
-				col = Color("#2b303a") # 체커기: 출발 불가
-			draw_rect(Rect2(w * i / n, 4, w / n + 1, h), col)
-			var risk: float = float(cd["risk"])
-			if risk > 0.12 and m <= T - WK.RUN_MIN:
-				draw_rect(Rect2(w * i / n, 4, w / n + 1, 4), Color(0.88, 0.02, 0.0, clampf(risk * 2.5, 0.2, 0.9)))
-		if lo > 0.0:
-			draw_rect(Rect2(0, 4, w * lo / T, h), Color(0, 0, 0, 0.55))
-		var font: Font = get_theme_default_font()
-		for d in done_deps:
-			draw_line(Vector2(w * float(d) / T, 2), Vector2(w * float(d) / T, h + 6), Color("#9aa1ad"), 2.0)
-		var x: float = w * dep / T
-		draw_rect(Rect2(x - 2, 0, 4, h + 8), Color.WHITE)
-		for mm in [0.0, T * 0.5, T - WK.RUN_MIN, T]:
-			var rem: float = T - mm
-			draw_string(font, Vector2(clampf(w * mm / T - 14, 0, w - 34), h + 22), "%d:%02d" % [int(rem), int(round(fmod(rem, 1.0) * 60))], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#9aa1ad"))
-var _landscape := -1
+var q_speed := 30            # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤
+var q_comps: Array = ["S", "S"]
+var q_pushes: Array = ["std", "std"]
+var _q_ver := -1
+var _q_head: RichTextLabel
+var _q_car_txt: Array = []
+var _q_table: RichTextLabel
+var _q_log: RichTextLabel
+var _q_tick := 0.0
 
 
 func open(sim_, wk_) -> void:
@@ -332,130 +294,170 @@ func _render_quali() -> void:
 		sub = "클래스 상위 8대 하이퍼폴 진출 · 다른 클래스는 기록순 그리드" if st == 1 else "클래스 상위 8대 폴 포지션 결정전"
 		ttl = "%s %s" % [sim.CIRC["name"], "예선" if st == 1 else "하이퍼폴"]
 	_title(ttl, sub)
-	var c: Variant = wk.current_car()
-	if c != null:
-		var card = K.card(_side, "[Q%d] #%d %s 어택 준비" % [st, c.slot + 1, c.name], K.AMBER)
-		var s: Dictionary = wk.sets[c.slot]
-		card.add_child(K.label("어택 타이어 (새 세트가 없으면 헌 타이어 +0.45초)", 14, K.DIM))
-		var u: Dictionary = wk.used_sets[c.slot]
-		var qitems: Array = []
-		for k in ["S", "M", "H"]:
-			if wk.has_any(c.slot, k):
-				qitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])
-		if not wk.has_any(c.slot, q_comp) and not qitems.is_empty():
-			q_comp = qitems[0][0]
-		if sim.is_wec():
-			var al: Array = ["M"] if st >= 2 else sim.wec_comps(c.cls)
-			qitems = qitems.filter(func(it): return al.has(it[0]))
-			if not al.has(q_comp):
-				q_comp = al[0]
-			card.add_child(K.label("WEC 규정: 이번 대회 드라이 %s · 하이퍼폴은 미디엄만" % "·".join(PackedStringArray(sim.wec_comps(c.cls))), 13, K.DIM))
-		K.seg(card, qitems, q_comp, _on_qcomp, 14, anim == null)
-		card.add_child(K.label("한 랩 기준: 소프트 약 0.55초 빠름 · 하드 0.45초 느림 · 이미 쓴 세트는 +0.45초 → 쓴 소프트 ≈ 새 미디엄. 새 소프트를 어느 세션에 아낄지 정하세요 (예선에 쓴 세트는 레이스에서 헌 세트예요).", 12, K.DIM))
-		card.add_child(K.label("공기압", 14, K.DIM))
-		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(c.slot), 14, anim == null)
-		card.add_child(K.label("드라이버 어택 강도", 14, K.DIM))
-		K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_push, _on_qpush, 14, anim == null)
-		# 출발 시각: 세션 시계에서 언제 피트를 나갈지
-		var T: float = wk.q_len()
-		var lo: float = float(wk.Q["clock"][c.slot])
-		var hi: float = wk.q_last_dep()
-		if q_dep < 0.0:
-			q_dep = maxf(lo, hi - 2.0)
-		q_dep = clampf(q_dep, lo, hi)
-		card.add_child(K.label("피트 출발 시각 — 세션 %d분 (마지막 출발은 체커기 3분 전)" % int(T), 14, K.DIM))
-		_q_line = QTimeline.new()
-		_q_line.wk = wk
-		_q_line.stage = st
-		_q_line.lo = lo
-		_q_line.dep = q_dep
-		var dd: Array = []
-		var prev_res: Variant = wk.Q["res"].get(c.id)
-		if prev_res != null and int(prev_res["stage"]) == st and prev_res.has("dep"):
-			dd.append(float(prev_res["dep"]))
-		_q_line.done_deps = dd
-		card.add_child(_q_line)
-		# 슬라이더를 시간 막대와 같은 눈금으로: 0분 ~ 마지막 출발, 오른쪽 3분은 빈칸
-		var srow = K.hbox(0)
-		card.add_child(srow)
-		var sl = HSlider.new()
-		sl.min_value = 0.0
-		sl.max_value = hi
-		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sl.size_flags_stretch_ratio = hi
-		_q_lo = lo
-		sl.step = 0.5
-		sl.value = q_dep
-		sl.editable = anim == null and hi > lo
-		sl.custom_minimum_size = Vector2(0, 30)
-		sl.value_changed.connect(_on_qdep.bind(sl))
-		srow.add_child(sl)
-		var gap = Control.new()
-		gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		gap.size_flags_stretch_ratio = WK.RUN_MIN
-		srow.add_child(gap)
-		_q_info = K.rtl(14)
-		card.add_child(_q_info)
-		var hint = K.rtl(13)
-		hint.text = "[color=#8b98a5]늦게 나갈수록 노면이 좋아져 빨라요(초록). 대신 막판엔 다들 나와서 트래픽(빨간 띠)과 사고로 어택이 중단될 위험이 커지고, 중단되면 다시 나갈 시간이 없어요. 일찍 한 번 기록을 만들어 두고 막판에 한 번 더 나가는 것도 방법이에요 (타이어 한 세트 더 필요). 한계까지 밀면 빠르지만 트랙 리밋으로 기록이 지워질 수 있어요.[/color]"
-		card.add_child(hint)
-		var runs: int = int(wk.Q["runs"][c.slot])
-		_q_go = K.btn("", 18, _run_quali_lap)
-		_q_go.disabled = anim != null
-		card.add_child(_q_go)
-		_q_update_info()
-		if runs > 0 and anim == null:
-			card.add_child(K.btn("이 차는 여기까지 · 기록 확정 ▶", 15, _on_q_end_car))
-
-	if anim == null:
-		_live.text = "[color=#8b98a5]섹터 색: [color=#a855f7]보라[/color] 전체 최고 · [color=#22c55e]초록[/color] 폴보다 빠름 · [color=#facc15]노랑[/color] 느림[/color]"
-	_render_q_table()
+	_q_ver = int(wk.Q["ver"])
+	# 세션 상태 · 진행 속도
+	var hc = K.card(_side, "", K.RED)
+	_q_head = K.rtl(17)
+	hc.add_child(_q_head)
+	K.seg(hc, [["0", "⏸ 멈춤"], ["10", "10×"], ["30", "30×"], ["60", "60×"]], str(q_speed), _on_qspeed, 14)
+	if wk.Q["stage_over"]:
+		var oc = K.card(_side, "Q%d 종료" % st, K.AMBER)
+		oc.add_child(K.label("탈락: %s" % ", ".join(wk.Q.get("cut_names", PackedStringArray())), 15, K.INK))
+		var nb = K.btn("다음 세션 시작 ▶", 18, _on_next_stage)
+		oc.add_child(nb)
+	# 내 차: 차고에 있으면 타이어·강도를 골라 내보내고, 아웃랩 중이면 포기할 수 있다
+	_q_car_txt = []
+	for c in wk.my_cars():
+		var slot: int = c.slot
+		var card = K.card(_side, "#%d %s" % [slot + 1, c.name], K.AMBER)
+		var stt = K.rtl(15)
+		card.add_child(stt)
+		_q_car_txt.append(stt)
+		if not wk._participant(c, st) or wk.Q["stage_over"]:
+			continue
+		var ph: String = wk.q_phase(c)
+		if ph == "":
+			var s: Dictionary = wk.sets[slot]
+			var u: Dictionary = wk.used_sets[slot]
+			var items: Array = []
+			var al: Array = ["S", "M", "H"]
+			if sim.is_wec():
+				al = ["M"] if st >= 2 else sim.wec_comps(c.cls)
+			for k in al:
+				if wk.has_any(slot, k):
+					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])
+			if items.is_empty():
+				card.add_child(K.label("남은 타이어가 없어요", 14, K.BAD))
+				continue
+			var have := false
+			for it in items:
+				if it[0] == q_comps[slot]:
+					have = true
+			if not have:
+				q_comps[slot] = items[0][0]
+			K.seg(card, items, q_comps[slot], _on_q_comp.bind(slot), 14)
+			K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_pushes[slot], _on_q_push.bind(slot), 14)
+			var go = K.btn("피트 출발 ▶", 18, _on_q_go.bind(slot))
+			go.disabled = float(wk.Q["red_left"]) > 0.0 or float(wk.Q["t"]) > wk.q_last_dep()
+			card.add_child(go)
+		elif ph == "out":
+			card.add_child(K.btn("어택 포기 · 피트로 (타이어는 이미 사용)", 14, _on_q_abort.bind(slot)))
+	var tc = K.card(_side, "라이브 타이밍")
+	_q_table = K.rtl(14)
+	tc.add_child(_q_table)
+	var lc = K.card(_side, "세션 소식")
+	_q_log = K.rtl(13)
+	lc.add_child(_q_log)
+	var hint = K.rtl(12)
+	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요. 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 +0.45초).[/color]" % WK.OUT_MIN
+	_side.add_child(hint)
 	_side.add_child(K.btn("⚡ 남은 예선 자동 진행", 15, _on_auto_quali))
+	_q_live_update()
 
 
-func _run_quali_lap() -> void:
-	if anim != null:
-		return
-	var c: Variant = wk.current_car()
-	if c == null:
-		return
-	var res: Dictionary = wk.my_lap(q_comp, q_push, q_dep)
-	anim = {"kind": "quali", "t": 0.0, "res": res, "car": c}
+func _on_qspeed(v) -> void:
+	q_speed = int(v)
+
+
+func _on_q_comp(v, slot: int) -> void:
+	q_comps[slot] = v
+
+
+func _on_q_push(v, slot: int) -> void:
+	q_pushes[slot] = v
+
+
+func _on_q_go(slot: int) -> void:
+	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot])
+	if err != "":
+		_live.text = "[color=#ef4444]%s[/color]" % err
+	if q_speed == 0:
+		q_speed = 30
 	refresh()
 
 
-func _render_q_table() -> void:
-	var tc = K.card(_side, "예선 순위")
+func _on_q_abort(slot: int) -> void:
+	wk.player_abort(slot)
+	refresh()
+
+
+func _on_next_stage() -> void:
+	wk.next_stage()
+	refresh()
+
+
+## 매 프레임: 시계·차 상태·라이브 타이밍만 글자로 갱신 (버튼은 상태가 바뀔 때만 다시 만든다)
+func _q_live_update() -> void:
+	if _q_head == null or wk.Q.is_empty():
+		return
+	var Q: Dictionary = wk.Q
+	var now: Dictionary = wk.q_now()
+	var red: bool = float(Q["red_left"]) > 0.0
+	var flag: String = "[bgcolor=#e10600][color=#ffffff] 🟥 레드 플래그 [/color][/bgcolor]  " if red else ("[bgcolor=#1f2937][color=#ffffff] 체커기 [/color][/bgcolor]  " if float(Q["t"]) >= wk.q_len() else "")
+	var last_ok: bool = float(Q["t"]) <= wk.q_last_dep()
+	_q_head.text = "%s남은 시간 [font_size=26][b]%s[/b][/font_size]   트랙 위 [b]%d대[/b] · 노면 [color=%s][b]%+.2f초[/b][/color] · 트래픽 [b]%d%%[/b]%s" % [
+		flag, wk.q_clock_txt(), int(now["on"]), "#22c55e" if float(now["evo"]) < -0.1 else "#facc15", float(now["evo"]), int(round(float(now["risk"]) * 160)),
+		"" if last_ok else "  [color=#ef4444]· 더 나갈 수 없음[/color]"]
+	var cut: int = wk._cut_n()
+	for c in wk.my_cars():
+		if c.slot >= _q_car_txt.size():
+			continue
+		var t := ""
+		var r: Variant = Q["res"].get(c.id)
+		var best := "기록 없음"
+		if r != null and int(r["stage"]) == int(Q["stage"]):
+			best = "[color=#ef4444]기록 삭제[/color]" if r["deleted"] else K.fmt_lap(float(r["total"]))
+		if not wk._participant(c, Q["stage"]):
+			t = "[color=#8b98a5]이번 세션 탈락 · 그리드 확정[/color]"
+		else:
+			var pos: int = wk.q_class_order(c).find(c) + 1
+			var safe: bool = pos <= cut and r != null and int(r["stage"]) == int(Q["stage"]) and not r["deleted"]
+			var ph: String = wk.q_phase(c)
+			var run: Variant = Q["run"].get(c.id)
+			var st_txt := "차고 대기"
+			if ph == "out":
+				st_txt = "[color=#22c55e]아웃랩[/color] — %d초 뒤 어택 시작" % int(maxf(0.0, (float(run["t0"]) + float(run["dur"]) - float(Q["t"])) * 60.0))
+			elif ph == "push":
+				st_txt = "[color=#a855f7]어택 중[/color] (%s)" % RS.TYRE_KO[run["comp"]]
+			elif ph == "in":
+				st_txt = "인랩"
+			var pcol: String = "#22c55e" if safe else "#ef4444"
+			t = "%s · 최고 [b]%s[/b] · [color=%s][b]P%d[/b][/color] %s · 이번 세션 %d번 나감" % [st_txt, best, pcol, pos, ("(진출권)" if safe else "(탈락권)") if int(Q["stage"]) < int(Q["max_stage"]) else "", int(Q["runs"].get(c.id, 0))]
+		_q_car_txt[c.slot].text = t
+	# 라이브 타이밍
+	var tt := ""
 	var ord: Array = wk.q_order()
-	var pole: Variant = wk.pole()
-	var t := ""
 	var i := 0
+	var lead: float = -1.0
 	for c in ord:
 		if sim.is_wec() and c.cls != wk.main_cls():
 			continue
+		if not wk._participant(c, Q["stage"]):
+			continue
 		i += 1
-		var r: Variant = wk.Q["res"].get(c.id)
-		var g := "대기"
-		if r != null:
+		if i == cut + 1 and int(Q["stage"]) < int(Q["max_stage"]):
+			tt += "[color=#e10600]──────── 탈락선 ────────[/color]\n"
+		var r: Variant = Q["res"].get(c.id)
+		var g := "[color=#5d6674]—[/color]"
+		if r != null and int(r["stage"]) == int(Q["stage"]):
 			if r["deleted"]:
-				g = "Q%d 삭제" % r["stage"]
-			elif pole == null or is_same(r, pole) or i == 1:
-				g = K.fmt_lap(r["total"])
+				g = "[color=#ef4444]삭제[/color]"
+			elif lead < 0.0:
+				lead = float(r["total"])
+				g = K.fmt_lap(lead)
 			else:
-				g = "+%.3f" % (r["total"] - pole["total"])
+				g = "+%.3f" % (float(r["total"]) - lead)
+		var ph: String = wk.q_phase(c)
+		var tag: String = {"out": " [color=#22c55e]OUT[/color]", "push": " [color=#a855f7]●어택[/color]", "in": " [color=#8b98a5]IN[/color]"}.get(ph, "")
 		var nm_col := "#ffc53d" if c.mine else "#e6edf3"
-		var out := " [color=#ef4444]OUT[/color]" if wk.Q["eliminated"].has(c.id) else ""
-		var comp := ""
-		if r != null:
-			comp = "[color=%s]%s[/color]" % [RS.TYRE_HEX[r["q_comp"]], r["q_comp"]]
 		var who: String = ("%s #%d" % [c.team, c.slot + 1]) if sim.is_wec() else c.code
-		t += "%2d  [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  %s %s  [color=#8b98a5]Q%s[/color]%s\n" % [i, K.hex(c.color), nm_col, who, c.code if sim.is_wec() else c.team, g, comp, str(r["stage"]) if r != null else "-", out]
-	var rr = K.rtl(14)
-	rr.text = t
-	tc.add_child(rr)
+		tt += "%2d  [color=%s]▌[/color][color=%s]%s[/color]  %s%s\n" % [i, K.hex(c.color), nm_col, who, g, tag]
+	_q_table.text = tt
+	_q_log.text = "\n".join(PackedStringArray(Q["log"]))
 
 
 func _render_secs(res: Variant, upto: int) -> void:
+
 	K.clear(_secs)
 	var best: Array = wk.best_secs(res["id"]) if res != null else []
 	var pole: Variant = wk.pole() if res != null and not wk.Q.is_empty() else null
@@ -644,49 +646,6 @@ func _on_qpush(v) -> void:
 	refresh()
 
 
-func _on_qtrf(v) -> void:
-	q_traffic = v
-	refresh()
-
-
-func _remain_txt(minute: float) -> String:
-	var rem: float = maxf(0.0, wk.q_len() - minute)
-	return "%d:%02d" % [int(rem), int(round(fmod(rem, 1.0) * 60))]
-
-
-## 슬라이더를 움직이면 정보 줄·막대·버튼만 바꾼다 (화면 전체를 다시 그리면 끌기가 끊긴다)
-func _on_qdep(v: float, sl: HSlider) -> void:
-	if v < _q_lo:
-		sl.set_value_no_signal(_q_lo) # 이미 달린 시간 이전으로는 못 돌아간다
-		v = _q_lo
-	q_dep = v
-	if _q_line != null:
-		_q_line.dep = v
-		_q_line.queue_redraw()
-	_q_update_info()
-
-
-func _q_update_info() -> void:
-	if _q_info == null or wk.Q.is_empty():
-		return
-	var cd: Dictionary = wk.q_cond(wk.Q["stage"], q_dep)
-	var evo: float = float(cd["evo"])
-	_q_info.text = "남은 시간 [b]%s[/b]에 출발 · 노면 [color=%s][b]%+.2f초[/b][/color] · 트래픽 위험 [b]%d%%[/b] · 어택 중단 위험 [b]%d%%[/b]" % [
-		_remain_txt(q_dep), "#22c55e" if evo < -0.1 else ("#facc15" if evo < 0.02 else "#ef4444"), evo, int(round(float(cd["risk"]) * 160)), int(round(float(cd["abort"]) * 100))]
-	if _q_go != null:
-		_q_go.text = ("어택 출발 ▶  (남은 시간 %s)" % _remain_txt(q_dep)) if anim == null else "어택 중…"
-
-
-func _on_q_end_car() -> void:
-	if anim != null:
-		return
-	wk.end_car()
-	q_dep = -1.0
-	if wk.done_quali:
-		phase = "grid"
-	refresh()
-
-
 func _on_start_comp(v, slot: int) -> void:
 	wk.set_start_comp(slot, v)
 	if plan_edit.has(slot) and not plan_edit[slot]["edited"]:
@@ -710,6 +669,7 @@ func _on_to_quali() -> void:
 func _on_auto_quali() -> void:
 	if anim == null:
 		wk.auto_quali()
+		_view.solo = {"car": null, "dist": 0.0}
 		if wk.done_quali:
 			phase = "grid"
 		refresh()
@@ -838,7 +798,12 @@ func _on_plan_comp(v, slot: int, i: int) -> void:
 
 # ═════════ 애니메이션 ═════════
 func _process(delta: float) -> void:
-	if anim == null or sim == null:
+	if sim == null:
+		return
+	if phase == "quali" and anim == null:
+		_quali_tick(delta)
+		return
+	if anim == null:
 		return
 	var T = sim.T
 	if anim["kind"] == "practice":
@@ -849,46 +814,54 @@ func _process(delta: float) -> void:
 			anim = null
 			_view.solo = {"car": null, "dist": 0.0}
 			refresh()
+
+
+## 라이브 예선 진행: 세션 시계를 돌리고, 트랙 위 차를 그리고, 글자를 갱신
+func _quali_tick(delta: float) -> void:
+	if wk.Q.is_empty() or not is_visible_in_tree():
 		return
-	# 예선: 섹터 시간대로 한 바퀴 (시뮬레이션 10배속)
-	var res: Dictionary = anim["res"]
-	anim["t"] += delta * 10.0
-	var acc := 0.0
-	var sec := 0
-	while sec < 6 and acc + float(res["secs"][sec]) <= anim["t"]:
-		acc += float(res["secs"][sec])
-		sec += 1
-	var frac := 1.0
-	var dsec := 5
-	if sec < 6:
-		frac = (anim["t"] - acc) / float(res["secs"][sec])
-		dsec = sec
-	_view.solo = {"car": anim["car"], "dist": T.dist_at(dsec, frac)}
-	_render_secs(res, sec)
-	var pole: Variant = wk.pole()
-	var dtxt := ""
-	if pole != null and sec > 0:
-		var a := 0.0
-		var b := 0.0
-		for i in sec:
-			a += float(res["secs"][i])
-			b += float(pole["secs"][i])
-		var d := a - b
-		dtxt = "  [color=%s]%s%.3f[/color] (폴 대비)" % ["#a855f7" if d <= 0 else "#facc15", "" if d <= 0 else "+", d]
-	_live.text = "[b]%s[/b]  %s%s" % [anim["car"].code, K.fmt_lap(minf(anim["t"], res["total"])), dtxt]
-	if anim["t"] >= res["total"]:
-		var c = anim["car"]
-		anim = null
+	if wk.done_quali:
+		phase = "grid"
 		_view.solo = {"car": null, "dist": 0.0}
-		var idx0: int = wk.Q["idx"]
-		var st0: int = wk.Q["stage"]
-		wk.commit_lap(res)
-		if wk.Q["idx"] != idx0 or wk.Q["stage"] != st0:
-			q_dep = -1.0
-		var note: String = res["note"]
-		if wk.done_quali:
-			phase = "grid"
 		refresh()
-		var pos: int = wk.q_order().find(c) + 1
-		_live.text = "[b]%s[/b] %s · Q%d 현재 P%d%s" % [c.code, "[color=#ef4444]기록 삭제[/color]" if res["deleted"] else K.fmt_lap(res["total"]), res["stage"], pos, ("  ·  " + note) if note != "" else ""]
-		_render_secs(res, 6)
+		return
+	if q_speed > 0:
+		wk.q_advance(delta * float(q_speed) / 60.0)
+	var Q: Dictionary = wk.Q
+	var T = sim.T
+	var t: float = float(Q.get("t", 0.0))
+	var lst: Array = []
+	var my_push: Variant = null
+	for id in Q.get("run", {}).keys():
+		var r: Dictionary = Q["run"][id]
+		var c = wk._car(id)
+		var f: float = clampf((t - float(r["t0"])) / maxf(0.01, float(r["dur"])), 0.0, 1.0)
+		var d: float = 0.0
+		match String(r["phase"]):
+			"out":
+				d = f * T.L
+			"push":
+				var res: Dictionary = r["res"]
+				var el: float = (t - float(r["t0"])) * 60.0
+				var acc := 0.0
+				var sec := 0
+				while sec < 5 and acc + float(res["secs"][sec]) <= el:
+					acc += float(res["secs"][sec])
+					sec += 1
+				d = T.dist_at(sec, clampf((el - acc) / float(res["secs"][sec]), 0.0, 1.0))
+				if c.mine and my_push == null:
+					my_push = [res, sec, el]
+			_:
+				d = f * T.L * 0.5
+		lst.append([c, d])
+	_view.solo = {"list": lst}
+	if my_push != null:
+		_render_secs(my_push[0], my_push[1])
+		_live.text = "[b]%s[/b] 어택 중  %s" % [wk._car(my_push[0]["id"]).code, K.fmt_lap(float(my_push[2]))]
+	if int(Q["ver"]) != _q_ver:
+		refresh()
+		return
+	_q_tick += delta
+	if _q_tick >= 0.15:
+		_q_tick = 0.0
+		_q_live_update()

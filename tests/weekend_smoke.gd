@@ -20,17 +20,20 @@ func _init() -> void:
 			wk.auto_practice()
 			wk.start_quali()
 			if n == 1:
-				# 시간 예선: 첫 차가 초반에 한 번, 막판에 한 번 → 두 번 다 기록되고 좋은 기록만 남는지
-				var a: Dictionary = wk.my_lap("M", "std", 1.0)
-				wk.commit_lap(a)
-				var again: bool = wk.can_run_again(0)
-				var b: Dictionary = wk.my_lap("S", "std", wk.q_last_dep() - 0.5)
-				wk.commit_lap(b)
-				var kept: Variant = wk.Q["res"].get(a["id"])
-				print("   시간 예선: 1차 %.3f(%s) · 다시 가능=%s · 2차 %.3f(%s, 출발 %.1f분) · 남은 기록 %.3f · 출발 시각 제한=%s" % [a["total"], a["note"], again, b["total"], b["note"], b["dep"], kept["total"] if kept != null else -1.0, b["dep"] <= wk.q_last_dep()])
-				if not again or kept == null:
+				# 라이브 예선: 내 1번 차를 초반에 내보내고 5분 진행 → 기록이 생기는지, AI 도 스스로 나갔는지
+				var err: String = wk.player_depart(0, "M", "std")
+				wk.q_advance(5.0)
+				var my_res: Variant = wk.Q["res"].get(wk.my_cars()[0].id)
+				var ai_runs := 0
+				for id in wk.Q["runs"]:
+					ai_runs += int(wk.Q["runs"][id])
+				print("   라이브 예선: 출발=%s · 5분 뒤 내 기록 %s · 트랙 위 %d대 · 지금까지 들어온 횟수 %d · 노면 %+.2f · 소식 %s" % ["OK" if err == "" else err, ("%.3f" % float(my_res["total"])) if my_res != null else "없음", wk.Q["run"].size(), ai_runs, float(wk.q_now()["evo"]), wk.Q["log"].slice(0, 2)])
+				if err != "" or my_res == null:
 					fails += 1
 			wk.auto_quali()
+			if not wk.done_quali:
+				print("   ! 예선이 끝나지 않음")
+				fails += 1
 			sim.prepare_start()
 			var guard = 0
 			while not sim.done and guard < 200000:

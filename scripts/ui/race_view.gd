@@ -328,6 +328,9 @@ func _draw() -> void:
 		if solo.get("car") != null:
 			var d: float = solo["dist"]
 			_draw_car(_X(T.point_at_dist(d)), T.head_at_dist(d), solo["car"], night)
+		# 라이브 예선: 트랙 위 여러 대 [[car, dist], …]
+		for e in solo.get("list", []):
+			_draw_car(_X(T.point_at_dist(float(e[1]))), T.head_at_dist(float(e[1])), e[0], night)
 		return
 	var wet: float = sim.wet
 	if wet > 0.2:
