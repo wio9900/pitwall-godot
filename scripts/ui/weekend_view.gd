@@ -26,6 +26,7 @@ var _view
 var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
+var p_comp := "M"            # 연습 주행 타이어
 var _landscape := -1
 
 
@@ -174,7 +175,8 @@ func _wing_desc(w: float) -> String:
 
 func _sets_txt(slot: int) -> String:
 	var s: Dictionary = wk.sets[slot]
-	return "새 타이어: [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d (예선+결승 공용)" % [s["S"], s["M"], s["H"]]
+	var u: Dictionary = wk.used_sets[slot]
+	return "주말 타이어 (연습·예선·결승 공용) — 새 [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d  /  쓴 S %d · M %d · H %d" % [s["S"], s["M"], s["H"], u["S"], u["M"], u["H"]]
 
 
 # ── 연습 ──
@@ -212,6 +214,18 @@ func _render_practice() -> void:
 	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 정답은 띠 안 어딘가에 있어요 — 가운데가 정답은 아니에요. 테스트를 달릴수록 띠가 좁아지고, 드라이버 피드백이 방향을 알려줘요. 항목마다 딱 맞으면 랩당 약 0.09초 빨라져요. 서스펜션을 단단하게·디퍼렌셜을 잠글수록 타이어 마모가 늘고, 브레이크를 뒤로 보낼수록 실수가 늘어요.[/color]"
 	card.add_child(dx)
 	var left: int = wk.practice_left[sel]
+	# 연습 타이어: 쓴 세트가 있으면 그걸로, 없으면 새 세트를 하나 열어요
+	card.add_child(K.label("연습 타이어 — 쓴 세트가 있으면 그걸로 달리고, 없으면 새 세트를 하나 열어요 (연 세트는 예선·결승에서 헌 세트)", 13, K.DIM))
+	var ps: Dictionary = wk.sets[sel]
+	var pu: Dictionary = wk.used_sets[sel]
+	var pitems: Array = []
+	for k in ["S", "M", "H"]:
+		if sim.is_wec() and not sim.wec_comps(c.cls).has(k):
+			continue
+		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), int(pu[k])]])
+	if not wk.has_any(sel, p_comp):
+		p_comp = "M"
+	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
 	var h = K.hbox(6)
 	card.add_child(h)
 	h.add_child(K.btn("셋업 테스트 (3랩)", 15, func(): _run_practice("short")))
@@ -249,10 +263,15 @@ func _render_practice() -> void:
 	_side.add_child(K.btn("◀ 뒤로", 14, _on_back))
 
 
+func _on_pcomp(v) -> void:
+	p_comp = v
+	refresh()
+
+
 func _run_practice(kind: String) -> void:
 	if anim != null:
 		return
-	var r: Dictionary = wk.practice_run(sel, kind)
+	var r: Dictionary = wk.practice_run(sel, kind, p_comp)
 	if r.is_empty():
 		return
 	anim = {"kind": "practice", "t": 0.0, "dur": 3.5 if kind == "long" else 2.4, "car": _my(sel), "laps": 3 if kind == "long" else 2}
@@ -273,7 +292,13 @@ func _render_quali() -> void:
 		var card = K.card(_side, "[Q%d] #%d %s 어택 준비" % [st, c.slot + 1, c.name], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
 		card.add_child(K.label("어택 타이어 (새 세트가 없으면 헌 타이어 +0.45초)", 14, K.DIM))
-		var qitems: Array = [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]]
+		var u: Dictionary = wk.used_sets[c.slot]
+		var qitems: Array = []
+		for k in ["S", "M", "H"]:
+			if wk.has_any(c.slot, k):
+				qitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])
+		if not wk.has_any(c.slot, q_comp) and not qitems.is_empty():
+			q_comp = qitems[0][0]
 		if sim.is_wec():
 			var al: Array = ["M"] if st >= 2 else sim.wec_comps(c.cls)
 			qitems = qitems.filter(func(it): return al.has(it[0]))
@@ -575,6 +600,7 @@ func _on_start_race() -> void:
 			var c = _my(int(slot))
 			c.active_plan = pe["key"]
 			sim.set_custom_plans(c, {"A": pe["A"], "B": pe["B"]})
+	wk.commit_start_tyres()
 	start_race.emit()
 
 

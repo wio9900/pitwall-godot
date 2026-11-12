@@ -17,7 +17,11 @@ const FUEL_LOAD_KO := {"light": "가볍게", "std": "표준", "heavy": "넉넉�
 const PRACTICE_LAPS := 16
 
 var sim                      # race_sim.gd
-var sets: Array = []         # 내 차별 주말 타이어 세트 [{S, M, H}, {…}] (예선·레이스 공유)
+var sets: Array = []         # 내 차별 '새' 타이어 세트 [{S, M, H}, {…}] (연습·예선·결승 공용 할당)
+var used_sets: Array = []    # 내 차별 '쓴' 세트 수 (연습·예선에서 한 번이라도 달린 세트)
+## 주말 타이어 할당: 연습부터 결승까지 이 안에서 해결한다 (실제 F1 의 주말 13세트를 이 게임 길이에 맞춰 축소)
+const ALLOC_F1 := {"S": 3, "M": 3, "H": 2}
+const ALLOC_WEC := {"S": 2, "M": 3, "H": 2}  # WEC 결승은 별도 레이스 할당(race_sim wec_sets)을 쓴다
 var setups: Array = []       # 내 차별 셋업 [{wing, press, fuel_load}]
 var wear_est := {}           # {err, runs, bias}
 var practice_left: Array = [PRACTICE_LAPS, PRACTICE_LAPS]
@@ -33,11 +37,9 @@ var _q_soft_used := {}
 ## sim 은 new_race 까지 끝난 상태여야 한다. obligation_laps: 스폰서 행사로 줄어드는 연습 랩 수.
 func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	sim = sim_
-	# 주말 타이어: F1 S2·M2·H1 / WEC S1·M2·H2 (예선 세션이 2개라 새 소프트가 1세트뿐)
-	if sim.is_wec():
-		sets = [{"S": 1, "M": 2, "H": 2}, {"S": 1, "M": 2, "H": 2}]
-	else:
-		sets = [{"S": 2, "M": 2, "H": 1}, {"S": 2, "M": 2, "H": 1}]
+	var al: Dictionary = ALLOC_WEC if sim.is_wec() else ALLOC_F1
+	sets = [al.duplicate(), al.duplicate()]
+	used_sets = [{"S": 0, "M": 0, "H": 0}, {"S": 0, "M": 0, "H": 0}]
 	setups = []
 	bands = []
 	for c in my_cars():
@@ -192,12 +194,35 @@ func feedback(c) -> String:
 
 # ═════════ 연습 주행 ═════════
 ## kind: "short"(셋업 테스트 3랩) / "long"(롱런 5랩, 마모 추정 오차 절반)
-func practice_run(slot: int, kind: String) -> Dictionary:
+## 세트 꺼내기. 연습은 쓴 세트를 먼저(없으면 새 세트를 하나 연다), 예선은 새 세트를 먼저.
+## 돌려주는 값: "new" / "used" / "" (그 컴파운드는 남은 세트가 없음)
+func take_set(slot: int, comp: String, prefer_new: bool) -> String:
+	var nw: Dictionary = sets[slot]
+	var us: Dictionary = used_sets[slot]
+	if not nw.has(comp):
+		return "new" # 인터·웻은 할당 밖
+	if prefer_new and int(nw[comp]) > 0 or (not prefer_new and int(us[comp]) == 0 and int(nw[comp]) > 0):
+		nw[comp] = int(nw[comp]) - 1
+		us[comp] = int(us[comp]) + 1
+		return "new"
+	if int(us[comp]) > 0:
+		return "used"
+	return ""
+
+
+func has_any(slot: int, comp: String) -> bool:
+	return int(sets[slot].get(comp, 0)) > 0 or int(used_sets[slot].get(comp, 0)) > 0
+
+
+func practice_run(slot: int, kind: String, comp: String = "M") -> Dictionary:
 	var c = my_cars()[slot]
 	var n := 5 if kind == "long" else 3
 	if practice_left[slot] < n:
 		return {}
-	var comp := "M"
+	if sim.is_wec():
+		comp = sim.wec_fit_comp(c.cls, comp)
+	if take_set(slot, comp, false) == "":
+		return {}
 	var wear := 0.0
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
 	var CIRC: Dictionary = sim.CIRC
@@ -221,7 +246,7 @@ func practice_run(slot: int, kind: String) -> Dictionary:
 	if kind == "long":
 		wear_est["runs"] = int(wear_est["runs"]) + 1
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
+	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
 	practice_runs.push_front(r)
 	last_feedback = "%s: %s" % [c.name, feedback(c)]
 	if kind == "long":
@@ -234,9 +259,10 @@ func auto_practice() -> void:
 	for slot in my_cars().size():
 		engineer_apply(slot)
 		if practice_left[slot] >= 5:
-			practice_run(slot, "long")
+			practice_run(slot, "long", "M")
 		while practice_left[slot] >= 3:
-			practice_run(slot, "short")
+			if practice_run(slot, "short", "M").is_empty():
+				break
 		engineer_apply(slot)
 
 
@@ -334,10 +360,13 @@ func my_lap(comp: String, push: String, traffic: String) -> Dictionary:
 		return {}
 	if sim.is_wec():
 		comp = "M" if Q["stage"] >= 2 else sim.wec_fit_comp(c.cls, comp) # 하이퍼폴은 미디엄만
-	var qs: Dictionary = sets[c.slot]
-	var used_set: bool = not (qs[comp] > 0)
-	if not used_set:
-		qs[comp] -= 1
+	if not has_any(c.slot, comp):
+		# 그 컴파운드는 다 썼다 → 남은 것 중 가장 빠른 것으로
+		for k in ["S", "M", "H"]:
+			if has_any(c.slot, k) and (not sim.is_wec() or sim.wec_comps(c.cls).has(k)):
+				comp = k
+				break
+	var used_set: bool = take_set(c.slot, comp, true) != "new"
 	return q_lap(c, push, traffic, Q["stage"], comp, used_set)
 
 
@@ -463,6 +492,18 @@ func finish_quali() -> void:
 	for c in my_cars():
 		parts.append("%s P%d(%s)" % [c.code, c.grid + 1, c.comp])
 	sim.event("예선 종료 · 그리드 확정: " + ", ".join(parts))
+
+
+## 결승 출발: Q3 고정이 아닌 내 차는 출발 타이어도 주말 할당에서 꺼낸다 (새 세트가 없으면 헌 세트 +0.45초)
+func commit_start_tyres() -> void:
+	if sim.is_wec():
+		return
+	for c in my_cars():
+		if c.q3_locked or not RS.SLICK.has(c.comp):
+			continue
+		if take_set(c.slot, c.comp, true) != "new":
+			c.used_set_pen = 0.45
+			c.wear = 0.10
 
 
 ## Q3 진출 못 한 내 차는 출발 타이어를 고를 수 있다
