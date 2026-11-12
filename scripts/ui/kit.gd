@@ -2,6 +2,7 @@ extends RefCounted
 ## 화면 부품 공통 도구 (버튼·라벨·서식 텍스트·카드). 모든 화면이 같은 모양을 쓰도록 한곳에 모았다.
 
 const HelpS = preload("res://scripts/ui/help.gd")
+const TouchDragS = preload("res://scripts/ui/touch_drag.gd")
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
 const PANEL2 := Color("#1b232d")
@@ -167,6 +168,7 @@ static func scroll_v(parent: Control) -> VBoxContainer:
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(sc)
+	drag_scroll(sc)
 	var v = vbox(10)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(v)
@@ -178,3 +180,10 @@ static func help(title: String, body_bb: String) -> Button:
 	var b = HelpS.new()
 	b.setup(title, body_bb)
 	return b
+
+
+## 손가락 드래그 스크롤을 붙인다 (ScrollContainer · 스크롤되는 RichTextLabel)
+static func drag_scroll(ctrl: Control) -> void:
+	var n = TouchDragS.new()
+	n.target = ctrl
+	ctrl.add_child(n)

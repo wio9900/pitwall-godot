@@ -285,6 +285,7 @@ func _build_menu() -> void:
 	var scroll = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	mc.add_child(scroll)
+	KitS.drag_scroll(scroll)
 	menu_cols = BoxContainer.new()
 	menu_cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	menu_cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -909,10 +910,12 @@ func _build_race_ui() -> void:
 	tower.meta_underlined = false
 	tower.meta_clicked.connect(_on_tower_click)
 	tower.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	KitS.drag_scroll(tower)
 	_small_text(tower, 16)
 	tw.add_child(tower)
 	radio = _rtl(false)
 	radio.name = "무전"
+	KitS.drag_scroll(radio)
 	_small_text(radio, 16)
 	tabs.add_child(radio)
 
@@ -1254,6 +1257,7 @@ func _build_result() -> void:
 	result_title = _label("레이스 결과", 30, AMBER)
 	v.add_child(result_title)
 	result_text = _rtl(false)
+	KitS.drag_scroll(result_text)
 	result_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(result_text)
 	var h = HBoxContainer.new()

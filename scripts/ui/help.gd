@@ -60,6 +60,9 @@ func open() -> void:
 		r.add_theme_font_size_override(k, 16)
 	r.text = body_bb
 	v.add_child(r)
+	var td = load("res://scripts/ui/touch_drag.gd").new()
+	td.target = r
+	r.add_child(td)
 	var close = Button.new()
 	close.text = "닫기"
 	close.add_theme_font_size_override("font_size", 18)
