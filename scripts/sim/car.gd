@@ -33,6 +33,7 @@ var repairs := 0
 var damage_now := ""
 var wec_req: Variant = null
 var drv_laps: Array = [0, 0, 0] # 드라이버별 완주 랩 (최소 주행 규정 확인용)
+var auto_swap := true       # WEC 내 차: 피트 설정의 드라이버 '교대' 선택 (자동 박스·빠른 박스도 이걸 따른다)
 var wec_sets := -1          # WEC: 레이스에서 쓸 수 있는 남은 새 드라이 세트
 var drv_log: Array = []     # WEC: 랩마다 운전한 드라이버 번호 (주행 시간 규정)
 var drive_warned := -1      # WEC: 주행 시간 경고·위반 표시 (같은 경고 반복 방지)

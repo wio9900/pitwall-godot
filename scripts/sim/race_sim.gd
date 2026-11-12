@@ -1444,9 +1444,10 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 				var d_t: bool = c.wear > 0.45 or kind_of(c.comp) != want_kind
 				var comp0: String = (wec_fit_comp(c.cls, "M") if want == "slick" else "W") if d_t else c.comp
 				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
-				return {"comp": comp0, "tyres": d_t, "driver": false, "fuel": true}
+				var d_d: bool = c.auto_swap or must_swap(c)
+				return {"comp": comp0, "tyres": d_t, "driver": d_d, "fuel": true}
 			return null
-		var req: Dictionary = c.wec_req if c.wec_req != null else {"tyres": true, "fuel": true, "driver": false}
+		var req: Dictionary = c.wec_req if c.wec_req != null else {"tyres": true, "fuel": true, "driver": c.auto_swap}
 		var comp1: String = wec_fit_comp(c.cls, c.pit_req)
 		c.pit_req = ""
 		c.wec_req = null

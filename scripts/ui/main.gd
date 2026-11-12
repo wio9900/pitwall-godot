@@ -35,7 +35,7 @@ const AMBER := Color("#ffc53d")
 const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
-const SPEEDS := [0, 1, 2, 4, 8, 16]
+const SPEEDS := [0, 1, 2, 5, 10, 15]
 const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}
 
 var sim: Variant = null
@@ -97,6 +97,7 @@ var settings_view
 var debrief
 var records_view
 var resume_btn: Button
+var _save_ms := -100000   # 마지막 자동 저장 시각(실제 ms)
 var _save_lap := -1       # 마지막으로 자동 저장한 선두 랩
 var recorded := false     # 기록실에 이 레이스를 기록했는지
 var fps_label: Label
@@ -671,6 +672,7 @@ func _autosave() -> void:
 		"speed": speed_x, "circ": sim.CIRC.get("name", sim.circ_key), "lap": mini(sim.laps, sim.leader_lap + 1), "laps": sim.laps}
 	RaceSaveS.save(sim, meta, feature_sim if sprint_mode else null)
 	_save_lap = sim.leader_lap
+	_save_ms = Time.get_ticks_msec()
 
 
 func _notification(what: int) -> void:
@@ -1232,6 +1234,7 @@ func _build_race_ui() -> void:
 	race_panel = RacePanelS.new()
 	race_panel.select_car.connect(_on_select_car)
 	race_panel.radio_prompt.connect(_on_radio_prompt)
+	race_panel.tab_changed.connect(_on_panel_tab)
 	panels_box = race_panel
 	race_scroll = ScrollContainer.new()
 	race_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1245,6 +1248,7 @@ func _build_race_ui() -> void:
 	# 순위 / 무전
 	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.visible = race_panel.tab == "laps" # 상세 순위·무전은 랩타임 탭에서만
 	var tw = VBoxContainer.new()
 	tw.name = "상세 순위"
 	tabs.add_child(tw)
@@ -1279,6 +1283,13 @@ func _press_only(btns: Array, idx: int) -> void:
 
 
 func _set_speed(s: int) -> void:
+	# 예전 배속 값(4·8·16)은 가장 가까운 새 배속으로
+	if not SPEEDS.has(s):
+		var best: int = SPEEDS[1]
+		for v in SPEEDS:
+			if v > 0 and absi(v - s) < absi(best - s):
+				best = v
+		s = best
 	speed_x = s
 	if race_view != null:
 		race_view.speed_hint = float(s)
@@ -1342,10 +1353,11 @@ func _on_wec_box(comp: String, slot: int) -> void:
 	var c: Variant = _my(slot)
 	if c == null:
 		return
+	var drv: bool = bool(race_panel.draft[slot]["driver"]) if slot < race_panel.draft.size() else true
 	if comp == "keep":
-		sim.request_pit_wec(c, c.comp, false, true, false)
+		sim.request_pit_wec(c, c.comp, false, true, drv)
 	else:
-		sim.request_pit_wec(c, comp, true, true, false)
+		sim.request_pit_wec(c, comp, true, true, drv)
 	_refresh_ui()
 
 
@@ -1437,7 +1449,8 @@ func _process(delta: float) -> void:
 		sim.advance(delta * speed_x * RaceSimS.SPEED_BASE)
 		_sim_us += Time.get_ticks_usec() - u0
 		_sim_n += 1
-		if sim.leader_lap != _save_lap and sim.leader_lap >= 1 and not sim.done:
+		# 자동 저장은 선두 랩이 바뀔 때, 단 실제 시간 30초에 한 번까지 (WEC 고배속에서 저장 때문에 화면이 멈칫하던 것)
+		if sim.leader_lap != _save_lap and sim.leader_lap >= 1 and not sim.done and Time.get_ticks_msec() - _save_ms > 30000:
 			_autosave()
 	ui_timer += delta
 	if ui_timer >= 0.2:
@@ -1586,6 +1599,13 @@ func _refresh_tower(ord: Array, leader) -> void:
 	s += "[/table]"
 	if tower.text != s:
 		tower.text = s
+
+
+## 지시판 탭이 바뀌면: 랩타임 탭에서만 상세 순위·무전 (다른 탭에선 그 공간을 비워 둔다)
+func _on_panel_tab(t: String) -> void:
+	if tabs != null:
+		tabs.visible = t == "laps"
+		_refresh_ui()
 
 
 ## 가로 화면: 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)

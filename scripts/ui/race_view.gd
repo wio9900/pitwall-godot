@@ -39,7 +39,16 @@ var _cam_zoom := 1.0
 var _s := 1.0
 var _off := Vector2.ZERO
 var _now := 0.0
-var _smooth := {}      # car id → {p, a}
+var _smooth := {}      # car id → {p, a, d(트랙 위 거리), lat(옆으로 비킨 정도)}
+# 두 손가락 확대·이동 (PC 는 마우스 휠)
+var user_zoom := 1.0
+var user_pan := Vector2.ZERO   # 트랙 좌표 기준 이동량
+var _touches := {}             # 손가락 index → 위치
+var _pinch_d0 := 0.0
+var _pinch_z0 := 1.0
+var _pinch_m0 := Vector2.ZERO
+var _pinch_p0 := Vector2.ZERO
+var _pinching := false
 var _pit_seen := {}    # car id → 피트레인 진입 시각(시뮬레이션)
 var _popups: Array = [] # {id, text, col, t}
 var _last_pos := {}
@@ -114,6 +123,10 @@ func reset() -> void:
 	_confetti.clear()
 	banner_text = ""
 	_cam_center = Vector2.ZERO
+	user_zoom = 1.0
+	user_pan = Vector2.ZERO
+	_touches.clear()
+	_pinching = false
 
 
 func now() -> float:
@@ -144,7 +157,11 @@ func _update_camera(delta: float) -> void:
 		if follow_slot < mc.size() and mc[follow_slot].dnf == "" and _smooth.has(mc[follow_slot].id):
 			want_center = _smooth[mc[follow_slot].id]["p"]
 			want_zoom = 2.8
+	want_zoom *= user_zoom
+	want_center += user_pan
 	var k = clampf(delta * (7.0 if follow_slot >= 0 else 3.5), 0.0, 1.0)
+	if _pinching:
+		k = 1.0 # 손가락을 따라 바로
 	if _cam_center == Vector2.ZERO:
 		_cam_center = want_center
 		_cam_zoom = want_zoom
@@ -184,24 +201,112 @@ func _update_cars(delta: float) -> void:
 		if last_d != null and last_d - dist < T.L * 0.5:
 			dist = minf(dist, last_d - gap_d)
 		last_by_cls[c.cls] = dist
-		targets[c.id] = [T.point_at_dist(dist), T.head_at_dist(dist)]
+		targets[c.id] = {"d": dist, "cls": c.cls}
+	# 멀티 클래스: 느린 클래스 차가 빠른 클래스 차와 겹치면 옆으로 비켜 달린다 (르망에서 겹쳐 보이던 것)
+	var lat_want := {}
+	if sim.is_wec():
+		var lst: Array = []
+		for id in targets:
+			if targets[id] is Dictionary:
+				lst.append([fposmod(float(targets[id]["d"]), T.L), id, float(sim.CLASS_PACE.get(targets[id]["cls"], 1.0))])
+		lst.sort_custom(func(a, b): return a[0] < b[0])
+		var n: int = lst.size()
+		for i in n:
+			var a: Array = lst[i]
+			for j in [i - 1, i + 1]:
+				if n < 2:
+					break
+				var b: Array = lst[posmod(j, n)]
+				if b[1] == a[1]:
+					continue
+				var dd: float = absf(wrapf(float(a[0]) - float(b[0]), -T.L * 0.5, T.L * 0.5))
+				if dd < gap_d * 1.6 and float(a[2]) > float(b[2]) + 0.001:
+					lat_want[a[1]] = TRACK_W * (0.32 if float(a[2]) > 1.06 else 0.24) # 느린 차가 바깥쪽으로
 	# 배속이 빠르면 차가 한 프레임에 많이 움직이므로 보정을 빠르게, 순간이동 판정 거리도 넓게
 	var sp: float = maxf(1.0, speed_hint)
 	var kp = clampf(delta * 18.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
 	var ka = clampf(delta * 14.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
+	# 트랙 위 차는 '거리'로 부드럽게 따라간다: 화면 좌표로 섞으면 코너를 가로지르고, 섹터 경계에서 툭툭 튀어 보인다
+	var kd = 1.0 - exp(-delta * 9.0 * maxf(1.0, sqrt(sp)))
 	var snap_d: float = 40.0 * maxf(1.0, sp / 2.0)
+	var snap_dist: float = T.L * 0.08
 	for id in targets:
-		var tp: Vector2 = targets[id][0]
-		var ta: float = targets[id][1]
+		var tg = targets[id]
+		if tg is Dictionary:
+			var td: float = float(tg["d"])
+			var lw: float = float(lat_want.get(id, 0.0))
+			var s: Variant = _smooth.get(id)
+			if s == null or not s.has("d") or absf(wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5)) > snap_dist:
+				s = {"d": td, "lat": lw}
+				_smooth[id] = s
+			else:
+				s["d"] = float(s["d"]) + wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5) * kd
+				s["lat"] = lerpf(float(s["lat"]), lw, clampf(delta * 4.0, 0.0, 1.0))
+			var ha: float = T.head_at_dist(float(s["d"]))
+			s["p"] = T.point_at_dist(float(s["d"])) + Vector2(-sin(ha), cos(ha)) * float(s["lat"])
+			s["a"] = ha
+			continue
+		var tp: Vector2 = tg[0]
+		var ta: float = tg[1]
 		if not _smooth.has(id) or (_smooth[id]["p"] - tp).length() > snap_d:
 			_smooth[id] = {"p": tp, "a": ta}
 		else:
-			var s: Dictionary = _smooth[id]
-			s["p"] = s["p"].lerp(tp, kp)
-			s["a"] = s["a"] + wrapf(ta - s["a"], -PI, PI) * ka
+			var s2: Dictionary = _smooth[id]
+			s2.erase("d")
+			s2["p"] = s2["p"].lerp(tp, kp)
+			s2["a"] = s2["a"] + wrapf(ta - s2["a"], -PI, PI) * ka
 	for id in _smooth.keys():
 		if not targets.has(id):
 			_smooth.erase(id)
+
+
+## 두 손가락으로 벌리면 확대 · 움직이면 이동 · 두 번 톡 치면 원래대로. PC 는 마우스 휠 확대
+func _gui_input(ev: InputEvent) -> void:
+	if ev is InputEventScreenTouch:
+		if ev.pressed:
+			_touches[ev.index] = ev.position
+			if ev.double_tap and _touches.size() == 1:
+				user_zoom = 1.0
+				user_pan = Vector2.ZERO
+		else:
+			_touches.erase(ev.index)
+		_pinch_begin()
+		if _touches.size() >= 2:
+			accept_event()
+	elif ev is InputEventScreenDrag:
+		_touches[ev.index] = ev.position
+		if _touches.size() >= 2 and _pinching:
+			var ks: Array = _touches.keys()
+			var a: Vector2 = _touches[ks[0]]
+			var b: Vector2 = _touches[ks[1]]
+			var d: float = a.distance_to(b)
+			user_zoom = clampf(_pinch_z0 * d / maxf(10.0, _pinch_d0), 1.0, 6.0)
+			var m: Vector2 = (a + b) * 0.5
+			user_pan = _pinch_p0 - (m - _pinch_m0) / maxf(0.01, _s)
+			if user_zoom <= 1.01:
+				user_pan = Vector2.ZERO
+			accept_event()
+	elif ev is InputEventMouseButton and ev.pressed and (ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		user_zoom = clampf(user_zoom * (1.15 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 1.0, 6.0)
+		if user_zoom <= 1.01:
+			user_pan = Vector2.ZERO
+		accept_event()
+	elif ev is InputEventMagnifyGesture:
+		user_zoom = clampf(user_zoom * ev.factor, 1.0, 6.0)
+		accept_event()
+
+
+func _pinch_begin() -> void:
+	_pinching = _touches.size() >= 2
+	if not _pinching:
+		return
+	var ks: Array = _touches.keys()
+	var a: Vector2 = _touches[ks[0]]
+	var b: Vector2 = _touches[ks[1]]
+	_pinch_d0 = a.distance_to(b)
+	_pinch_z0 = user_zoom
+	_pinch_m0 = (a + b) * 0.5
+	_pinch_p0 = user_pan
 
 
 # ═════════ 팝업·말풍선·배너 (sim 상태 변화를 감지만 한다) ═════════

@@ -5,6 +5,7 @@ extends VBoxContainer
 
 signal select_car(slot: int)
 signal radio_prompt  # 새 엔지니어 제안이 떴을 때 (main 이 배속을 1×로)
+signal tab_changed(t: String)  # 랩타임 탭에서만 상세 순위·무전을 보여주려고 main 이 듣는다
 
 const K = preload("res://scripts/ui/kit.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
@@ -89,7 +90,7 @@ func _init() -> void:
 	for i in 2:
 		var b = Button.new()
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(0, 76)
+		b.custom_minimum_size = Vector2(0, 98)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_chip.bind(i))
 		# 내 차 카드: 선택되면 왼쪽 호박색 막대 + 밝은 바탕 (글씨 색은 그대로)
@@ -125,13 +126,9 @@ func _init() -> void:
 		b.toggle_mode = true
 		b.button_group = grp
 		b.clip_text = true
-		# 탭: 선택되면 흰 글씨 + 빨간 밑줄
-		var tn = StyleBoxFlat.new()
-		tn.bg_color = Color(0, 0, 0, 0)
-		tn.set_content_margin_all(6)
-		var tp = tn.duplicate()
-		tp.border_width_bottom = 3
-		tp.border_color = K.RED
+		# 탭: 칸마다 테두리가 있는 버튼, 선택된 탭은 빨강 바탕 (구분이 확실하게)
+		var tn = _box(K.PANEL2, Color("#454c59"), 6)
+		var tp = _box(K.RED, K.RED, 6)
 		for st in ["normal", "hover", "disabled", "focus"]:
 			b.add_theme_stylebox_override(st, tn)
 		for st in ["pressed", "hover_pressed"]:
@@ -476,7 +473,16 @@ func refresh() -> void:
 		elif c.tl_warn > 0 and c.dnf == "":
 			line2 += " [color=#f59e0b]TL %d/2[/color]" % c.tl_warn
 		var code: String = ("#%d %s" % [c.slot + 1, c.code]) if wec else c.code
-		_chip_txt[i].text = "[font_size=30][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]" % [pos, code, badge, line2]
+		# 셋째 줄: 이 타이어로 몇 랩째 · 마모 추세로 본 남은 랩 · 최근 랩타임
+		var line3 := ""
+		if c.dnf == "":
+			var rate: float = c.wear / maxf(1.0, float(c.stint_laps))
+			var lim: float = RS.H_CLIFF if c.comp == "H" else 0.70
+			var rem_t := "-"
+			if c.stint_laps >= 1 and rate > 0.0005 and RS.SLICK.has(c.comp):
+				rem_t = "약 %d랩 더" % maxi(0, int((lim - c.wear) / rate))
+			line3 = "%d랩째 · %s · 최근 %s" % [c.stint_laps, rem_t, K.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"]
+		_chip_txt[i].text = "[font_size=30][b]%s[/b][/font_size]  [b]%s[/b]  %s\n[color=#8b98a5]%s[/color]\n[color=#e6edf3]%s[/color]" % [pos, code, badge, line2, line3]
 	var c = car()
 	if c == null:
 		return
@@ -492,7 +498,7 @@ func refresh() -> void:
 			_refresh_laps(c)
 	# 팀 오더: F1 에서 두 대 모두 달릴 때
 	var both: bool = mc.size() == 2 and mc[0].is_running() and mc[1].is_running()
-	_order_row.visible = not wec and both
+	_order_row.visible = not wec and both and tab == "drive" # 팀 오더는 주행 탭에서만
 	_press(_order_btns, [["free"], ["hold"]], sim.team_order)
 	_swap_btn.disabled = sim.swap_req
 
@@ -587,6 +593,7 @@ func _refresh_pit(c) -> void:
 			_pits_seen[sel] = c.pits
 			d["driver"] = true
 		_press(_w_drv_btns, [["no"], ["yes"]], "yes" if d["driver"] else "no")
+		c.auto_swap = bool(d["driver"])
 	# 상태줄 · 확정/철수
 	var booked: bool = c.pit_req != "" or c.boxing != null
 	var in_lane: bool = sim.is_pitting(c)
@@ -726,8 +733,9 @@ func _on_tab(t: String) -> void:
 	tab = t
 	for i in TABS.size():
 		_tab_btns[i].set_pressed_no_signal(TABS[i][0] == t)
-		_tab_btns[i].add_theme_color_override("font_color", Color.WHITE if TABS[i][0] == t else K.DIM)
+		_tab_btns[i].add_theme_color_override("font_color", Color.WHITE if TABS[i][0] == t else K.INK)
 		_pages[TABS[i][0]].visible = TABS[i][0] == t
+	tab_changed.emit(t)
 	refresh()
 
 

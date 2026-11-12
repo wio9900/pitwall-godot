@@ -2,9 +2,9 @@ extends RefCounted
 ## 게임 설정 (user://settings.json). 화면이 아닌 값 보관·저장만 한다.
 
 const PATH := "user://settings.json"
-const SPEEDS := [1, 2, 4, 8, 16]
+const SPEEDS := [1, 2, 5, 10, 15]
 
-static var data := {"volume": 0.8, "engine": true, "speed": 4, "prompts": true, "prompt_slow": true, "ui_scale": 1.0, "battery": false, "show_fps": false}
+static var data := {"volume": 0.8, "engine": true, "speed": 5, "prompts": true, "prompt_slow": true, "ui_scale": 1.0, "battery": false, "show_fps": false}
 static var _loaded := false
 
 
