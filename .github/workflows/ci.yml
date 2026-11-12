@@ -36,6 +36,8 @@ jobs:
         run: timeout 240 ./godot --headless --path . --script res://tests/weekend_smoke.gd 2>&1 | tee weekend.log; test ${PIPESTATUS[0]} -eq 0
       - name: 커리어 테스트
         run: timeout 240 ./godot --headless --path . --script res://tests/career_smoke.gd 2>&1 | tee career.log; test ${PIPESTATUS[0]} -eq 0
+      - name: 버그 찾기 (무작위 플레이)
+        run: timeout 420 ./godot --headless --path . --script res://tests/fuzz.gd 2>&1 | tee fuzz.log; test ${PIPESTATUS[0]} -eq 0
       - name: 밸런스 점검
         run: timeout 300 ./godot --headless --path . --script res://tests/calib.gd 2>&1 | tee calib.log
       - name: UI 스모크 테스트
