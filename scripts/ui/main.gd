@@ -195,12 +195,23 @@ func _on_resize() -> void:
 	if want != landscape:
 		landscape = want
 		_apply_layout()
-	# 메뉴는 넓은 화면에서 가운데 정렬된 기둥으로
-	menu_cols.vertical = landscape == 0
-	var side = maxf(24.0, (vs.x - (1200.0 if landscape == 1 else 820.0)) / 2.0)
+	_menu_layout()
+	result_panel.custom_minimum_size = Vector2(minf(760.0, vs.x - 32.0), minf(900.0, vs.y - 32.0))
+
+
+## 메뉴 배치: 메인(홈)은 가운데 한 줄 기둥(로고 → 이어하기 → 큰 버튼 2개),
+## 다른 화면은 가로에선 2단 · 세로에선 1단
+func _menu_layout() -> void:
+	if menu_cols == null:
+		return
+	var vs: Vector2 = get_viewport_rect().size
+	var home: bool = menu_page == "home"
+	menu_cols.vertical = landscape == 0 or home
+	menu_cols.alignment = BoxContainer.ALIGNMENT_CENTER if home else BoxContainer.ALIGNMENT_BEGIN
+	var col_w: float = 720.0 if home else (1200.0 if landscape == 1 else 820.0)
+	var side = maxf(24.0, (vs.x - col_w) / 2.0)
 	menu_box.add_theme_constant_override("margin_left", int(side))
 	menu_box.add_theme_constant_override("margin_right", int(side))
-	result_panel.custom_minimum_size = Vector2(minf(760.0, vs.x - 32.0), minf(900.0, vs.y - 32.0))
 
 
 func _move(node: Control, parent: Control) -> void:
@@ -469,11 +480,7 @@ func _build_menu() -> void:
 	v2.add_child(career_right)
 	# 메인 화면: 큰 버튼 두 개만 (가로 화면에서는 오른쪽, 세로 화면에서는 로고 아래)
 	home_box = KitS.vbox(16)
-	home_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v2.add_child(home_box)
-	var hs = Control.new()
-	hs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	home_box.add_child(hs)
 	for it in [["career", "🏆  커리어", "팀 운영 · 시즌 · 승격 — 저장 슬롯 3개"], ["quick", "🏁  퀵 레이스", "단판 레이스 · 연습 → 예선 → 결승"]]:
 		var mb = Button.new()
 		mb.text = "%s\n%s" % [it[1], it[2]]
@@ -488,9 +495,6 @@ func _build_menu() -> void:
 			mb.add_theme_stylebox_override("hover", _sb(PANEL.lightened(0.06), AMBER, 10, 10, 8, true))
 		mb.pressed.connect(_on_mode.bind(it[0]))
 		home_box.add_child(mb)
-	var hs2 = Control.new()
-	hs2.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	home_box.add_child(hs2)
 	var tcard = PanelContainer.new()
 	quick_right.add_child(tcard)
 	var tv = KitS.vbox(8)
@@ -730,6 +734,7 @@ func _render_career_menu() -> void:
 		return
 	home_box.visible = menu_page == "home"
 	nav_row.visible = menu_page != "home"
+	_menu_layout()
 	nav_title.text = {"quick": "퀵 레이스", "slots": "커리어 · 저장 슬롯", "new": "새 커리어 · 슬롯 %d" % new_slot}.get(menu_page, "")
 	quick_left.visible = menu_page == "quick"
 	quick_right.visible = menu_page == "quick"
@@ -1201,9 +1206,11 @@ func _build_race_ui() -> void:
 	var tw = VBoxContainer.new()
 	tw.name = "순위"
 	tabs.add_child(tw)
-	gap_btn = _btn("간격: 앞차 ⇄ 선두 ⇄ 랩타임  ·  이름을 누르면 라이벌 분석", 13)
+	gap_btn = _btn("", 14)
+	gap_btn.tooltip_text = "누를 때마다 앞차 간격 → 선두와 차이 → 직전 랩타임. 순위표에서 이름을 누르면 라이벌 분석"
 	gap_btn.pressed.connect(_on_gap_mode)
 	tw.add_child(gap_btn)
+	_gap_text()
 	tower = _rtl(false)
 	tower.meta_underlined = false
 	tower.meta_clicked.connect(_on_tower_click)
@@ -1323,9 +1330,13 @@ func _on_radio_prompt() -> void:
 	sfx.play("radio")
 
 
+func _gap_text() -> void:
+	gap_btn.text = "⇄  보기: %s   (눌러서 바꾸기 · 이름 누르면 라이벌 분석)" % ["앞차 간격", "선두와 차이", "직전 랩타임"][gap_mode]
+
+
 func _on_gap_mode() -> void:
 	gap_mode = (gap_mode + 1) % 3
-	gap_btn.text = ["간격: 앞차 기준", "간격: 선두 기준", "직전 랩타임"][gap_mode] + "  ⇄"
+	_gap_text()
 	if sim != null:
 		_refresh_ui()
 
@@ -1455,16 +1466,18 @@ func _refresh_ui() -> void:
 	if not starting:
 		top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
 	# 날씨 줄: 서킷 · 노면 · 강수 확률 · 수막 · 그립 · 예보
-	var evo_sec: float = -0.65 * sim.track_evo * (1.0 - sim.wet)
+	# 짧게: 서킷 · 노면(젖었을 때만 수막) · 그립 · 비 예보 (자세한 건 피트 탭 기상 레이더)
 	var fc_txt := ""
 	if sim.fc != null and sim.leader_lap < int(sim.fc["hi"]):
-		fc_txt = " · 예보: L%d-%d 비 확률 %d%%" % [int(sim.fc["lo"]), int(sim.fc["hi"]), int(sim.fc["p"])]
+		fc_txt = "   🌦 비 예보 [b]L%d–%d[/b] (%d%%)" % [int(sim.fc["lo"]), int(sim.fc["hi"]), int(sim.fc["p"])]
 	elif sim.fc == null:
-		fc_txt = " · 예보: 맑음 유지"
-	info_label.text = "[color=#8b98a5]%s · 노면 [b]%s[/b] · 강수확률 [b]%d%%[/b] · 수막 [b]%.1fmm[/b] · 그립 [b]%d%% (%.2fs)[/b]%s[/color]" % [
-		sim.CIRC["name"], sim.surface_ko(), sim.forecast_prob_at(lap_now), sim.wet_mm(sim.wet), int(round(sim.track_evo * 100)), evo_sec, fc_txt]
+		fc_txt = "   ☀ 비 예보 없음"
+	var surf: String = ("☀ " + sim.surface_ko()) if sim.wet < 0.05 else ("🌧 %s %.1fmm" % [sim.surface_ko(), sim.wet_mm(sim.wet)])
+	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
+		sim.CIRC["name"], surf, int(round(sim.track_evo * 100)), fc_txt]
 	race_panel.refresh()
 	rival.refresh()
+	_fit_tabs()
 	# 성능: 안 보이는 탭은 건너뛰고, 내용이 같으면 다시 그리지 않는다
 	if tower.is_visible_in_tree():
 		_refresh_tower(ord, leader)
@@ -1491,7 +1504,7 @@ func _refresh_tower(ord: Array, leader) -> void:
 		_refresh_tower_wec(ord)
 		return
 	var s = "[table=5]"
-	s += "[cell][color=#8b98a5]P[/color][/cell][cell][color=#8b98a5]드라이버[/color][/cell][cell][color=#8b98a5]%s[/color][/cell][cell][color=#8b98a5]타이어[/color][/cell][cell][color=#8b98a5]피트[/color][/cell]" % ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
+	s += _tower_head()
 	var pos = 0
 	var prev: Variant = null
 	for c in ord:
@@ -1523,24 +1536,47 @@ func _refresh_tower(ord: Array, leader) -> void:
 		var tyre = "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
 		if c.mine:
 			tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-		s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
-			pos, c.id, _hex(c.color), name_col, c.code, c.team, gap, tyre, c.pits]
+		s += _tower_row(pos, c, "[color=%s][b]%s[/b][/color] [color=#8b98a5]%s[/color]" % [name_col, c.code, _short_team(c.team)], gap, tyre)
 	s += "[/table]"
 	if tower.text != s:
 		tower.text = s
 
 
+## 가로 화면: 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)
+func _fit_tabs() -> void:
+	if landscape != 1 or race_scroll == null:
+		return
+	var h: float = race_scroll.size.y - panels_box.size.y - 12.0
+	var want: float = maxf(330.0, h)
+	if absf(tabs.custom_minimum_size.y - want) > 2.0:
+		tabs.custom_minimum_size = Vector2(0, want)
+
+
 func _short_team(n: String) -> String:
-	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo"]:
+	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo", " THOR", " JOTA", " WRT", " Corse"]:
 		n = n.replace(w, "")
 	return n
 
 
+## 순위표 머리줄 · 한 줄 (열 너비: 이름이 넓게, 나머지는 내용만큼)
+func _tower_head() -> String:
+	var g: String = ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
+	return "[cell][color=#5d6674]P[/color][/cell][cell expand=4][color=#5d6674]팀 · 드라이버[/color][/cell][cell expand=2][color=#5d6674]%s[/color][/cell][cell expand=1][color=#5d6674]타이어[/color][/cell][cell][color=#5d6674]피트[/color][/cell]" % g
+
+
+func _tower_row(pos: int, c, name_txt: String, gap: String, tyre: String) -> String:
+	var pc: String = "#ffc53d" if c.mine else "#e6edf3"
+	return "[cell][color=%s][b]%d[/b][/color]  [/cell][cell expand=4][url=%d][color=%s]▌[/color]%s[/url][/cell][cell expand=2]%s[/cell][cell expand=1]%s[/cell][cell][color=#8b98a5]%d[/color][/cell]" % [pc, pos, c.id, _hex(c.color), name_txt, gap, tyre, c.pits]
+
+
 func _refresh_tower_wec(ord: Array) -> void:
 	var s = "[table=5]"
+	s += _tower_head()
 	for cls in ["HY", "GT"]:
-		s += "[cell][color=#ffc53d][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell][cell][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
+		# 클래스 이름은 이름 칸에 (첫 칸에 두면 순위 칸이 넓어져 줄이 벌어진다)
+		s += "[cell][/cell][cell expand=4][color=#ffc53d][b]%s[/b][/color][/cell][cell expand=2][/cell][cell expand=1][/cell][cell][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
 		var lead: Variant = null
+		var prev: Variant = null
 		var pos := 0
 		for c in ord:
 			if c.cls != cls:
@@ -1548,17 +1584,27 @@ func _refresh_tower_wec(ord: Array) -> void:
 			pos += 1
 			if lead == null:
 				lead = c
-			var name_col := "#ffc53d" if c.mine else "#e6edf3"
-			var gap: String = "선두" if c == lead else sim.gap_to(c, lead)
+			var gap := ""
 			if c.dnf != "":
 				gap = "[color=#ef4444]DNF[/color]"
+			elif gap_mode == 2:
+				gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
+			elif c == lead:
+				gap = "[color=#a855f7]◆[/color] 선두"
+			elif gap_mode == 0 and prev != null:
+				gap = sim.gap_to(c, prev)
+			else:
+				gap = sim.gap_to(c, lead)
+			if c.time_pen > 0.0 and c.dnf == "":
+				gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
 			if c.boxing != null or c.pit_phase == 2:
 				gap += " [color=#ffc53d]PIT[/color]"
+			prev = c
 			var tyre := "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
 			if c.mine:
 				tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-			var nm: String = _short_team(c.team) + (" #%d" % (c.slot + 1))
-			s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [pos, c.id, _hex(c.color), name_col, nm, c.code, gap, tyre, c.pits]
+			var nm: String = "[color=%s]%s #%d[/color] [color=#8b98a5]%s[/color]" % ["#ffc53d" if c.mine else "#e6edf3", _short_team(c.team), c.slot + 1, c.code]
+			s += _tower_row(pos, c, nm, gap, tyre)
 	s += "[/table]"
 	if tower.text != s:
 		tower.text = s

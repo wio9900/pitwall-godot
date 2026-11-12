@@ -45,6 +45,7 @@ var _pred: RichTextLabel
 var _radar_head: RichTextLabel
 var _radar: Array = []
 var _radar_sb: Array = []
+var _radar_row: HBoxContainer
 var _w_opts: VBoxContainer
 var _w_tyre_btns: Array = []
 var _w_fuel_btns: Array = []
@@ -252,6 +253,7 @@ func _build_pit(pg: VBoxContainer) -> void:
 	pc.add_child(_pred)
 	_radar_head = _rt(pg, 13)
 	var rr = K.hbox(4)
+	_radar_row = rr
 	pg.add_child(rr)
 	for i in 5:
 		var cell = PanelContainer.new()
@@ -505,7 +507,16 @@ func _refresh_pit(c) -> void:
 		_pred.text = "[font_size=26][b]P%d[/b][/font_size]  [color=#8b98a5]지금 박스 시 복귀 순위 (손실 약 %d초%s)[/color]\n%s · %s%s" % [int(pr["pos"]), int(round(float(pr["loss"]))), (", " + sim.sc_kind + " 중") if sim.sc else "", a, b, u]
 	# 기상 레이더
 	var cur: int = mini(sim.laps, sim.leader_lap + 1)
-	_radar_head.text = "[color=#8b98a5]기상 레이더 (인터 1.2mm · 웻 3.5mm 기준)[/color]  지금 강수확률 [b]%d%%[/b] · 노면 수막 [b]%.1fmm[/b]" % [sim.forecast_prob_at(cur), sim.wet_mm(sim.wet)]
+	# 앞으로 5랩 동안 비 걱정이 없으면 칸 대신 한 줄만
+	var calm: bool = sim.wet < 0.05
+	for i in 5:
+		if cur + i + 1 <= sim.laps and sim.forecast_wet_at(cur + i + 1) >= 0.2:
+			calm = false
+	_radar_row.visible = not calm
+	if calm:
+		_radar_head.text = "[color=#8b98a5]날씨[/color]  ☀ 앞으로 5랩 비 걱정 없음 [color=#8b98a5](강수확률 %d%%)[/color]" % sim.forecast_prob_at(cur)
+	else:
+		_radar_head.text = "[color=#8b98a5]기상 레이더[/color]  지금 강수확률 [b]%d%%[/b] · 노면 수막 [b]%.1fmm[/b] [color=#8b98a5](인터 1.2mm · 웻 3.5mm부터)[/color]" % [sim.forecast_prob_at(cur), sim.wet_mm(sim.wet)]
 	for i in 5:
 		var tl: int = cur + i + 1
 		var r: RichTextLabel = _radar[i]
@@ -531,8 +542,8 @@ func _refresh_pit(c) -> void:
 		var b: Button = _tyre_btns[i]
 		b.visible = not (wec and (comp == "I" or (RS.SLICK.has(comp) and not allowed.has(comp))))
 		var sub: String = RS.TYRE_KO[comp]
-		if wec and RS.SLICK.has(comp):
-			sub = "새 %d세트 남음" % c.wec_sets if c.wec_sets > 0 else "새 세트 없음 (헌 세트)"
+		if wec:
+			pass # WEC 새 세트 수는 컴파운드 공용이라 아래 한 줄에만 표시
 		elif RS.SLICK.has(comp) and c.tyre_sets != null and c.tyre_sets.has(comp):
 			var rem := int(c.tyre_sets[comp])
 			sub = "새 %d세트" % rem if rem > 0 else "헌 (+0.45s)"
