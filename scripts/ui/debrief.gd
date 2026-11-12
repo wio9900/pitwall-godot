@@ -169,7 +169,7 @@ func _render() -> void:
 	# 같은 클래스 차들 중에서 차트에 그릴 차: 내 차 + 포디움 + 내 차 바로 앞뒤로 끝난 차
 	var cls: String = mine[0].cls if not mine.is_empty() else "F1"
 	var ord: Array = []
-	for o in sim.order():
+	for o in sim.order_ui():
 		if o.cls == cls:
 			ord.append(o)
 	var pick: Array = []

@@ -47,9 +47,13 @@ jobs:
           GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
           GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           mkdir -p build
-          timeout 600 ./godot --headless --path . --export-debug "Android" build/PitWall.apk 2>&1 | tail -40
+          # 릴리스 빌드: 디버그 검사가 빠져 더 빠르고 배터리를 덜 쓴다
+          timeout 600 ./godot --headless --path . --export-release "Android" build/PitWall.apk 2>&1 | tail -40
           ls -la build
           test -f build/PitWall.apk
       - name: APK를 apk 브랜치에 올리기

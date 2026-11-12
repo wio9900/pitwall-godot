@@ -397,7 +397,7 @@ func refresh() -> void:
 	if sim == null:
 		return
 	var wec: bool = sim.is_wec()
-	var ord: Array = sim.order()
+	var ord: Array = sim.order_ui()
 	var mc: Array = sim.my_cars()
 	# 엔지니어 제안
 	if sim.active_radio != null:

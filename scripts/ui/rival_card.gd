@@ -116,7 +116,7 @@ func refresh() -> void:
 			me = m
 			break
 	if me != null and me != c and c.dnf == "":
-		var ord: Array = sim.order()
+		var ord: Array = sim.order_ui()
 		var ahead: bool = ord.find(c) < ord.find(me)
 		var g: float = sim.gap_seconds(me, c) if ahead else sim.gap_seconds(c, me)
 		t += "내 차(%s)와 간격: [b]%s %.1f초[/b]\n" % [me.code, "내 앞" if ahead else "내 뒤", g]

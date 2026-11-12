@@ -1372,7 +1372,7 @@ func _chip(text: String, bg: String, fg: String = "#0b0f14") -> String:
 func _refresh_ui() -> void:
 	if sim == null:
 		return
-	var ord: Array = sim.order()
+	var ord: Array = sim.order_ui()
 	var leader = ord[0]
 	var lap_now = mini(sim.laps, leader.lap + 1)
 	# 상단: 큰 랩 숫자 + 상태 칩
@@ -1421,7 +1421,7 @@ func _refresh_ui() -> void:
 
 func _wec_gaps(c) -> String:
 	var same: Array = []
-	for o in sim.order():
+	for o in sim.order_ui():
 		if o.cls == c.cls:
 			same.append(o)
 	var i := same.find(c)

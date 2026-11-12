@@ -160,7 +160,7 @@ func _update_cars(delta: float) -> void:
 	var gap_d: float = maxf(T.L * 0.0045, 15.0 * _car_scale(false) / maxf(_s, 0.01))
 	var last_by_cls := {} # 클래스별로 앞차보다 앞서 그리지 않기
 	var targets := {}
-	for c in sim.order():
+	for c in sim.order_ui():
 		if c.dnf != "":
 			continue
 		if not c.started:
@@ -205,7 +205,7 @@ func _update_cars(delta: float) -> void:
 
 # ═════════ 팝업·말풍선·배너 (sim 상태 변화를 감지만 한다) ═════════
 func _update_effects() -> void:
-	var ord: Array = sim.order()
+	var ord: Array = sim.order_ui()
 	for i in ord.size():
 		var c = ord[i]
 		var pos = i + 1
@@ -248,7 +248,7 @@ func _update_effects() -> void:
 		if c.finished and not _fin_seen.has(c.id):
 			_fin_seen[c.id] = true
 			if c.mine and _smooth.has(c.id):
-				var fp = sim.order().find(c) + 1
+				var fp = sim.order_ui().find(c) + 1
 				_popups.append({"id": c.id, "text": "🏁 P%d" % fp, "col": AMBER, "t": _now})
 				var cp: int = sim.class_pos(c) if sim.is_wec() else fp
 				if cp <= 3 and c.penalty <= 0.0 and (_win_rank == 0 or cp < _win_rank):

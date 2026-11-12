@@ -14,7 +14,7 @@ config/name="Pit Wall"
 config/description="F1 피트월 전략 시뮬레이션"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
-config/icon="res://icon.svg"
+config/icon="res://assets/icon_512.png"
 
 [display]
 

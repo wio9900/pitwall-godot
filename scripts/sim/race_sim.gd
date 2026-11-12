@@ -101,6 +101,8 @@ var iradio_done := {}      # "차id:종류" → true (같은 제안은 한 번�
 var prompts_enabled := true  # 설정에서 끄면 엔지니어 제안 창을 띄우지 않음
 
 var _cuts_cache: Dictionary = {}
+var _oc: Array = []          # order_ui 캐시
+var _oc_clock := -1.0
 
 
 func is_wec() -> bool:
@@ -2141,6 +2143,15 @@ func order() -> Array:
 	var arr = cars.duplicate()
 	arr.sort_custom(func(a, b): return _cmp(a, b) < 0)
 	return arr
+
+
+## 화면용 순위: 같은 시각(clock)이면 한 번만 정렬해 재사용 (화면은 매 프레임 여러 번 순위를 읽는다).
+## 시뮬레이션 내부 계산에는 쓰지 않는다 — 같은 시각에도 상태가 바뀔 수 있어서.
+func order_ui() -> Array:
+	if _oc_clock != clock or _oc.size() != cars.size():
+		_oc = order()
+		_oc_clock = clock
+	return _oc
 
 
 func gap_to(c, ref) -> String:

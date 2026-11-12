@@ -8,7 +8,7 @@ const CarS = preload("res://scripts/sim/car.gd")
 const DB = preload("res://scripts/data/game_db.gd")
 const PATH := "user://race_resume.bin"
 const VER := 1
-const SKIP := ["T", "CIRC", "rng", "cars", "_cuts_cache"]
+const SKIP := ["T", "CIRC", "rng", "cars", "_cuts_cache", "_oc", "_oc_clock"]
 
 
 static func _vars(o: Object) -> Array:
