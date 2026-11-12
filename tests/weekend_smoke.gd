@@ -19,6 +19,17 @@ func _init() -> void:
 			var r1: Dictionary = wk.practice_run(1, "short")
 			wk.auto_practice()
 			wk.start_quali()
+			if n == 1:
+				# 시간 예선: 첫 차가 초반에 한 번, 막판에 한 번 → 두 번 다 기록되고 좋은 기록만 남는지
+				var a: Dictionary = wk.my_lap("M", "std", 1.0)
+				wk.commit_lap(a)
+				var again: bool = wk.can_run_again(0)
+				var b: Dictionary = wk.my_lap("S", "std", wk.q_last_dep() - 0.5)
+				wk.commit_lap(b)
+				var kept: Variant = wk.Q["res"].get(a["id"])
+				print("   시간 예선: 1차 %.3f(%s) · 다시 가능=%s · 2차 %.3f(%s, 출발 %.1f분) · 남은 기록 %.3f · 출발 시각 제한=%s" % [a["total"], a["note"], again, b["total"], b["note"], b["dep"], kept["total"] if kept != null else -1.0, b["dep"] <= wk.q_last_dep()])
+				if not again or kept == null:
+					fails += 1
 			wk.auto_quali()
 			sim.prepare_start()
 			var guard = 0

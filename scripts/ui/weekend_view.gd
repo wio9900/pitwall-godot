@@ -27,6 +27,50 @@ var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
 var p_comp := "M"            # 연습 주행 타이어
+var q_dep := -1.0            # 예선 출발 시각 (세션 시작 후 분). -1 = 기본값(마지막 출발 2분 전)
+var _q_info: RichTextLabel
+var _q_line
+var _q_go: Button
+
+
+## 예선 세션 시간 막대: 노면(초록일수록 좋음) · 막판 트래픽(빨간 줄무늬) · 내가 고른 출발 시각 · 이미 달린 시각
+class QTimeline extends Control:
+	var wk
+	var stage := 1
+	var dep := 0.0
+	var lo := 0.0
+	var done_deps: Array = []
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(0, 46)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var T: float = wk.q_len(stage)
+		var w: float = size.x
+		var h: float = 22.0
+		var n := 48
+		for i in n:
+			var m: float = T * (float(i) + 0.5) / n
+			var cd: Dictionary = wk.q_cond(stage, minf(m, T - WK.RUN_MIN))
+			var g: float = clampf((0.10 - float(cd["evo"])) / 0.40, 0.0, 1.0)
+			var col := Color("#1c2028").lerp(Color("#15803d"), g)
+			if m > T - WK.RUN_MIN:
+				col = Color("#2b303a") # 체커기: 출발 불가
+			draw_rect(Rect2(w * i / n, 4, w / n + 1, h), col)
+			var risk: float = float(cd["risk"])
+			if risk > 0.12 and m <= T - WK.RUN_MIN:
+				draw_rect(Rect2(w * i / n, 4, w / n + 1, 4), Color(0.88, 0.02, 0.0, clampf(risk * 2.5, 0.2, 0.9)))
+		if lo > 0.0:
+			draw_rect(Rect2(0, 4, w * lo / T, h), Color(0, 0, 0, 0.55))
+		var font: Font = get_theme_default_font()
+		for d in done_deps:
+			draw_line(Vector2(w * float(d) / T, 2), Vector2(w * float(d) / T, h + 6), Color("#9aa1ad"), 2.0)
+		var x: float = w * dep / T
+		draw_rect(Rect2(x - 2, 0, 4, h + 8), Color.WHITE)
+		for mm in [0.0, T * 0.5, T - WK.RUN_MIN, T]:
+			var rem: float = T - mm
+			draw_string(font, Vector2(clampf(w * mm / T - 14, 0, w - 34), h + 22), "%d:%02d" % [int(rem), int(round(fmod(rem, 1.0) * 60))], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#9aa1ad"))
 var _landscape := -1
 
 
@@ -311,14 +355,47 @@ func _render_quali() -> void:
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(c.slot), 14, anim == null)
 		card.add_child(K.label("드라이버 어택 강도", 14, K.DIM))
 		K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_push, _on_qpush, 14, anim == null)
-		card.add_child(K.label("피트 출주 타이밍", 14, K.DIM))
-		K.seg(card, [["early", "즉시 출주"], ["clean", "클린 에어 대기"], ["late", "막판 릴리즈"]], q_traffic, _on_qtrf, 14, anim == null)
+		# 출발 시각: 세션 시계에서 언제 피트를 나갈지
+		var T: float = wk.q_len()
+		var lo: float = float(wk.Q["clock"][c.slot])
+		var hi: float = wk.q_last_dep()
+		if q_dep < 0.0:
+			q_dep = maxf(lo, hi - 2.0)
+		q_dep = clampf(q_dep, lo, hi)
+		card.add_child(K.label("피트 출발 시각 — 세션 %d분 (마지막 출발은 체커기 3분 전)" % int(T), 14, K.DIM))
+		_q_line = QTimeline.new()
+		_q_line.wk = wk
+		_q_line.stage = st
+		_q_line.lo = lo
+		_q_line.dep = q_dep
+		var dd: Array = []
+		var prev_res: Variant = wk.Q["res"].get(c.id)
+		if prev_res != null and int(prev_res["stage"]) == st and prev_res.has("dep"):
+			dd.append(float(prev_res["dep"]))
+		_q_line.done_deps = dd
+		card.add_child(_q_line)
+		var sl = HSlider.new()
+		sl.min_value = lo
+		sl.max_value = hi
+		sl.step = 0.5
+		sl.value = q_dep
+		sl.editable = anim == null and hi > lo
+		sl.custom_minimum_size = Vector2(0, 30)
+		sl.value_changed.connect(_on_qdep)
+		card.add_child(sl)
+		_q_info = K.rtl(14)
+		card.add_child(_q_info)
 		var hint = K.rtl(13)
-		hint.text = "[color=#8b98a5]한계까지 밀면 빠르지만 트랙 리밋으로 기록이 지워질 수 있어요. 막판 릴리즈는 노면이 좋아지지만 트래픽 위험이 커요. Q1·Q2를 미디엄으로 넘기면 Q3용 새 소프트를 아낄 수 있어요.[/color]"
+		hint.text = "[color=#8b98a5]늦게 나갈수록 노면이 좋아져 빨라요(초록). 대신 막판엔 다들 나와서 트래픽(빨간 띠)과 사고로 어택이 중단될 위험이 커지고, 중단되면 다시 나갈 시간이 없어요. 일찍 한 번 기록을 만들어 두고 막판에 한 번 더 나가는 것도 방법이에요 (타이어 한 세트 더 필요). 한계까지 밀면 빠르지만 트랙 리밋으로 기록이 지워질 수 있어요.[/color]"
 		card.add_child(hint)
-		var go = K.btn("어택 랩 출발 ▶" if anim == null else "어택 중…", 18, _run_quali_lap)
-		go.disabled = anim != null
-		card.add_child(go)
+		var runs: int = int(wk.Q["runs"][c.slot])
+		_q_go = K.btn("", 18, _run_quali_lap)
+		_q_go.disabled = anim != null
+		card.add_child(_q_go)
+		_q_update_info()
+		if runs > 0 and anim == null:
+			card.add_child(K.btn("이 차는 여기까지 · 기록 확정 ▶", 15, _on_q_end_car))
+
 	if anim == null:
 		_live.text = "[color=#8b98a5]섹터 색: [color=#a855f7]보라[/color] 전체 최고 · [color=#22c55e]초록[/color] 폴보다 빠름 · [color=#facc15]노랑[/color] 느림[/color]"
 	_render_q_table()
@@ -331,7 +408,7 @@ func _run_quali_lap() -> void:
 	var c: Variant = wk.current_car()
 	if c == null:
 		return
-	var res: Dictionary = wk.my_lap(q_comp, q_push, q_traffic)
+	var res: Dictionary = wk.my_lap(q_comp, q_push, q_dep)
 	anim = {"kind": "quali", "t": 0.0, "res": res, "car": c}
 	refresh()
 
@@ -561,6 +638,41 @@ func _on_qtrf(v) -> void:
 	refresh()
 
 
+func _remain_txt(minute: float) -> String:
+	var rem: float = maxf(0.0, wk.q_len() - minute)
+	return "%d:%02d" % [int(rem), int(round(fmod(rem, 1.0) * 60))]
+
+
+## 슬라이더를 움직이면 정보 줄·막대·버튼만 바꾼다 (화면 전체를 다시 그리면 끌기가 끊긴다)
+func _on_qdep(v: float) -> void:
+	q_dep = v
+	if _q_line != null:
+		_q_line.dep = v
+		_q_line.queue_redraw()
+	_q_update_info()
+
+
+func _q_update_info() -> void:
+	if _q_info == null or wk.Q.is_empty():
+		return
+	var cd: Dictionary = wk.q_cond(wk.Q["stage"], q_dep)
+	var evo: float = float(cd["evo"])
+	_q_info.text = "남은 시간 [b]%s[/b]에 출발 · 노면 [color=%s][b]%+.2f초[/b][/color] · 트래픽 위험 [b]%d%%[/b] · 어택 중단 위험 [b]%d%%[/b]" % [
+		_remain_txt(q_dep), "#22c55e" if evo < -0.1 else ("#facc15" if evo < 0.02 else "#ef4444"), evo, int(round(float(cd["risk"]) * 160)), int(round(float(cd["abort"]) * 100))]
+	if _q_go != null:
+		_q_go.text = ("어택 출발 ▶  (남은 시간 %s)" % _remain_txt(q_dep)) if anim == null else "어택 중…"
+
+
+func _on_q_end_car() -> void:
+	if anim != null:
+		return
+	wk.end_car()
+	q_dep = -1.0
+	if wk.done_quali:
+		phase = "grid"
+	refresh()
+
+
 func _on_start_comp(v, slot: int) -> void:
 	wk.set_start_comp(slot, v)
 	if plan_edit.has(slot) and not plan_edit[slot]["edited"]:
@@ -754,7 +866,11 @@ func _process(delta: float) -> void:
 		var c = anim["car"]
 		anim = null
 		_view.solo = {"car": null, "dist": 0.0}
+		var idx0: int = wk.Q["idx"]
+		var st0: int = wk.Q["stage"]
 		wk.commit_lap(res)
+		if wk.Q["idx"] != idx0 or wk.Q["stage"] != st0:
+			q_dep = -1.0
 		var note: String = res["note"]
 		if wk.done_quali:
 			phase = "grid"

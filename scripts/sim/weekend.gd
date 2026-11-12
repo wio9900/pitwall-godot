@@ -12,6 +12,11 @@ const QCOMP := {"S": -0.55, "M": 0.0, "H": 0.45}
 const QPUSH := {"safe": [0.85, 0.5, 0.0], "std": [1.0, 1.0, 0.012], "limit": [1.15, 2.0, 0.07]}
 const QPUSH_KO := {"safe": "안전하게", "std": "표준", "limit": "한계까지"}
 const QTRAFFIC := {"early": [0.05, 0.12, "즉시 출주"], "clean": [-0.12, 0.04, "클린 에어 대기"], "late": [-0.28, 0.28, "막판 릴리즈"]}
+## 예선 세션 시계 (분). 출발 시각을 직접 고른다: 늦을수록 노면이 좋아지지만(트랙 에볼루션)
+## 막판엔 다들 나와서 트래픽·사고(어택 중단) 위험이 커지고, 중단되면 다시 나갈 시간이 없다.
+const QLEN_F1 := [0.0, 18.0, 15.0, 12.0]
+const QLEN_WEC := [0.0, 15.0, 12.0]
+const RUN_MIN := 3.0   # 아웃랩 + 어택 랩 (분). 체커기 전에 어택 랩을 시작해야 하므로 마지막 출발 = 세션 길이 - 3분
 const PRESS_KO := {"low": "낮게", "std": "표준", "high": "높게"}
 const FUEL_LOAD_KO := {"light": "가볍게", "std": "표준", "heavy": "넉넉하게"}
 const PRACTICE_LAPS := 16
@@ -268,7 +273,7 @@ func auto_practice() -> void:
 
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
 func start_quali() -> void:
-	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "idx": 0, "done": false}
+	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "idx": 0, "done": false, "clock": [0.0, 0.0], "runs": [0, 0]}
 	_q_soft_used.clear()
 	for c in my_cars():
 		c.q3_locked = false
@@ -276,9 +281,33 @@ func start_quali() -> void:
 	_skip_eliminated()
 
 
-func q_lap(c, push: String, traffic: String, stage: int, comp: String, used_set: bool) -> Dictionary:
+## 세션 길이(분)
+func q_len(stage: int = -1) -> float:
+	var st: int = int(Q.get("stage", 1)) if stage < 0 else stage
+	var arr: Array = QLEN_WEC if sim.is_wec() else QLEN_F1
+	return float(arr[clampi(st, 1, arr.size() - 1)])
+
+
+func q_last_dep(stage: int = -1) -> float:
+	return q_len(stage) - RUN_MIN
+
+
+## 출발 시각의 노면·트래픽·중단 위험 {evo 초, risk 트래픽 확률, abort 어택 중단 확률}
+func q_cond(stage: int, minute: float) -> Dictionary:
+	var T: float = q_len(stage)
+	var f: float = clampf(minute / maxf(1.0, T - RUN_MIN), 0.0, 1.0)
+	var late: float = clampf((minute - (T - RUN_MIN - 4.0)) / 4.0, 0.0, 1.0) # 마지막 4분: 다들 나온다
+	var early: float = clampf((2.0 - minute) / 2.0, 0.0, 1.0)
+	return {"evo": 0.10 - 0.40 * f, "risk": 0.04 + 0.24 * late + 0.08 * early, "abort": 0.03 + 0.09 * late}
+
+
+func q_lap(c, push: String, traffic: Variant, stage: int, comp: String, used_set: bool) -> Dictionary:
 	var pv: Array = QPUSH[push]
-	var tv: Array = QTRAFFIC.get(traffic, QTRAFFIC["clean"])
+	var tv: Array = [0.0, 0.0]
+	if traffic is Dictionary:
+		tv = [float(traffic["evo"]), float(traffic["risk"])]
+	else:
+		tv = QTRAFFIC.get(traffic, QTRAFFIC["clean"])
 	var spd: float = pv[0]
 	var err: float = pv[1]
 	var lim: float = pv[2]
@@ -320,10 +349,12 @@ func _run_ai_stage(st: int) -> void:
 			continue
 		if sim.is_wec() and c.cls != main_cls() and st > 1:
 			continue # 하이퍼폴은 하이퍼카만
+		# 출발 시각: 55% 막판 · 30% 초반 · 15% 중간
+		var T: float = q_len(st)
 		var r = sim.rnd()
-		var trf := "clean"
-		if r >= 0.6:
-			trf = "early" if sim.rnd() < 0.5 else "late"
+		var dep: float = sim.uni(T - RUN_MIN - 6.0, T - RUN_MIN) if r < 0.55 else (sim.uni(0.0, 4.0) if r < 0.85 else sim.uni(4.0, maxf(4.5, T - RUN_MIN - 6.0)))
+		dep = clampf(dep, 0.0, T - RUN_MIN)
+		var cond: Dictionary = q_cond(st, dep)
 		var ai_comp := "M" if (st == 1 and c.speed > 0.86 and sim.rnd() < 0.5) else "S"
 		if sim.is_wec():
 			ai_comp = "M" if st >= 2 else sim.wec_fit_comp(c.cls, "S")
@@ -336,7 +367,16 @@ func _run_ai_stage(st: int) -> void:
 			push = "limit"
 		elif c.aggr < 0.5:
 			push = "safe"
-		Q["res"][c.id] = q_lap(c, push, trf, st, ai_comp, ai_used)
+		var res_ai: Dictionary = q_lap(c, push, cond, st, ai_comp, ai_used)
+		if sim.rnd() < float(cond["abort"]):
+			# 어택 중단: 시간이 남았으면 쓴 타이어로 한 번 더
+			if dep + RUN_MIN <= T - RUN_MIN:
+				var dep2: float = sim.uni(dep + RUN_MIN, T - RUN_MIN)
+				res_ai = q_lap(c, push, q_cond(st, dep2), st, ai_comp, true)
+			else:
+				res_ai["deleted"] = true
+				res_ai["note"] = "어택 중단"
+		Q["res"][c.id] = res_ai
 
 
 func _skip_eliminated() -> void:
@@ -354,10 +394,11 @@ func current_car() -> Variant:
 
 
 ## 내 차 어택 랩 계산 (세트 소모). 화면이 섹터 애니메이션을 보여준 뒤 commit_lap 을 부른다.
-func my_lap(comp: String, push: String, traffic: String) -> Dictionary:
+func my_lap(comp: String, push: String, dep: float) -> Dictionary:
 	var c: Variant = current_car()
 	if c == null:
 		return {}
+	dep = clampf(maxf(dep, float(Q["clock"][c.slot])), 0.0, q_last_dep())
 	if sim.is_wec():
 		comp = "M" if Q["stage"] >= 2 else sim.wec_fit_comp(c.cls, comp) # 하이퍼폴은 미디엄만
 	if not has_any(c.slot, comp):
@@ -367,11 +408,54 @@ func my_lap(comp: String, push: String, traffic: String) -> Dictionary:
 				comp = k
 				break
 	var used_set: bool = take_set(c.slot, comp, true) != "new"
-	return q_lap(c, push, traffic, Q["stage"], comp, used_set)
+	var cond: Dictionary = q_cond(Q["stage"], dep)
+	var res: Dictionary = q_lap(c, push, cond, Q["stage"], comp, used_set)
+	res["dep"] = dep
+	res["slot"] = c.slot
+	if sim.rnd() < float(cond["abort"]):
+		res["deleted"] = true
+		res["aborted"] = true
+		res["note"] = "앞차 사고로 옐로·레드 플래그 → 어택 중단"
+	return res
+
+
+## 이 차가 이번 세션에 한 번 더 나갈 수 있나 (시간 · 타이어)
+func can_run_again(slot: int) -> bool:
+	if Q.is_empty() or Q["done"]:
+		return false
+	if float(Q["clock"][slot]) > q_last_dep():
+		return false
+	for k in ["S", "M", "H"]:
+		if has_any(slot, k):
+			return true
+	return false
+
+
+## 같은 세션의 기록 중 좋은 것만 남긴다
+func _better(a: Variant, b: Dictionary) -> bool:
+	if a == null:
+		return true
+	if int(a["stage"]) != int(b["stage"]):
+		return true
+	if a["deleted"] != b["deleted"]:
+		return not b["deleted"]
+	return float(b["total"]) < float(a["total"])
 
 
 func commit_lap(res: Dictionary) -> void:
-	Q["res"][res["id"]] = res
+	if _better(Q["res"].get(res["id"]), res):
+		Q["res"][res["id"]] = res
+	var sl: int = int(res.get("slot", 0))
+	Q["clock"][sl] = float(res.get("dep", 0.0)) + RUN_MIN
+	Q["runs"][sl] = int(Q["runs"][sl]) + 1
+	if not can_run_again(sl):
+		end_car()
+
+
+## 이 차는 이번 세션을 마친다 → 다음 내 차, 모두 마쳤으면 컷오프 후 다음 세션
+func end_car() -> void:
+	if Q.is_empty() or Q["done"]:
+		return
 	Q["idx"] += 1
 	_skip_eliminated()
 	var mine: Array = my_cars()
@@ -395,6 +479,8 @@ func commit_lap(res: Dictionary) -> void:
 			Q["eliminated"][ord[i].id] = true
 		Q["stage"] += 1
 		Q["idx"] = 0
+		Q["clock"] = [0.0, 0.0]
+		Q["runs"] = [0, 0]
 		_skip_eliminated()
 		_run_ai_stage(Q["stage"])
 		if Q["idx"] < mine.size():
@@ -413,7 +499,11 @@ func auto_quali() -> void:
 		if c == null:
 			break
 		var comp := "S" if sets[c.slot]["S"] > 0 else "M"
-		commit_lap(my_lap(comp, "std", "clean"))
+		var st0: int = Q["stage"]
+		var idx0: int = Q["idx"]
+		commit_lap(my_lap(comp, "std", q_last_dep() - 1.5))
+		if not Q["done"] and Q["stage"] == st0 and Q["idx"] == idx0:
+			end_car() # 자동 진행은 한 번만 달린다
 
 
 func q_order() -> Array:
