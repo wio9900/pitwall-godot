@@ -3,13 +3,15 @@ extends RefCounted
 
 const HelpS = preload("res://scripts/ui/help.gd")
 const TouchDragS = preload("res://scripts/ui/touch_drag.gd")
-const BG := Color("#0b0f14")
-const PANEL := Color("#141a22")
-const PANEL2 := Color("#1b232d")
-const LINE := Color("#2a3441")
-const INK := Color("#e6edf3")
-const DIM := Color("#8b98a5")
+# 중계 화면풍 팔레트: 거의 검정 바탕 · 흰 글씨 · 빨강 구조색(제목 막대·선택 밑줄) · 호박색은 '내 차'
+const BG := Color("#090b0f")
+const PANEL := Color("#13161c")
+const PANEL2 := Color("#1c2028")
+const LINE := Color("#2b303a")
+const INK := Color("#f2f4f7")
+const DIM := Color("#9aa1ad")
 const AMBER := Color("#ffc53d")
+const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const PURPLE := Color("#a855f7")
@@ -75,26 +77,29 @@ static func vbox(sep := 6) -> VBoxContainer:
 static func card(parent: Control, title: String = "", accent: Color = LINE) -> VBoxContainer:
 	var pc = PanelContainer.new()
 	var sb = StyleBoxFlat.new()
+	# 각진 상자 + 왼쪽 굵은 색 막대 (중계 그래픽 느낌)
 	sb.bg_color = PANEL
-	sb.border_color = accent
+	sb.border_color = LINE
 	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
-	sb.content_margin_left = 12
+	sb.border_width_left = 4
+	sb.border_color = accent if accent != LINE else RED
+	sb.set_corner_radius_all(2)
+	sb.content_margin_left = 14
 	sb.content_margin_right = 12
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 10
-	sb.set_corner_radius_all(10)
-	sb.corner_detail = 8
-	sb.shadow_size = 6
-	sb.shadow_color = Color(0, 0, 0, 0.3)
-	sb.shadow_offset = Vector2(0, 3)
+	sb.shadow_size = 4
+	sb.shadow_color = Color(0, 0, 0, 0.35)
+	sb.shadow_offset = Vector2(0, 2)
 	pc.add_theme_stylebox_override("panel", sb)
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(pc)
 	var v = vbox(6)
 	pc.add_child(v)
 	if title != "":
-		v.add_child(label(title, 16, AMBER))
+		var tl = label(title.to_upper(), 15, INK)
+		tl.add_theme_constant_override("outline_size", 0)
+		v.add_child(tl)
 	return v
 
 

@@ -58,7 +58,7 @@ func _init() -> void:
 	sb.bg_color = K.PANEL
 	sb.border_color = K.AMBER
 	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(10)
+	sb.set_corner_radius_all(2)
 	sb.set_content_margin_all(14)
 	_panel.add_theme_stylebox_override("panel", sb)
 	cc.add_child(_panel)

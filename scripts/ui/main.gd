@@ -23,13 +23,15 @@ const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 const RecS = preload("res://scripts/sim/records.gd")
 const RecordsViewS = preload("res://scripts/ui/records_view.gd")
 
-const BG := Color("#0b0f14")
-const PANEL := Color("#141a22")
-const PANEL2 := Color("#1b232d")
-const LINE := Color("#2a3441")
-const INK := Color("#e6edf3")
-const DIM := Color("#8b98a5")
+# 중계 화면풍 팔레트: 거의 검정 바탕 · 흰 글씨 · 빨강 구조색(제목 막대·선택 밑줄) · 호박색은 '내 차'
+const BG := Color("#090b0f")
+const PANEL := Color("#13161c")
+const PANEL2 := Color("#1c2028")
+const LINE := Color("#2b303a")
+const INK := Color("#f2f4f7")
+const DIM := Color("#9aa1ad")
 const AMBER := Color("#ffc53d")
+const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const SPEEDS := [0, 1, 2, 4, 8, 16]
@@ -251,8 +253,8 @@ func _sb(bg_col: Color, border: Color, radius := 8, pad := 8, shadow := 0, depth
 	s.set_border_width_all(1)
 	if depth:
 		s.border_width_bottom = 2 # 아래 테두리를 살짝 두껍게 → 눌리는 버튼 느낌
-	s.set_corner_radius_all(radius)
-	s.corner_detail = 8
+	s.set_corner_radius_all(mini(radius, 3)) # 중계 화면풍: 각진 모서리
+	s.corner_detail = 4
 	s.anti_aliasing = true
 	s.content_margin_left = pad
 	s.content_margin_right = pad
@@ -275,34 +277,48 @@ func _make_theme() -> Theme:
 	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	th.default_font = f
 	th.default_font_size = 20
+	# 굵은 글꼴: 버튼·탭·서식 텍스트 [b] 에 사용
+	var fb = f.duplicate()
+	fb.font_weight = 700
+	var fm = f.duplicate()
+	fm.font_weight = 600
+	th.set_font("bold_font", "RichTextLabel", fb)
+	for t in ["Button", "OptionButton", "TabContainer"]:
+		th.set_font("font", t, fm)
 	for t in ["Button", "OptionButton"]:
-		th.set_stylebox("normal", t, _sb(PANEL2, LINE, 9, 8, 3, true))
-		th.set_stylebox("hover", t, _sb(PANEL2.lightened(0.07), LINE.lightened(0.25), 9, 8, 4, true))
-		th.set_stylebox("pressed", t, _sb(Color("#3a2f12"), AMBER, 9, 8, 0, false))
-		th.set_stylebox("hover_pressed", t, _sb(Color("#45381a"), AMBER, 9, 8, 0, false))
-		th.set_stylebox("disabled", t, _sb(PANEL, LINE.darkened(0.2), 9, 8, 0, false))
+		# 선택된 버튼은 흰 바탕 + 검은 글씨 (중계 그래픽의 '선택' 표시)
+		th.set_stylebox("normal", t, _sb(PANEL2, LINE, 3, 8, 2, true))
+		th.set_stylebox("hover", t, _sb(PANEL2.lightened(0.07), INK.darkened(0.45), 3, 8, 2, true))
+		th.set_stylebox("pressed", t, _sb(INK, INK, 3, 8, 0, false))
+		th.set_stylebox("hover_pressed", t, _sb(Color.WHITE, Color.WHITE, 3, 8, 0, false))
+		th.set_stylebox("disabled", t, _sb(PANEL, LINE.darkened(0.2), 3, 8, 0, false))
 		th.set_stylebox("focus", t, StyleBoxEmpty.new())
 		th.set_color("font_color", t, INK)
 		th.set_color("font_hover_color", t, Color.WHITE)
-		th.set_color("font_pressed_color", t, AMBER)
-		th.set_color("font_hover_pressed_color", t, AMBER)
+		th.set_color("font_pressed_color", t, Color("#0a0c10"))
+		th.set_color("font_hover_pressed_color", t, Color("#0a0c10"))
 		th.set_color("font_disabled_color", t, DIM.darkened(0.2))
-	th.set_stylebox("panel", "PanelContainer", _sb(PANEL, LINE, 12, 10, 8))
+	th.set_stylebox("panel", "PanelContainer", _sb(PANEL, LINE, 2, 10, 6))
 	th.set_color("font_color", "Label", INK)
 	th.set_color("default_color", "RichTextLabel", INK)
 	th.set_stylebox("normal", "RichTextLabel", StyleBoxEmpty.new())
 	th.set_stylebox("panel", "TabContainer", _sb(PANEL, LINE, 12, 8, 6))
-	th.set_stylebox("tab_selected", "TabContainer", _sb(PANEL2, AMBER, 8, 10))
-	th.set_stylebox("tab_unselected", "TabContainer", _sb(PANEL, LINE, 8, 10))
-	th.set_stylebox("tab_hovered", "TabContainer", _sb(PANEL2, LINE, 8, 10))
-	th.set_color("font_selected_color", "TabContainer", AMBER)
+	# 탭: 선택된 탭은 빨간 밑줄
+	var ts = _sb(PANEL2, PANEL2, 2, 12)
+	ts.border_width_bottom = 3
+	ts.border_color = RED
+	th.set_stylebox("tab_selected", "TabContainer", ts)
+	var tu = _sb(PANEL, PANEL, 2, 12)
+	th.set_stylebox("tab_unselected", "TabContainer", tu)
+	th.set_stylebox("tab_hovered", "TabContainer", _sb(PANEL2, PANEL2, 2, 12))
+	th.set_color("font_selected_color", "TabContainer", Color.WHITE)
 	th.set_color("font_unselected_color", "TabContainer", DIM)
 	# 슬라이더: 얇은 홈 + 호박색 채움
 	var groove = _sb(Color("#0b1016"), LINE, 6, 0)
 	groove.content_margin_top = 3
 	groove.content_margin_bottom = 3
 	th.set_stylebox("slider", "HSlider", groove)
-	var fill = _sb(AMBER.darkened(0.25), AMBER.darkened(0.25), 6, 0)
+	var fill = _sb(RED, RED, 6, 0)
 	fill.content_margin_top = 3
 	fill.content_margin_bottom = 3
 	th.set_stylebox("grabber_area", "HSlider", fill)
@@ -322,19 +338,20 @@ func _make_theme() -> Theme:
 	th.set_stylebox("grabber_pressed", "VScrollBar", grab_h)
 	# 드롭다운 목록
 	th.set_stylebox("panel", "PopupMenu", _sb(PANEL2, LINE, 10, 8, 10))
-	th.set_stylebox("hover", "PopupMenu", _sb(Color("#3a2f12"), AMBER, 6, 4))
-	th.set_color("font_hover_color", "PopupMenu", AMBER)
+	th.set_stylebox("hover", "PopupMenu", _sb(RED, RED, 2, 4))
+	th.set_color("font_hover_color", "PopupMenu", Color.WHITE)
 	return th
 
 
 ## 주 버튼 (시작 등): 호박색으로 채워 눈에 띄게
 func _primary(b: Button) -> void:
-	b.add_theme_stylebox_override("normal", _sb(AMBER.darkened(0.08), AMBER.lightened(0.2), 10, 10, 6, true))
-	b.add_theme_stylebox_override("hover", _sb(AMBER, Color.WHITE, 10, 10, 8, true))
-	b.add_theme_stylebox_override("pressed", _sb(AMBER.darkened(0.3), AMBER, 10, 10, 0, false))
-	b.add_theme_color_override("font_color", Color("#1a1204"))
-	b.add_theme_color_override("font_hover_color", Color("#1a1204"))
-	b.add_theme_color_override("font_pressed_color", Color("#1a1204"))
+	# 주 버튼: 빨강 바탕 + 흰 굵은 글씨
+	b.add_theme_stylebox_override("normal", _sb(RED, RED.lightened(0.15), 3, 10, 6, true))
+	b.add_theme_stylebox_override("hover", _sb(RED.lightened(0.1), Color.WHITE, 3, 10, 8, true))
+	b.add_theme_stylebox_override("pressed", _sb(RED.darkened(0.3), RED, 3, 10, 0, false))
+	b.add_theme_color_override("font_color", Color.WHITE)
+	b.add_theme_color_override("font_hover_color", Color.WHITE)
+	b.add_theme_color_override("font_pressed_color", Color.WHITE)
 
 
 func _label(text: String, fsize := 20, col := INK) -> Label:
@@ -400,7 +417,7 @@ func _build_menu() -> void:
 	var logo = KitS.hbox(14)
 	v.add_child(logo)
 	var bar = ColorRect.new()
-	bar.color = AMBER
+	bar.color = RED
 	bar.custom_minimum_size = Vector2(7, 0)
 	logo.add_child(bar)
 	var lv = KitS.vbox(0)
@@ -409,7 +426,7 @@ func _build_menu() -> void:
 	var title = _rtl()
 	title.add_theme_font_size_override("normal_font_size", 54)
 	title.add_theme_font_size_override("bold_font_size", 54)
-	title.text = "[b]PIT[/b] [b][color=#ffc53d]WALL[/color][/b]"
+	title.text = "[b]PIT[/b] [b][color=#e10600]WALL[/color][/b]"
 	lv.add_child(title)
 	lv.add_child(_label("F1 · WEC 피트월 전략 시뮬레이션", 18, DIM))
 	var tools = KitS.vbox(6)
@@ -436,7 +453,7 @@ func _build_menu() -> void:
 	back.custom_minimum_size = Vector2(110, 44)
 	back.pressed.connect(_menu_back)
 	nav_row.add_child(back)
-	nav_title = _label("", 24, AMBER)
+	nav_title = _label("", 24, INK)
 	nav_row.add_child(nav_title)
 	quick_left = KitS.vbox(12)
 	v.add_child(quick_left)
@@ -491,8 +508,8 @@ func _build_menu() -> void:
 		if it[0] == "career":
 			_primary(mb)
 		else:
-			mb.add_theme_stylebox_override("normal", _sb(PANEL, AMBER.darkened(0.2), 10, 10, 6, true))
-			mb.add_theme_stylebox_override("hover", _sb(PANEL.lightened(0.06), AMBER, 10, 10, 8, true))
+			mb.add_theme_stylebox_override("normal", _sb(PANEL2, INK.darkened(0.5), 3, 10, 6, true))
+			mb.add_theme_stylebox_override("hover", _sb(PANEL2.lightened(0.06), INK, 3, 10, 8, true))
 		mb.pressed.connect(_on_mode.bind(it[0]))
 		home_box.add_child(mb)
 	var tcard = PanelContainer.new()
@@ -1561,12 +1578,16 @@ func _short_team(n: String) -> String:
 ## 순위표 머리줄 · 한 줄 (열 너비: 이름이 넓게, 나머지는 내용만큼)
 func _tower_head() -> String:
 	var g: String = ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
-	return "[cell][color=#5d6674]P[/color][/cell][cell expand=4][color=#5d6674]팀 · 드라이버[/color][/cell][cell expand=2][color=#5d6674]%s[/color][/cell][cell expand=1][color=#5d6674]타이어[/color][/cell][cell][color=#5d6674]피트[/color][/cell]" % g
+	return "[cell padding=4,2,4,4][color=#6b7280]P[/color][/cell][cell expand=4 padding=4,2,4,4][color=#6b7280]팀 · 드라이버[/color][/cell][cell expand=2 padding=4,2,4,4][color=#6b7280]%s[/color][/cell][cell expand=1 padding=4,2,4,4][color=#6b7280]타이어[/color][/cell][cell padding=4,2,4,4][color=#6b7280]피트[/color][/cell]" % g
 
 
 func _tower_row(pos: int, c, name_txt: String, gap: String, tyre: String) -> String:
-	var pc: String = "#ffc53d" if c.mine else "#e6edf3"
-	return "[cell][color=%s][b]%d[/b][/color]  [/cell][cell expand=4][url=%d][color=%s]▌[/color]%s[/url][/cell][cell expand=2]%s[/cell][cell expand=1]%s[/cell][cell][color=#8b98a5]%d[/color][/cell]" % [pc, pos, c.id, _hex(c.color), name_txt, gap, tyre, c.pits]
+	# 중계 화면처럼 줄마다 번갈아 바탕색, 내 차 줄은 호박색 바탕
+	var pc: String = "#ffc53d" if c.mine else "#ffffff"
+	var bg: String = "#2a2410" if c.mine else ("#181b22" if pos % 2 == 1 else "#111319")
+	var cl: String = "[cell bg=%s padding=4,3,4,3]" % bg
+	var cx: String = "[cell bg=%s padding=4,3,4,3 expand=%%d]" % bg
+	return (cl + "[color=%s][b]%d[/b][/color][/cell]" + (cx % 4) + "[url=%d][color=%s]▌[/color] %s[/url][/cell]" + (cx % 2) + "%s[/cell]" + (cx % 1) + "%s[/cell]" + cl + "[color=#9aa1ad]%d[/color][/cell]") % [pc, pos, c.id, _hex(c.color), name_txt, gap, tyre, c.pits]
 
 
 func _refresh_tower_wec(ord: Array) -> void:
@@ -1574,7 +1595,7 @@ func _refresh_tower_wec(ord: Array) -> void:
 	s += _tower_head()
 	for cls in ["HY", "GT"]:
 		# 클래스 이름은 이름 칸에 (첫 칸에 두면 순위 칸이 넓어져 줄이 벌어진다)
-		s += "[cell][/cell][cell expand=4][color=#ffc53d][b]%s[/b][/color][/cell][cell expand=2][/cell][cell expand=1][/cell][cell][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
+		s += "[cell bg=#e10600][/cell][cell bg=#e10600 expand=4 padding=4,2,4,2][color=#ffffff][b]%s[/b][/color][/cell][cell bg=#e10600 expand=2][/cell][cell bg=#e10600 expand=1][/cell][cell bg=#e10600][/cell]" % ("HYPERCAR" if cls == "HY" else "LMGT3")
 		var lead: Variant = null
 		var prev: Variant = null
 		var pos := 0

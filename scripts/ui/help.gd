@@ -39,7 +39,7 @@ func open() -> void:
 	sb.bg_color = Color("#141a22")
 	sb.border_color = Color("#38bdf8")
 	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(10)
+	sb.set_corner_radius_all(2)
 	sb.set_content_margin_all(14)
 	pc.add_theme_stylebox_override("panel", sb)
 	pc.custom_minimum_size = Vector2(minf(680.0, vp_size.x - 32.0), 0)

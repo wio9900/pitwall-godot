@@ -147,7 +147,7 @@ func _box(bg: Color, border: Color, pad := 8) -> StyleBoxFlat:
 	sb.bg_color = bg
 	sb.border_color = border
 	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
+	sb.set_corner_radius_all(2)
 	sb.set_content_margin_all(pad)
 	return sb
 
