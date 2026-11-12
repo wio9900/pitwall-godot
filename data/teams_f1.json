@@ -27,14 +27,14 @@
      "age": 29
     },
     {
-     "name": "S. Pérez",
-     "speed": 0.84,
-     "cons": 0.82,
-     "tyreMgmt": 0.85,
-     "aggr": 0.5,
-     "def": 0.78,
-     "wet": 0.8,
-     "age": 36
+     "name": "I. Hadjar",
+     "speed": 0.88,
+     "cons": 0.84,
+     "tyreMgmt": 0.82,
+     "aggr": 0.65,
+     "def": 0.81,
+     "wet": 0.85,
+     "age": 22
     }
    ]
   },
@@ -182,13 +182,13 @@
      "age": 30
     },
     {
-     "name": "J. Doohan",
-     "speed": 0.79,
-     "cons": 0.79,
+     "name": "F. Colapinto",
+     "speed": 0.83,
+     "cons": 0.78,
      "tyreMgmt": 0.8,
-     "aggr": 0.5,
-     "def": 0.72,
-     "wet": 0.76,
+     "aggr": 0.65,
+     "def": 0.77,
+     "wet": 0.82,
      "age": 23
     }
    ]
@@ -234,16 +234,6 @@
    "rim": "#ef4444",
    "drivers": [
     {
-     "name": "Y. Tsunoda",
-     "speed": 0.85,
-     "cons": 0.82,
-     "tyreMgmt": 0.81,
-     "aggr": 0.65,
-     "def": 0.79,
-     "wet": 0.82,
-     "age": 26
-    },
-    {
      "name": "L. Lawson",
      "speed": 0.83,
      "cons": 0.83,
@@ -252,6 +242,16 @@
      "def": 0.78,
      "wet": 0.8,
      "age": 24
+    },
+    {
+     "name": "A. Lindblad",
+     "speed": 0.85,
+     "cons": 0.78,
+     "tyreMgmt": 0.78,
+     "aggr": 0.7,
+     "def": 0.76,
+     "wet": 0.8,
+     "age": 19
     }
    ]
   },
@@ -265,21 +265,21 @@
    "rim": "#e11d48",
    "drivers": [
     {
-     "name": "E. Ocon",
-     "speed": 0.84,
-     "cons": 0.85,
-     "tyreMgmt": 0.84,
-     "aggr": 0.6,
-     "def": 0.82,
-     "wet": 0.85,
-     "age": 30
-    },
-    {
      "name": "O. Bearman",
      "speed": 0.82,
      "cons": 0.8,
      "tyreMgmt": 0.82,
      "aggr": 0.55,
+     "def": 0.76,
+     "wet": 0.8,
+     "age": 21
+    },
+    {
+     "name": "R. Câmara",
+     "speed": 0.84,
+     "cons": 0.8,
+     "tyreMgmt": 0.8,
+     "aggr": 0.6,
      "def": 0.76,
      "wet": 0.8,
      "age": 21
@@ -327,6 +327,16 @@
    "rim": "#1d4ed8",
    "drivers": [
     {
+     "name": "S. Pérez",
+     "speed": 0.84,
+     "cons": 0.82,
+     "tyreMgmt": 0.85,
+     "aggr": 0.5,
+     "def": 0.78,
+     "wet": 0.8,
+     "age": 36
+    },
+    {
      "name": "V. Bottas",
      "speed": 0.83,
      "cons": 0.85,
@@ -335,16 +345,6 @@
      "def": 0.8,
      "wet": 0.85,
      "age": 37
-    },
-    {
-     "name": "F. Drugovich",
-     "speed": 0.78,
-     "cons": 0.8,
-     "tyreMgmt": 0.79,
-     "aggr": 0.45,
-     "def": 0.72,
-     "wet": 0.76,
-     "age": 26
     }
    ]
   }
