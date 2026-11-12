@@ -128,6 +128,7 @@ func open(sim_) -> void:
 
 func _build_shell() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_to_group("modal")
 	var bg = ColorRect.new()
 	bg.color = K.BG
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

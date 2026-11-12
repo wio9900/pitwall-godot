@@ -22,6 +22,7 @@ func open() -> void:
 		return
 	var vp_size: Vector2 = get_viewport_rect().size
 	_ov = Control.new()
+	_ov.add_to_group("modal")
 	_ov.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_ov.mouse_filter = Control.MOUSE_FILTER_STOP
 	var dim = ColorRect.new()

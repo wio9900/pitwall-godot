@@ -23,6 +23,7 @@ const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같�
 
 var sim: Variant = null
 var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
+var speed_hint := 4.0        # 화면 배속 (빠를수록 위치 보정을 빠르게 → 끊김 방지)
 var sel_slot := 0            # 강조 링을 굵게 그릴 내 차
 var lights := -1             # 출발 신호: -1 숨김, 0~5 점등 개수
 var lights_out_t := -10.0    # 소등 시각(실시간) — GO! 표시용
@@ -158,12 +159,15 @@ func _update_cars(delta: float) -> void:
 			dist = minf(dist, last_d - gap_d)
 		last_by_cls[c.cls] = dist
 		targets[c.id] = [T.point_at_dist(dist), T.head_at_dist(dist)]
-	var kp = clampf(delta * 18.0, 0.0, 1.0)
-	var ka = clampf(delta * 14.0, 0.0, 1.0)
+	# 배속이 빠르면 차가 한 프레임에 많이 움직이므로 보정을 빠르게, 순간이동 판정 거리도 넓게
+	var sp: float = maxf(1.0, speed_hint)
+	var kp = clampf(delta * 18.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
+	var ka = clampf(delta * 14.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
+	var snap_d: float = 40.0 * maxf(1.0, sp / 2.0)
 	for id in targets:
 		var tp: Vector2 = targets[id][0]
 		var ta: float = targets[id][1]
-		if not _smooth.has(id) or (_smooth[id]["p"] - tp).length() > 40.0:
+		if not _smooth.has(id) or (_smooth[id]["p"] - tp).length() > snap_d:
 			_smooth[id] = {"p": tp, "a": ta}
 		else:
 			var s: Dictionary = _smooth[id]

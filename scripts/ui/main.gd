@@ -104,6 +104,8 @@ var mute_btn: Button
 # 반응형 배치: 가로 화면(PC·가로 폰) / 세로 화면(세로 폰)
 var hud_top: Control
 var panels_box: Control
+var race_scroll: ScrollContainer   # 지시판 + 순위·무전 (화면이 작으면 끌어서 스크롤)
+var race_lower: VBoxContainer
 var tabs: TabContainer
 var port_box: VBoxContainer
 var land_box: HBoxContainer
@@ -182,23 +184,24 @@ func _move(node: Control, parent: Control) -> void:
 
 
 func _apply_layout() -> void:
+	# 지시판과 순위·무전은 항상 스크롤 영역 안 (화면이 작아도 끌어서 다 볼 수 있게)
+	_move(panels_box, race_lower)
+	_move(tabs, race_lower)
 	if landscape == 1:
 		# 왼쪽: 상단 바 + 큰 트랙 / 오른쪽: 내 차 지시 + 순위·무전
 		_move(hud_top, land_left)
 		_move(race_view, land_left)
-		_move(panels_box, land_right)
-		_move(tabs, land_right)
+		_move(race_scroll, land_right)
 		race_view.custom_minimum_size = Vector2(0, 0)
-		tabs.custom_minimum_size = Vector2(0, 160)
+		tabs.custom_minimum_size = Vector2(0, 330)
 		land_box.visible = true
 		port_box.visible = false
 	else:
 		_move(hud_top, port_box)
 		_move(race_view, port_box)
-		_move(panels_box, port_box)
-		_move(tabs, port_box)
+		_move(race_scroll, port_box)
 		race_view.custom_minimum_size = Vector2(0, 520)
-		tabs.custom_minimum_size = Vector2(0, 240)
+		tabs.custom_minimum_size = Vector2(0, 520)
 		land_box.visible = false
 		port_box.visible = true
 
@@ -1013,6 +1016,15 @@ func _build_race_ui() -> void:
 	race_panel.select_car.connect(_on_select_car)
 	race_panel.radio_prompt.connect(_on_radio_prompt)
 	panels_box = race_panel
+	race_scroll = ScrollContainer.new()
+	race_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	race_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	race_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	KitS.drag_scroll(race_scroll)
+	race_lower = VBoxContainer.new()
+	race_lower.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	race_lower.add_theme_constant_override("separation", 8)
+	race_scroll.add_child(race_lower)
 	# 순위 / 무전
 	tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1048,6 +1060,8 @@ func _press_only(btns: Array, idx: int) -> void:
 
 func _set_speed(s: int) -> void:
 	speed_x = s
+	if race_view != null:
+		race_view.speed_hint = float(s)
 	_press_only(speed_btns, SPEEDS.find(s))
 
 
@@ -1363,6 +1377,7 @@ func _build_result() -> void:
 	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	dim.add_child(cc)
 	result_box = dim
+	dim.add_to_group("modal")
 	var pc = PanelContainer.new()
 	pc.custom_minimum_size = Vector2(660, 680)
 	result_panel = pc
