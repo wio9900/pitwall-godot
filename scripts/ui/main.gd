@@ -1180,7 +1180,9 @@ func _build_race_ui() -> void:
 		sp.add_child(b)
 		cam_btns.append(b)
 	sp.add_child(VSeparator.new())
-	mute_btn = _btn("소리 켜짐", 16)
+	mute_btn = _btn("🔊", 16)
+	mute_btn.tooltip_text = "소리 켜기·끄기"
+	mute_btn.custom_minimum_size = Vector2(44, 0)
 	mute_btn.toggle_mode = true
 	mute_btn.pressed.connect(_on_mute)
 	sp.add_child(mute_btn)
@@ -1439,7 +1441,7 @@ func _update_start(delta: float) -> void:
 
 func _on_mute() -> void:
 	sfx.muted = mute_btn.button_pressed
-	mute_btn.text = "소리 꺼짐" if sfx.muted else "소리 켜짐"
+	mute_btn.text = "🔇" if sfx.muted else "🔊"
 
 
 func _tyre_bb(comp: String) -> String:
