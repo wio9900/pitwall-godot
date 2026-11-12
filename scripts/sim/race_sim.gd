@@ -72,6 +72,8 @@ var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
 var sc_dist := -1.0
+var sc_wait := false       # SC가 피트 출구에서 나와 선두를 기다리는 중
+var yellow := {}           # 국지 옐로: 섹터 번호 → 해제 시각(clock)
 var sc_in_notified := false
 var sc_in_pit_lane := false
 var sc_pit_prog := 0.0
@@ -174,6 +176,8 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	sc_kind = ""
 	sc_end_lap = 0
 	sc_dist = -1.0
+	sc_wait = false
+	yellow = {}
 	sc_in_notified = false
 	sc_in_pit_lane = false
 	sc_pit_prog = 0.0
@@ -521,8 +525,11 @@ func drs_on() -> bool:
 	return not is_wec() and leader_lap >= 2 and not sc and wet < 0.25
 
 
+var _force_green := false  # 복기용: SC가 아니었다면의 피트 손실 계산
+
+
 func sc_mult() -> float:
-	if not sc:
+	if not sc or _force_green:
 		return 1.0
 	return 0.72 if sc_kind == "SC" else 0.80
 
@@ -545,7 +552,7 @@ func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true) -> float:
 	var drv_work: float = WPIT["driver"] if driver else 0.0
 	var work: float = (fuel_work + tyre_work + drv_work) * maxf(0.32, pit_scale())
 	var scf := 1.0
-	if sc:
+	if sc and not _force_green:
 		scf = 0.62 if sc_kind == "SC" else 0.78
 	return (lane_loss + work) * scf
 
@@ -582,6 +589,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	t += (setup_pen(c, w) + float(PRESS[c.press][0]) + press_straight(c.press)) * sh
 	var sx: Dictionary = setup_extra(c)
 	t += float(sx["dt"]) * sh
+	if is_yellow(c.sec):
+		t += 0.45 * sh * ws # 옐로 구간 감속
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
 	if not is_wec():
@@ -649,6 +658,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var crash = ""
 	if rnd() < p_err:
 		t += uni(1.0, 4.0) + w * 3.0
+		if not sc and rnd() < 0.35:
+			flag_yellow(c.sec, float(CIRC["base"]) * 0.25, "%s 코스 이탈" % name_of(c))
 		if c.mine:
 			say(c, "타이어가 차가워서 미끄러졌어요" if cold > 0.05 else "실수! 코너에서 밀렸어요")
 		if w > 0.2 and rnd() < 0.25 * w:
@@ -734,13 +745,19 @@ func retire(c, why: String) -> void:
 	if c.mine:
 		say(c, "%s 발생으로 리타이어합니다." % why)
 	if not sc and leader_lap < laps - 1:
+		# 멈춘 차가 위험한 곳에 있을 때만 SC·VSC. 대부분은 그 섹터 국지 옐로로 처리 (원작보다 SC 빈도를 낮춤)
 		var r = rnd()
-		var p_sc = 0.10 if why == "고장" else (0.75 if why == "스핀" else 0.60)
-		var p_v = 0.35 if why == "고장" else (0.15 if why == "스핀" else 0.25)
+		var p_sc = 0.06 if why == "고장" else (0.40 if why == "스핀" else 0.32)
+		var p_v = 0.22 if why == "고장" else (0.15 if why == "스핀" else 0.22)
+		if is_wec():
+			p_sc *= 0.45 # 긴 서킷 + 많은 차: 대부분 슬로우 존·옐로로
+			p_v *= 0.6
 		if r < p_sc:
 			deploy("SC")
 		elif r < p_sc + p_v:
 			deploy("FCY" if is_wec() else "VSC")
+		else:
+			flag_yellow(c.sec, float(CIRC["base"]) * 0.9, "%s 정지 차량" % name_of(c))
 
 
 ## WEC: 수리 가능한 손상 (60% 개러지 수리, 40% 리타이어)
@@ -755,10 +772,34 @@ func damage(c, why: String) -> void:
 		if c.boxing == null:
 			c.boxing = {"comp": c.comp, "tyres": false, "driver": false, "fuel": false, "forced": true}
 			c.pit_total = WPIT["lane"] * pit_scale()
-		if not sc and rnd() < 0.08:
+		if not sc and rnd() < 0.04:
 			deploy("FCY")
+		elif not sc:
+			flag_yellow(c.sec, float(CIRC["base"]) * 0.5, "%s 접촉" % name_of(c))
 	else:
 		retire(c, why)
+
+
+## 국지 옐로 플래그: 그 섹터는 추월 금지·감속
+func flag_yellow(sec: int, dur: float, why: String) -> void:
+	if sc or is_wec() and dur < 1.0:
+		return
+	var was: bool = is_yellow(sec)
+	yellow[sec] = maxf(float(yellow.get(sec, 0.0)), clock + dur)
+	if not was:
+		event("🟨 S%d 옐로 플래그 (%s) · 추월 금지" % [sec + 1, why], "yellow")
+
+
+func is_yellow(sec: int) -> bool:
+	return yellow.has(sec) and float(yellow[sec]) > clock
+
+
+func yellow_secs() -> Array:
+	var out: Array = []
+	for k in yellow:
+		if float(yellow[k]) > clock:
+			out.append(int(k))
+	return out
 
 
 func deploy(kind: String) -> void:
@@ -766,6 +807,7 @@ func deploy(kind: String) -> void:
 		return
 	sc = true
 	sc_kind = kind
+	yellow = {}
 	sc_in_notified = false
 	sc_in_pit_lane = false
 	sc_pit_prog = 0.0
@@ -774,8 +816,16 @@ func deploy(kind: String) -> void:
 		n = maxi(2, int(round(laps * uni(0.08, 0.14)))) if kind == "SC" else 1
 	sc_end_lap = leader_lap + n
 	if kind == "SC":
+		# 세이프티카는 피트 출구에서 나와 선두가 올 때까지 천천히 달리며 기다린다 (순간이동 없음)
 		var lead: Variant = leader_car()
-		sc_dist = (car_dist(lead) + T.L * 0.035) if lead != null else 0.0
+		var ld: float = car_dist(lead) if lead != null else 0.0
+		var exit_d: float = float(T.cum[T.pit_out])
+		var base_lap: float = floor(ld / T.L) * T.L
+		var pe: float = base_lap + exit_d
+		if pe < ld + T.L * 0.02:
+			pe += T.L
+		sc_dist = pe
+		sc_wait = true
 		event("세이프티카 출동! 대열이 압축됩니다 (%d랩 종료 예정)" % sc_end_lap, "sc")
 	else:
 		event("%s 발령! 간격 유지, 피트 손실 감소" % ("풀 코스 옐로" if kind == "FCY" else "버추얼 세이프티카"), "sc")
@@ -1185,6 +1235,16 @@ func _crew_error(c) -> float:
 
 ## 바로 앞 차 (같은 클래스): 방금 지난 경계를 나보다 먼저, 가장 늦게 지난 차
 ## (order() 는 경계를 막 지난 순간 정렬이 어긋나서 쓰지 않는다)
+## 스틴트별 타이어 목록 (출발 타이어 + 타이어를 간 피트마다)
+func tyre_seq(c) -> Array:
+	var first: String = c.lap_times[0]["comp"] if not c.lap_times.is_empty() else c.comp
+	var out: Array = [first]
+	for pl in c.pit_log:
+		if pl.get("tyres", pl["to"] != pl["from"]):
+			out.append(pl["to"])
+	return out
+
+
 func _front_same_class(c) -> Variant:
 	var k: int = c.cross.size() - 1
 	if k < 0:
@@ -1242,6 +1302,15 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	var tyres: bool = tyre_due or wrong
 	var driver: bool = c.stint_drv + 1 >= c.driver_every
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
+	if want == "slick" and tyres:
+		# 컴파운드 선택: 마지막 한 스틴트·서늘한 밤·공격형 팀은 소프트, 남은 게 길고 아끼는 팀은 하드
+		var one_stint: bool = left <= STINT + 1 or c.tyre_every <= 1
+		if one_stint and (left <= STINT + 1 or night or c.wec_style == "push") and rnd() < (0.75 if left <= STINT + 1 else 0.45):
+			comp = "S"
+		elif c.wec_style == "save" and left > STINT * 2 and rnd() < 0.5:
+			comp = "H"
+		elif comp == "S" and not one_stint:
+			comp = "M"
 	if not tyres:
 		comp = c.comp
 	c.crew_out = true
@@ -1428,7 +1497,16 @@ func apply_pit(c) -> void:
 					break
 			if busy and rnd() < 0.02 * (1.25 - c.crew):
 				add_penalty(c, 5.0, "언세이프 릴리스")
-		c.pit_log.append({"lap": c.lap + 1, "pos": class_pos(c), "from": c.comp, "to": c.boxing["comp"] if c.boxing["tyres"] else c.comp, "sc": sc_kind if sc else ""})
+		var pr: Variant = predict_pit(c)
+		var pr_green: int = int(pr["pos"]) if pr != null else class_pos(c)
+		if sc and pr != null:
+			_force_green = true
+			var pg: Variant = predict_pit(c)
+			_force_green = false
+			if pg != null:
+				pr_green = int(pg["pos"])
+		c.pit_log.append({"lap": c.lap + 1, "pos": class_pos(c), "from": c.comp, "to": c.boxing["comp"] if c.boxing["tyres"] else c.comp, "tyres": bool(c.boxing["tyres"]), "sc": sc_kind if sc else "",
+			"pred": int(pr["pos"]) if pr != null else class_pos(c), "pred_green": pr_green})
 	c.covering = false
 	c.stint_start_lap = c.lap + 1
 	c.stint_start_wear = 0.0
@@ -1535,7 +1613,8 @@ func schedule_next(c, t: float) -> void:
 					car_in_front = o
 		if sc_kind == "SC":
 			var lead_pace = float(CIRC["base"]) * sh * 1.58
-			var catchup = float(CIRC["base"]) * sh * (1.15 if c.cls == "GT" else 1.08)
+			# SC 중엔 모든 클래스가 감속 구간 속도 이하로만 대열을 따라잡는다 (GT3 포함)
+			var catchup = float(CIRC["base"]) * float(CLASS_PACE.get(c.cls, 1.0)) * sh * 1.22
 			if car_in_front == null:
 				dur = lead_pace
 			else:
@@ -1591,7 +1670,7 @@ func schedule_next(c, t: float) -> void:
 				say(c, "%s이(가) 길을 비켜줬어요" % ahead.code)
 				say(ahead, "팀 오더 확인, %s에게 양보했어요" % c.code)
 				event("팀 오더: %s → %s 순서 교체" % [ahead.code, c.code])
-			elif c.instr == "hold" or hold_mate:
+			elif c.instr == "hold" or hold_mate or is_yellow(c.sec):
 				dur = maxf(dur, (ahead.sec_end - t) + (0.5 if hold_mate else 1.0))
 			elif gap - diff < K["ot_gap"] and diff > 0:
 				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
@@ -1798,10 +1877,17 @@ func advance(dt: float) -> void:
 		var v_sc: float = T.L / (float(CIRC["base"]) * 1.56)
 		if lead != null:
 			var target_d: float = car_dist(lead) + T.L * 0.022
-			if sc_dist < target_d:
-				sc_dist = target_d
-			else:
-				sc_dist = maxf(target_d, sc_dist + dt * v_sc * 0.85 + (target_d - sc_dist) * minf(1.0, dt * 3.5))
+			if sc_wait:
+				# 피트 출구에서 나와 느리게 달리며 선두를 기다림
+				if sc_dist - target_d <= T.L * 0.004:
+					sc_wait = false
+				else:
+					sc_dist += dt * v_sc * 0.45
+			if not sc_wait:
+				if sc_dist < target_d:
+					sc_dist = minf(target_d, sc_dist + dt * v_sc * 1.6)
+				else:
+					sc_dist = maxf(target_d, sc_dist + dt * v_sc * 0.85 + (target_d - sc_dist) * minf(1.0, dt * 3.5))
 			if sc_in_notified and lead.sec == NS - 1:
 				var lf = car_frac(lead)
 				if lf >= T.entry_frac * 0.75:

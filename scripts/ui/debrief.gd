@@ -151,6 +151,10 @@ func _on_close() -> void:
 	closed.emit()
 
 
+func _sc_lap(l: int) -> bool:
+	return sim.sc_laps.has(l) or sim.sc_laps.has(l - 1)
+
+
 func _txt(parent: Control, bb: String, fs := 14) -> RichTextLabel:
 	var r = K.rtl(fs)
 	r.text = bb
@@ -211,32 +215,41 @@ func _car_report(c, ord: Array) -> void:
 			cur = []
 	if not cur.is_empty():
 		stints.append(cur)
-	var t := "[b]스틴트[/b]\n"
+	var t := "[b]스틴트[/b] [color=#8b98a5](SC·피트·수리 랩은 빼고 계산)[/color]\n"
 	for si in stints.size():
 		var st: Array = stints[si]
-		var tot := 0.0
-		var n := 0
-		var best := INF
+		# 깨끗한 랩만: 피트 랩·첫 랩·SC 랩·수리처럼 느린 랩(개인 최고 +15% 넘음) 제외
+		var clean: Array = []
 		var cliff := false
 		for r in st:
-			if not r["pit"] and int(r["lap"]) > 1:
-				tot += float(r["t"])
-				n += 1
-				best = minf(best, float(r["t"]))
 			if r.get("cliff", false):
 				cliff = true
+			var lt: float = float(r["t"])
+			if r["pit"] or int(r["lap"]) <= 1 or _sc_lap(int(r["lap"])):
+				continue
+			if c.best < INF and lt > c.best * 1.15:
+				continue
+			clean.append(lt)
 		var comp: String = st[0]["comp"]
-		var first_t: float = INF
-		var last_t: float = INF
-		for r in st:
-			if not r["pit"] and int(r["lap"]) > 1:
-				if first_t == INF:
-					first_t = float(r["t"])
-				last_t = float(r["t"])
-		var deg: String = "" if first_t == INF or n < 3 else " · 첫 랩 대비 마지막 랩 [b]%+.2f초[/b]" % (last_t - first_t)
-		t += "S%d [color=%s]%s[/color] %d랩 · 평균 %s · 최고 %s%s%s\n" % [si + 1, RS.TYRE_HEX[comp], RS.TYRE_KO[comp], st.size(), K.fmt_lap(tot / n) if n > 0 else "-", K.fmt_lap(best) if best < INF else "-", deg, " [color=#ef4444][절벽 구간!][/color]" if cliff else ""]
-	# 피트 평가 (HTML 방식: 2랩 뒤 순위 변화로 언더컷/오버컷 판정)
-	t += "[b]피트 결정 평가[/b]\n"
+		var avg_s := "-"
+		var best_s := "-"
+		var deg := ""
+		if not clean.is_empty():
+			var tot := 0.0
+			var best := INF
+			for lt in clean:
+				tot += lt
+				best = minf(best, lt)
+			avg_s = K.fmt_lap(tot / clean.size())
+			best_s = K.fmt_lap(best)
+			if clean.size() >= 3:
+				# 앞 2랩 평균 대비 뒤 2랩 평균 = 타이어가 닳으며 느려진 정도
+				var a0: float = (float(clean[0]) + float(clean[1])) / 2.0
+				var a1: float = (float(clean[-1]) + float(clean[-2])) / 2.0
+				deg = " · 스틴트 동안 [b]%+.2f초[/b] 느려짐" % (a1 - a0) if a1 >= a0 else " · 스틴트 동안 [b]%.2f초[/b] 빨라짐 (연료가 줄어서)" % (a0 - a1)
+		t += "S%d [color=%s]%s[/color] %d랩 · 평균 %s · 최고 %s%s%s\n" % [si + 1, RS.TYRE_HEX[comp], RS.TYRE_KO[comp], st.size(), avg_s, best_s, deg, " [color=#ef4444][절벽 구간!][/color]" if cliff else ""]
+	# 피트 평가: 피트 들어갈 때 예상한 복귀 순위 vs 2랩 뒤 실제 순위
+	t += "[b]피트 결정 평가[/b] [color=#8b98a5](들어갈 때 예상한 복귀 순위와 2랩 뒤 실제 순위 비교)[/color]\n"
 	if c.pit_log.is_empty():
 		t += "[color=#8b98a5]• 피트 없음 (원스틴트 주행)[/color]\n"
 	for ev in c.pit_log:
@@ -244,18 +257,24 @@ func _car_report(c, ord: Array) -> void:
 		for ph in c.pos_hist:
 			if int(ph["lap"]) <= int(ev["lap"]) + 2:
 				after = int(ph["pos"])
-		var diff: int = int(ev["pos"]) - after
-		var gain: float = diff * 1.45 + (8.5 if String(ev["sc"]) != "" else 0.0)
+		var pred: int = int(ev.get("pred", ev["pos"]))
+		var better: int = pred - after
 		var tag := ""
-		if String(ev["sc"]) != "":
-			tag = "[color=#22c55e]%s 피트 이득[/color]" % ev["sc"]
-		elif diff > 0:
-			tag = "[color=#22c55e]언더컷·트랙 포지션 성공 (+%d위)[/color]" % diff
-		elif diff < 0:
-			tag = "[color=#f59e0b]트래픽·오버컷 손실 (%d위)[/color]" % diff
+		if better >= 1:
+			tag = "[color=#22c55e]예상보다 %d계단 앞 (언더컷·페이스 성공)[/color]" % better
+		elif better <= -1:
+			tag = "[color=#f59e0b]예상보다 %d계단 뒤 (트래픽·오버컷 당함)[/color]" % -better
 		else:
-			tag = "포지션 유지"
-		t += "• L%d 피트 (%s→%s): %s (%+.1f초 효과)\n" % [int(ev["lap"]), ev["from"], ev["to"], tag, gain]
+			tag = "예상대로"
+		var sc_note := ""
+		if String(ev["sc"]) != "":
+			var pg: int = int(ev.get("pred_green", pred))
+			if pg > pred:
+				sc_note = " · [color=#22c55e]%s 덕분에 평소(P%d)보다 %d계단 덜 잃음[/color]" % [ev["sc"], pg, pg - pred]
+			else:
+				sc_note = " · %s 중 피트" % ev["sc"]
+		var tyre_txt: String = ("%s→%s" % [ev["from"], ev["to"]]) if ev.get("tyres", true) else "타이어 유지"
+		t += "• L%d 피트 (%s): P%d에서 들어가 예상 복귀 P%d → 2랩 뒤 P%d · %s%s\n" % [int(ev["lap"]), tyre_txt, int(ev["pos"]), pred, after, tag, sc_note]
 	var pen := ""
 	if c.penalty > 0.0:
 		pen = "\n[color=#ef4444]페널티 +%.0f초[/color]" % c.penalty

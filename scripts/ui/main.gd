@@ -1161,7 +1161,20 @@ func _on_gap_mode() -> void:
 
 
 # ═════════ 진행 ═════════
+## 성능·배터리: 레이스 화면만 60fps, 나머지는 30fps. 배터리 절약이면 30/20fps + 안티에일리어싱 끔
+func _apply_power() -> void:
+	var saver: bool = bool(ST.get_v("battery"))
+	var racing: bool = sim != null and race_box.visible
+	var want: int = (30 if saver else 60) if racing else (20 if saver else 30)
+	if Engine.max_fps != want:
+		Engine.max_fps = want
+	var aa: int = Viewport.MSAA_DISABLED if saver else Viewport.MSAA_2X
+	if get_viewport().msaa_2d != aa:
+		get_viewport().msaa_2d = aa
+
+
 func _process(delta: float) -> void:
+	_apply_power()
 	if sim == null or not race_box.visible:
 		if sfx != null:
 			sfx.set_engine(0.0)
@@ -1230,6 +1243,11 @@ func _refresh_ui() -> void:
 		chips += _chip("🏁 체커기", "#e6edf3") + " "
 	else:
 		chips += _chip("GREEN", "#22c55e") + " "
+	if not sim.sc and not sim.yellow_secs().is_empty():
+		var ys: PackedStringArray = []
+		for yv in sim.yellow_secs():
+			ys.append("S%d" % (int(yv) + 1))
+		chips += _chip("🟨 옐로 " + ",".join(ys), "#eab308") + " "
 	if sim.drs_on() and not sim.sc:
 		chips += _chip("DRS", "#0b0f14", "#22c55e") + " "
 	if sim.wet >= 0.22:
@@ -1254,8 +1272,11 @@ func _refresh_ui() -> void:
 		sim.CIRC["name"], sim.surface_ko(), sim.forecast_prob_at(lap_now), sim.wet_mm(sim.wet), int(round(sim.track_evo * 100)), evo_sec, fc_txt]
 	race_panel.refresh()
 	rival.refresh()
-	_refresh_tower(ord, leader)
-	_refresh_radio()
+	# 성능: 안 보이는 탭은 건너뛰고, 내용이 같으면 다시 그리지 않는다
+	if tower.is_visible_in_tree():
+		_refresh_tower(ord, leader)
+	if radio.is_visible_in_tree():
+		_refresh_radio()
 
 
 func _wec_gaps(c) -> String:
@@ -1312,7 +1333,8 @@ func _refresh_tower(ord: Array, leader) -> void:
 		s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			pos, c.id, _hex(c.color), name_col, c.code, c.team, gap, tyre, c.pits]
 	s += "[/table]"
-	tower.text = s
+	if tower.text != s:
+		tower.text = s
 
 
 func _short_team(n: String) -> String:
@@ -1345,7 +1367,8 @@ func _refresh_tower_wec(ord: Array) -> void:
 			var nm: String = _short_team(c.team) + (" #%d" % (c.slot + 1))
 			s += "[cell]%d  [/cell][cell][url=%d][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color][/url]  [/cell][cell]%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [pos, c.id, _hex(c.color), name_col, nm, c.code, gap, tyre, c.pits]
 	s += "[/table]"
-	tower.text = s
+	if tower.text != s:
+		tower.text = s
 
 
 func _refresh_radio() -> void:
@@ -1363,8 +1386,11 @@ func _refresh_radio() -> void:
 			msg_col = "#fcd34d"
 		elif e["kind"] == "wet":
 			msg_col = "#93c5fd"
+		elif e["kind"] == "yellow":
+			msg_col = "#fde047"
 		s += "[color=#8b98a5]%s[/color] [color=%s][b]%s[/b][/color] [color=%s]%s[/color]\n" % [e["lap"], _hex(col), e["who"], msg_col, e["msg"]]
-	radio.text = s
+	if radio.text != s:
+		radio.text = s
 
 
 # ═════════ 결과 ═════════
@@ -1453,17 +1479,18 @@ func _show_result() -> void:
 			s += "[cell][color=#ffc53d][b]%s[/b][/color][/cell][cell][/cell][cell][/cell][cell][/cell][cell][/cell]" % ("HYPERCAR" if c.cls == "HY" else "LMGT3")
 		var name_col = "#ffc53d" if c.mine else "#e6edf3"
 		var strat = ""
-		var hist: Array = c.lap_hist.duplicate()
-		hist.reverse()
-		# 실제 사용한 타이어 순서를 랩 기록에서 복원
-		var seq = []
-		var last = ""
-		for hrec in hist:
-			if hrec["comp"] != last:
-				seq.append(hrec["comp"])
-				last = hrec["comp"]
-		for i in seq.size():
-			strat += _tyre_bb(seq[i]) + (" " if i < seq.size() - 1 else "")
+		# 스틴트별 타이어 (같은 컴파운드로 갈아 끼운 것도 따로 센다): M×3 → H×2
+		var seq: Array = sim.tyre_seq(c)
+		var runs: Array = []
+		for comp in seq:
+			if not runs.is_empty() and runs[-1][0] == comp:
+				runs[-1][1] += 1
+			else:
+				runs.append([comp, 1])
+		var parts: PackedStringArray = []
+		for ru in runs:
+			parts.append(_tyre_bb(ru[0]) + ("[color=#8b98a5]×%d[/color]" % ru[1] if ru[1] > 1 else ""))
+		strat = " ".join(parts)
 		var pen = (" [color=#ef4444]+%ds[/color]" % int(c.penalty)) if c.penalty > 0 else ""
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			r["pos"], _hex(c.color), name_col, (_short_team(c.team) + " #%d" % (c.slot + 1)) if sim.is_wec() else c.code, c.code if sim.is_wec() else c.team, r["gap"], pen, strat, r["points"]]

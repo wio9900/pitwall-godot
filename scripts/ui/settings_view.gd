@@ -65,6 +65,8 @@ func _render() -> void:
 	_box.add_child(K.label("엔지니어 제안 창 (SC 피트 찬스·타이어 한계 등)", 15, K.DIM))
 	K.seg(_box, [["on", "보이기"], ["off", "끄기 (무전으로만)"]], "on" if ST.get_v("prompts") else "off", _on_prompts, 15)
 	K.seg(_box, [["on", "제안이 뜨면 1×로 감속"], ["off", "배속 유지"]], "on" if ST.get_v("prompt_slow") else "off", _on_slow, 15)
+	_box.add_child(K.label("배터리 절약 (화면 30fps · 계단 현상 보정 끔)", 15, K.DIM))
+	K.seg(_box, [["off", "끔 (부드럽게)"], ["on", "켬 (오래가게)"]], "on" if ST.get_v("battery") else "off", _on_battery, 15)
 	_box.add_child(K.label("글씨·버튼 크기", 15, K.DIM))
 	K.seg(_box, [["0.9", "작게"], ["1.0", "보통"], ["1.1", "크게"], ["1.2", "아주 크게"]], "%.1f" % float(ST.get_v("ui_scale")), _on_scale, 15)
 	var close = K.btn("닫기", 18, _on_close)
@@ -93,6 +95,10 @@ func _on_prompts(v) -> void:
 
 func _on_slow(v) -> void:
 	ST.set_v("prompt_slow", v == "on")
+
+
+func _on_battery(v) -> void:
+	ST.set_v("battery", v == "on")
 
 
 func _on_scale(v) -> void:
