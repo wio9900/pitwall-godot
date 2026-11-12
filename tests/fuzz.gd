@@ -54,7 +54,8 @@ func _live_quali(wk, tag: String) -> void:
 		wk.q_advance(rng.randf_range(0.05, 0.6))
 	if not wk.done_quali:
 		_bad("%s 예선이 끝나지 않음 (stage %d, t %.1f, run %d)" % [tag, int(wk.Q["stage"]), float(wk.Q["t"]), wk.Q["run"].size()])
-	_stat("레드 플래그", 1 if wk.Q.get("red_done", false) else 0)
+	_stat("레드 플래그", int(wk.Q.get("reds", 0)))
+	_stat("예선 세션", int(wk.Q["max_stage"]))
 	_check_sets(wk, tag)
 	# 그리드: 모든 차가 고유한 자리
 	var seen := {}

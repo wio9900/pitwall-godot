@@ -92,6 +92,7 @@ var n_stalls := 11
 var radio_log: Array = [] # {lap, who, color, msg, kind}
 var team_order := "free"   # 팀 오더: free 자유 경쟁 / hold 순서 유지
 var swap_req := false      # 팀 오더: 다음 기회에 앞 팀메이트가 양보
+var team_swap_lap := {}    # AI 팀 오더를 마지막으로 낸 랩 (팀별) — 같은 두 대가 순서를 주고받지 않게
 var active_radio: Variant = null  # 엔지니어 제안 {slot, title, msg, opts:[{label, act, comp}]}
 var radio_seq := 0         # 새 제안이 뜰 때마다 +1 (UI가 감속·표시에 사용)
 var sc_laps: Array = []    # SC·VSC·FCY 가 걸린 선두 랩 (복기 차트용)
@@ -1880,9 +1881,13 @@ func schedule_next(c, t: float) -> void:
 			var diff: float = ahead_dur - dur
 			var mate: bool = ahead.team == c.team and ahead.cls == c.cls
 			var hold_mate: bool = mate and c.mine and team_order == "hold"
-			var ai_swap: bool = mate and not c.mine and not ahead.mine and gap != null and gap < 1.2 and diff > 0.25 and c.strat_style != "aggressive" and laps - c.lap > 2 and rnd() < 0.35 * c.strategy
+			# AI 팀 오더: 한 섹터가 아니라 직전 랩이 확실히 빨라야, 3랩 이후, 팀당 6랩에 한 번
+			var ai_swap: bool = mate and not c.mine and not ahead.mine and gap != null and gap < 1.2 and diff > 0.25 and c.strat_style != "aggressive" and laps - c.lap > 2 \
+				and c.lap >= 3 and c.last_lap_t > 0.0 and ahead.last_lap_t > 0.0 and c.last_lap_t < ahead.last_lap_t - 0.3 * wsc() \
+				and c.lap - int(team_swap_lap.get(c.team, -99)) >= 6 and rnd() < 0.35 * c.strategy
 			if ai_swap:
 				_tally("팀오더")
+				team_swap_lap[c.team] = c.lap
 				dur = maxf(0.4, ahead.sec_end - t - 0.1)
 				ahead.sec_end += 0.6
 				event("팀 오더: %s → %s 순서 교체" % [ahead.code if not is_wec() else ahead.label, c.code if not is_wec() else c.label])

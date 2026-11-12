@@ -281,6 +281,7 @@ func _run_practice(kind: String) -> void:
 		return
 	var r: Dictionary = wk.practice_run(sel, kind, p_comp)
 	if r.is_empty():
+		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s 타이어가 남아 있지 않아요" % RS.TYRE_KO[p_comp])
 		return
 	anim = {"kind": "practice", "t": 0.0, "dur": 3.5 if kind == "long" else 2.4, "car": _my(sel), "laps": 3 if kind == "long" else 2}
 	refresh()

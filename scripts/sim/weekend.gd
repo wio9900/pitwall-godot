@@ -276,7 +276,7 @@ func auto_practice() -> void:
 
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
 func start_quali() -> void:
-	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "done": false, "auto": false, "ver": 0}
+	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "done": false, "auto": false, "ver": 0, "reds": 0}
 	_q_soft_used.clear()
 	for c in my_cars():
 		c.q3_locked = false
@@ -582,6 +582,7 @@ func _fmt(t: float) -> String:
 func _red_flag() -> void:
 	Q["red_done"] = true
 	Q["red_left"] = RED_MIN
+	Q["reds"] = int(Q.get("reds", 0)) + 1
 	var on: Array = Q["run"].keys()
 	var cause = _car(on[sim.rng.randi_range(0, on.size() - 1)])
 	_log("🟥 레드 플래그! %s 사고 · 어택 중이던 랩 무효" % cause.code)
