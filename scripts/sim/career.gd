@@ -1803,7 +1803,8 @@ func _season_end(notes: Array) -> void:
 	_cost_cap_audit(notes)
 	var ls: Dictionary = hq["last_season"]
 	hq["season_log"].append({"season": hq["season"], "rank": rank, "cash": hq["cash"], "spent": hq["spent_cap"], "cap": hq["cost_cap_limit"], "tier": tier(),
-		"pts": ls["pts"], "champ": ls["champ"], "drv_champ": ls["drv_champ"], "wins": int(ls["stats"].get("wins", 0)), "podiums": int(ls["stats"].get("podiums", 0))})
+		"pts": ls["pts"], "champ": ls["champ"], "drv_champ": ls["drv_champ"], "wins": int(ls["stats"].get("wins", 0)), "podiums": int(ls["stats"].get("podiums", 0)),
+		"tier_name": ls.get("tier_name", ""), "series": ls.get("series", ""), "my_drv": int(ls.get("my_drv", 0)), "team": hq.get("team_name", "")})
 	if hq["season_log"].size() > 12:
 		hq["season_log"].pop_front()
 	if not is_spec_tier():

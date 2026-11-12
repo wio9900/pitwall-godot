@@ -8,6 +8,7 @@ const ST = preload("res://scripts/ui/settings.gd")
 
 var _box: VBoxContainer
 var _panel: PanelContainer
+var _scroll: ScrollContainer
 
 
 func _init() -> void:
@@ -31,12 +32,19 @@ func _init() -> void:
 	sb.set_content_margin_all(16)
 	_panel.add_theme_stylebox_override("panel", sb)
 	cc.add_child(_panel)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_panel.add_child(_scroll)
+	K.drag_scroll(_scroll)
 	_box = K.vbox(10)
-	_panel.add_child(_box)
+	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_box)
 
 
 func open() -> void:
-	_panel.custom_minimum_size = Vector2(minf(620.0, get_viewport_rect().size.x - 32.0), 0)
+	var vs: Vector2 = get_viewport_rect().size
+	_panel.custom_minimum_size = Vector2(minf(620.0, vs.x - 32.0), 0)
+	_scroll.custom_minimum_size = Vector2(0, minf(640.0, vs.y - 70.0))
 	visible = true
 	_render()
 
@@ -67,6 +75,8 @@ func _render() -> void:
 	K.seg(_box, [["on", "제안이 뜨면 1×로 감속"], ["off", "배속 유지"]], "on" if ST.get_v("prompt_slow") else "off", _on_slow, 15)
 	_box.add_child(K.label("배터리 절약 (화면 30fps · 계단 현상 보정 끔)", 15, K.DIM))
 	K.seg(_box, [["off", "끔 (부드럽게)"], ["on", "켬 (오래가게)"]], "on" if ST.get_v("battery") else "off", _on_battery, 15)
+	_box.add_child(K.label("성능 표시 (오른쪽 위 FPS · 처리 시간) — 끊김·발열 확인용", 15, K.DIM))
+	K.seg(_box, [["off", "숨기기"], ["on", "보이기"]], "on" if ST.get_v("show_fps") else "off", _on_fps, 15)
 	_box.add_child(K.label("글씨·버튼 크기", 15, K.DIM))
 	K.seg(_box, [["0.9", "작게"], ["1.0", "보통"], ["1.1", "크게"], ["1.2", "아주 크게"]], "%.1f" % float(ST.get_v("ui_scale")), _on_scale, 15)
 	var close = K.btn("닫기", 18, _on_close)
@@ -95,6 +105,10 @@ func _on_prompts(v) -> void:
 
 func _on_slow(v) -> void:
 	ST.set_v("prompt_slow", v == "on")
+
+
+func _on_fps(v) -> void:
+	ST.set_v("show_fps", v == "on")
 
 
 func _on_battery(v) -> void:

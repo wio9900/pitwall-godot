@@ -4,7 +4,7 @@ extends RefCounted
 const PATH := "user://settings.json"
 const SPEEDS := [1, 2, 4, 8, 16]
 
-static var data := {"volume": 0.8, "engine": true, "speed": 4, "prompts": true, "prompt_slow": true, "ui_scale": 1.0, "battery": false}
+static var data := {"volume": 0.8, "engine": true, "speed": 4, "prompts": true, "prompt_slow": true, "ui_scale": 1.0, "battery": false, "show_fps": false}
 static var _loaded := false
 
 

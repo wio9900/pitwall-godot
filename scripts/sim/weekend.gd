@@ -296,6 +296,8 @@ func _run_ai_stage(st: int) -> void:
 		if r >= 0.6:
 			trf = "early" if sim.rnd() < 0.5 else "late"
 		var ai_comp := "M" if (st == 1 and c.speed > 0.86 and sim.rnd() < 0.5) else "S"
+		if sim.is_wec():
+			ai_comp = "M" if st >= 2 else sim.wec_fit_comp(c.cls, "S")
 		var used_n: int = _q_soft_used.get(c.id, 0)
 		var ai_used: bool = ai_comp == "S" and used_n >= (1 if sim.is_wec() else 2)
 		if ai_comp == "S":
@@ -327,6 +329,8 @@ func my_lap(comp: String, push: String, traffic: String) -> Dictionary:
 	var c: Variant = current_car()
 	if c == null:
 		return {}
+	if sim.is_wec():
+		comp = "M" if Q["stage"] >= 2 else sim.wec_fit_comp(c.cls, comp) # 하이퍼폴은 미디엄만
 	var qs: Dictionary = sets[c.slot]
 	var used_set: bool = not (qs[comp] > 0)
 	if not used_set:
@@ -441,7 +445,7 @@ func finish_quali() -> void:
 		c.grid = i
 		var r: Variant = Q["res"].get(c.id)
 		# 파크 페르메: 최종 세션(Q3) 진출 차는 그 세션 타이어로 출발 (어택 1랩 마모 5%, 헌 세트 14%)
-		if r != null and r["stage"] == Q["max_stage"]:
+		if r != null and r["stage"] == Q["max_stage"] and not sim.is_wec(): # WEC 는 결승을 새 타이어로 출발
 			c.comp = r["q_comp"]
 			c.used = {c.comp: true}
 			c.q3_locked = true
@@ -463,6 +467,8 @@ func set_start_comp(slot: int, comp: String) -> void:
 	var c = my_cars()[slot]
 	if c.q3_locked:
 		return
+	if sim.is_wec():
+		comp = sim.wec_fit_comp(c.cls, comp)
 	c.comp = comp
 	c.used = {comp: true}
 	c.plan = {"start": comp, "stops": []}

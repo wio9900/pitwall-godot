@@ -19,6 +19,9 @@ const DebriefS = preload("res://scripts/ui/debrief.gd")
 const RivalS = preload("res://scripts/ui/rival_card.gd")
 const ST = preload("res://scripts/ui/settings.gd")
 const SettingsViewS = preload("res://scripts/ui/settings_view.gd")
+const RaceSaveS = preload("res://scripts/sim/race_save.gd")
+const RecS = preload("res://scripts/sim/records.gd")
+const RecordsViewS = preload("res://scripts/ui/records_view.gd")
 
 const BG := Color("#0b0f14")
 const PANEL := Color("#141a22")
@@ -84,6 +87,14 @@ var btn_debrief: Button
 var rival
 var settings_view
 var debrief
+var records_view
+var resume_btn: Button
+var _save_lap := -1       # 마지막으로 자동 저장한 선두 랩
+var recorded := false     # 기록실에 이 레이스를 기록했는지
+var fps_label: Label
+var _fps_t := 0.0
+var _sim_us := 0          # 최근 시뮬레이션 계산 시간 합 (성능 표시용)
+var _sim_n := 0
 
 # 레이스
 var race_box: Control
@@ -150,6 +161,17 @@ func _ready() -> void:
 	add_child(season_view)
 	season_view.done.connect(_open_hq)
 	_build_result()
+	fps_label = Label.new()
+	fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fps_label.add_theme_font_size_override("font_size", 13)
+	fps_label.add_theme_color_override("font_color", Color("#22c55e"))
+	fps_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	fps_label.add_theme_constant_override("outline_size", 4)
+	fps_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	fps_label.position = Vector2(-330, 2)
+	fps_label.size = Vector2(320, 20)
+	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	add_child(fps_label)
 	_show_menu()
 	get_viewport().size_changed.connect(_on_resize)
 	_on_resize()
@@ -381,6 +403,17 @@ func _build_menu() -> void:
 	var gear = KitS.btn("⚙", 18, _open_settings)
 	gear.custom_minimum_size = Vector2(36, 32)
 	tools.add_child(gear)
+	var recb = KitS.btn("🏆", 18, _open_records)
+	recb.custom_minimum_size = Vector2(36, 32)
+	recb.tooltip_text = "기록실"
+	tools.add_child(recb)
+	# 진행 중이던 레이스가 저장돼 있으면 이어하기
+	resume_btn = _btn("▶ 이어하기", 20)
+	resume_btn.custom_minimum_size = Vector2(0, 58)
+	_primary(resume_btn)
+	resume_btn.pressed.connect(_resume_race)
+	resume_btn.visible = false
+	v.add_child(resume_btn)
 	# 모드: 큰 카드 버튼 두 개
 	var mrow = KitS.hbox(10)
 	v.add_child(mrow)
@@ -558,6 +591,81 @@ func _update_circ_info() -> void:
 func _show_menu() -> void:
 	_show_only(menu_box)
 	_render_career_menu()
+	_update_resume_btn()
+
+
+func _update_resume_btn() -> void:
+	if resume_btn == null:
+		return
+	var m: Dictionary = RaceSaveS.peek()
+	resume_btn.visible = not m.is_empty()
+	if not m.is_empty():
+		var who: String = ("커리어 슬롯 %d" % int(m.get("slot", 1))) if m.get("mode", "") == "career" else "퀵 레이스"
+		resume_btn.text = "▶ 레이스 이어하기 — %s · %s · L%d/%d" % [m.get("circ", "?"), who, int(m.get("lap", 0)), int(m.get("laps", 0))]
+
+
+func _open_records() -> void:
+	records_view.open()
+
+
+## 레이스 도중 자동 저장 (선두 랩마다 · 앱을 내리거나 끌 때 · 나가기 버튼)
+func _autosave() -> void:
+	if sim == null or starting or sim.done or not race_box.visible:
+		return
+	var meta := {"mode": mode, "sprint": sprint_mode, "slot": career.save_slot if (mode == "career" and career != null) else 0,
+		"speed": speed_x, "circ": sim.CIRC.get("name", sim.circ_key), "lap": mini(sim.laps, sim.leader_lap + 1), "laps": sim.laps}
+	RaceSaveS.save(sim, meta, feature_sim if sprint_mode else null)
+	_save_lap = sim.leader_lap
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_autosave()
+
+
+## 레이스 중 나가기: 저장하고 메뉴(커리어는 본부)로. 메뉴의 "이어하기"로 돌아올 수 있다
+func _exit_race() -> void:
+	_autosave()
+	sim = null
+	if mode == "career" and career != null:
+		_open_hq()
+	else:
+		_show_menu()
+
+
+func _resume_race() -> void:
+	var m: Dictionary = RaceSaveS.peek()
+	if m.is_empty():
+		_update_resume_btn()
+		return
+	if m.get("mode", "") == "career":
+		career = CareerS.new()
+		if not career.load_save(int(m.get("slot", 1))):
+			resume_btn.text = "커리어 저장을 찾을 수 없어 이어할 수 없어요"
+			return
+	var data: Dictionary = RaceSaveS.load_save()
+	if data.is_empty():
+		resume_btn.text = "저장된 레이스를 읽지 못했어요 (버전이 달라요)"
+		return
+	mode = String(m.get("mode", "quick"))
+	sprint_mode = bool(m.get("sprint", false))
+	sim = data["sim"]
+	feature_sim = data["extra"]
+	settled = false
+	recorded = false
+	starting = false
+	race_view.reset()
+	race_view.sim = sim
+	race_view.lights = -1
+	_show_only(race_box)
+	_set_speed(int(m.get("speed", 4)))
+	sim.prompts_enabled = bool(ST.get_v("prompts"))
+	_set_cam(-1)
+	race_panel.reset_for(sim)
+	race_view.sel_slot = 0
+	_save_lap = sim.leader_lap
+	race_view.show_banner("이어하기: L%d부터 다시 달려요" % mini(sim.laps, sim.leader_lap + 1), "green")
+	_refresh_ui()
 
 
 func _show_only(node: Control) -> void:
@@ -920,6 +1028,10 @@ func _start_race() -> void:
 
 func _launch_race() -> void:
 	settled = false
+	recorded = false
+	_save_lap = -1
+	if mode == "career" and career != null:
+		career.save() # 이어하기가 이 시점의 커리어를 불러오도록
 	race_view.reset()
 	race_view.sim = sim
 	race_view.follow_slot = -1
@@ -1003,6 +1115,11 @@ func _build_race_ui() -> void:
 	gear2.custom_minimum_size = Vector2(40, 0)
 	gear2.pressed.connect(_open_settings)
 	sp.add_child(gear2)
+	var exitb = _btn("⏏", 16)
+	exitb.custom_minimum_size = Vector2(40, 0)
+	exitb.tooltip_text = "저장하고 나가기 (메뉴에서 이어하기)"
+	exitb.pressed.connect(_exit_race)
+	sp.add_child(exitb)
 	# 트랙
 	sfx = SfxS.new()
 	add_child(sfx)
@@ -1161,6 +1278,23 @@ func _on_gap_mode() -> void:
 
 
 # ═════════ 진행 ═════════
+## 설정에서 켜면 오른쪽 위에 FPS · 프레임 처리 시간 · 시뮬레이션 계산 시간 표시
+func _update_fps(delta: float) -> void:
+	var on: bool = bool(ST.get_v("show_fps"))
+	fps_label.visible = on
+	if not on:
+		return
+	_fps_t += delta
+	if _fps_t < 0.5:
+		return
+	_fps_t = 0.0
+	var proc_ms: float = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	var sim_ms: float = (float(_sim_us) / 1000.0 / float(_sim_n)) if _sim_n > 0 else 0.0
+	_sim_us = 0
+	_sim_n = 0
+	fps_label.text = "FPS %d · 처리 %.1fms · 시뮬 %.2fms · 노드 %d" % [Engine.get_frames_per_second(), proc_ms, sim_ms, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+
+
 ## 성능·배터리: 레이스 화면만 60fps, 나머지는 30fps. 배터리 절약이면 30/20fps + 안티에일리어싱 끔
 func _apply_power() -> void:
 	var saver: bool = bool(ST.get_v("battery"))
@@ -1175,6 +1309,7 @@ func _apply_power() -> void:
 
 func _process(delta: float) -> void:
 	_apply_power()
+	_update_fps(delta)
 	if sim == null or not race_box.visible:
 		if sfx != null:
 			sfx.set_engine(0.0)
@@ -1191,7 +1326,12 @@ func _process(delta: float) -> void:
 	if starting:
 		_update_start(delta)
 	elif speed_x > 0 and not sim.done:
+		var u0 := Time.get_ticks_usec()
 		sim.advance(delta * speed_x * RaceSimS.SPEED_BASE)
+		_sim_us += Time.get_ticks_usec() - u0
+		_sim_n += 1
+		if sim.leader_lap != _save_lap and sim.leader_lap >= 1 and not sim.done:
+			_autosave()
 	ui_timer += delta
 	if ui_timer >= 0.2:
 		ui_timer = 0.0
@@ -1444,6 +1584,8 @@ func _build_result() -> void:
 	settings_view = SettingsViewS.new()
 	settings_view.changed.connect(_apply_settings)
 	add_child(settings_view)
+	records_view = RecordsViewS.new()
+	add_child(records_view)
 
 
 func _career_summary(ec: Dictionary) -> String:
@@ -1504,6 +1646,13 @@ func _show_result() -> void:
 	btn_hq.visible = mode == "career" and not sprint_mode
 	btn_feature.visible = mode == "career" and sprint_mode
 	result_title.text = "%s · %s" % ["스프린트 결과" if sprint_mode else "레이스 결과", sim.CIRC["name"]]
+	RaceSaveS.clear()
+	var rec_note := ""
+	if not recorded:
+		recorded = true
+		var rr: Dictionary = RecS.record_race(sim, mode, "스프린트" if sprint_mode else "")
+		if not rr["marks"].is_empty():
+			rec_note = "[color=#a855f7][b]🏆 새 기록![/b] %s[/color]\n\n" % " · ".join(PackedStringArray(rr["marks"]))
 	if mode == "career" and not settled:
 		settled = true
 		if sprint_mode:
@@ -1514,5 +1663,5 @@ func _show_result() -> void:
 			s = _career_summary(ec) + "\n" + s
 			season_pending = ec.get("season_end", false)
 	btn_hq.text = "시즌 결산 ▶" if season_pending else "본부(HQ)로 ▶"
-	result_text.text = s
+	result_text.text = rec_note + s
 	result_box.visible = true

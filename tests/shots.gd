@@ -163,6 +163,7 @@ func _process(_delta: float) -> bool:
 				step = 11
 		11:
 			_shot("portrait_rain_night")
+			main._autosave() # 메뉴에 '이어하기' 버튼이 보이도록
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
 			main._show_menu()
@@ -177,6 +178,12 @@ func _process(_delta: float) -> bool:
 		49:
 			_shot("settings")
 			main.settings_view._on_close()
+			main._open_records()
+			wait = 3
+			step = 50
+		50:
+			_shot("records")
+			main.records_view.visible = false
 			main.new_entry = "create"
 			main._render_career_menu()
 			wait = 3
@@ -275,6 +282,7 @@ func _process(_delta: float) -> bool:
 				step = 27
 		27:
 			_shot("wec_race")
+			main.race_panel._on_tab("power")
 			main._set_cam(0)
 			main._set_speed(0)
 			wait = 40

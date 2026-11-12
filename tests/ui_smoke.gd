@@ -7,6 +7,7 @@ const DB = preload("res://scripts/data/game_db.gd")
 var main
 var frames := 0
 var races := 0
+var resumed := {}
 var configs := [["monza", "dry", 1280, 720, "f1"], ["singapore", "rain", 720, 1280, "f1"], ["lemans", "auto", 1280, 720, "wec"]]
 
 
@@ -44,6 +45,23 @@ func _process(_delta: float) -> bool:
 		return false
 	if not main.sim.done:
 		main.sim.advance(6.0)
+		# 레이스 중간 저장 → 나가기 → 이어하기 (퀵 1번째 · 커리어 레이스 각각 한 번)
+		var rk: String = main.mode + str(races)
+		if main.sim.leader_lap >= 3 and not resumed.has(rk) and (races == 0 or main.mode == "career"):
+			resumed[rk] = true
+			var lap0: int = main.sim.leader_lap
+			main._exit_race()
+			if main.sim != null or not main.RaceSaveS.has_save():
+				print("  ! 나가기 후 저장 없음")
+				quit(1)
+				return true
+			main._resume_race()
+			if main.sim == null or main.sim.leader_lap != lap0:
+				print("  ! 이어하기 실패")
+				quit(1)
+				return true
+			print("이어하기 확인: %s L%d부터 (%s)" % [main.sim.CIRC["name"], lap0, main.mode])
+			return false
 		if frames % 40 == 0:
 			main._refresh_ui()
 		if frames % 300 == 0:
@@ -79,6 +97,10 @@ func _process(_delta: float) -> bool:
 		return frames > 60000
 	main._refresh_ui()
 	main._show_result()
+	if main.RaceSaveS.has_save():
+		print("  ! 레이스가 끝났는데 저장이 남아 있음")
+		quit(1)
+		return true
 	main._open_debrief()
 	main.debrief._on_close()
 	races += 1
@@ -134,5 +156,16 @@ func _process(_delta: float) -> bool:
 	main.settings_view._on_engine("on")
 	main.settings_view._on_speed("4")
 	main.settings_view._on_close()
+	main._open_records()
+	main.records_view._on_tab("log")
+	main.records_view._on_tab("career")
+	main.records_view._on_tab("circ")
+	main.records_view.visible = false
+	main.RecS.ensure()
+	print("기록실: 레이스 %d · 서킷 %d곳" % [int(main.RecS.data["totals"]["races"]), main.RecS.data["circuits"].size()])
+	if resumed.size() < 2:
+		print("  ! 이어하기 테스트가 돌지 않음")
+		quit(1)
+		return true
 	print("UI 테스트 통과 (%d프레임)" % frames)
 	return true

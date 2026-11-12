@@ -38,7 +38,10 @@ const GT3_PACE := 1.12
 const CLASS_PACE := {"HY": 1.0, "P2": 1.06, "GT": 1.12} # 클래스 기본 페이스 배율 (LMP2는 하이퍼카와 GT3 사이)
 const GRADE_KO := {"P": "플래티넘", "G": "골드", "S": "실버", "B": "브론즈"}
 const BOP_K := 0.006
-const WEC_WEAR := 3.0            # 미디엄 1스틴트 ≈ 50%, 더블 스틴트 끝 ≈ 100%
+const WEC_WEAR := 1.9            # 미디엄 1스틴트 ≈ 32%, 더블 스틴트 끝 ≈ 63% (2026 세트 제한 → 더블 스틴트가 기본)
+## WEC 2026 타이어 규정: 레이스용 새 드라이 세트 = 스틴트 수 × 비율 (출발 세트 포함). LMGT3 는 추가 타이어를 받아 조금 더 많다
+const WEC_SET_RATIO := {"HY": 0.6, "P2": 0.6, "GT": 0.75}
+const WEC_COLD_TT := {"S": 0.30, "M": 0.24, "H": 0.17, "I": 0.30, "W": 0.32} # 워머 금지: 피트 직후 타이어 온도
 const WPIT := {"lane": 30.0, "fuel": 30.0, "tyres": 12.0, "driver": 3.0}
 const WEC_FUEL_KO := {"lean": "세이브", "std": "표준", "rich": "리치"}
 const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
@@ -107,6 +110,80 @@ func is_wec() -> bool:
 ## WEC 는 랩이 길어서(르망 207초) 초 단위 페널티를 서킷 길이에 비례시킨다
 func wsc() -> float:
 	return float(CIRC["base"]) / 90.0 if is_wec() else 1.0
+
+
+## WEC 타이어 규정: 하이퍼카는 대회마다 드라이 2종(르망 3종), LMGT3·LMP2 는 미디엄 한 종류
+func wec_comps(cls: String) -> Array:
+	if cls != "HY":
+		return ["M"]
+	return CIRC.get("wecComps", ["S", "M", "H"])
+
+
+## 규정에 없는 컴파운드를 고르면 가장 가까운 허용 컴파운드로
+func wec_fit_comp(cls: String, want: String) -> String:
+	if not SLICK.has(want):
+		return want
+	var al: Array = wec_comps(cls)
+	if al.has(want):
+		return want
+	var order := ["S", "M", "H"]
+	var best: String = al[0]
+	for a in al:
+		if absi(order.find(a) - order.find(want)) < absi(order.find(best) - order.find(want)):
+			best = a
+	return best
+
+
+## 레이스 동안 쓸 수 있는 새 드라이 세트 수 (출발 세트 제외)
+func wec_race_sets(cls: String) -> int:
+	var stints: int = int(ceil(float(laps) / STINT))
+	return maxi(1, int(ceil(stints * float(WEC_SET_RATIO.get(cls, 0.6))))) - 1
+
+
+## WEC 드라이버 주행 시간 규정 (르망 규정 기준, 레이스 길이에 비례):
+## 어떤 6시간 구간에서도 4시간 초과 금지 · 르망은 한 명 최대 14시간·최소 6시간. 랩 수로 바꿔 쓴다
+func wec_hours() -> float:
+	return float(CIRC.get("wecHours", 6.0))
+
+
+func drive_limits() -> Dictionary:
+	var h: float = wec_hours()
+	var win: int = maxi(1, int(round(laps * minf(1.0, 6.0 / h))))
+	# 압축된 레이스에서도 연비 주행 한 스틴트(최대 약 STINT+2랩)는 한 명이 탈 수 있게
+	var max_win: int = maxi(STINT + 2, int(floor(laps * minf(1.0, 4.0 / h))))
+	var max_total: int = maxi(STINT + 2, int(floor(laps * 14.0 / 24.0))) if h >= 24.0 else laps
+	var min_each: int = int(ceil(laps * 6.0 / 24.0)) if h >= 24.0 else 0
+	return {"win": win, "max_win": max_win, "max_total": max_total, "min_each": min_each}
+
+
+## 최근 6시간 구간(랩)에 드라이버 d 가 달린 랩 수
+func drive_in_window(c, d: int) -> int:
+	var w: int = int(drive_limits()["win"])
+	var n := 0
+	var lg: Array = c.drv_log
+	for i in range(maxi(0, lg.size() - w), lg.size()):
+		if int(lg[i]) == d:
+			n += 1
+	return n
+
+
+## 지금 드라이버가 한 스틴트 더 달리면 규정 위반인가
+func must_swap(c) -> bool:
+	if not is_wec() or c.drivers.size() < 2:
+		return false
+	var lim: Dictionary = drive_limits()
+	var tot: int = int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0
+	# 피트 판단은 랩 도중에 하므로 지금 달리는 랩(1)과 다음 스틴트(연비 주행이면 STINT+1)를 더해서 본다
+	var more: int = 1 + STINT + 1
+	return drive_in_window(c, c.drv) + more > int(lim["max_win"]) or tot + more > int(lim["max_total"])
+
+
+## 드라이버 피로 (0~1): 운전하면 쌓이고(밤엔 더 빨리) 쉬면 풀린다
+func fatigue(c, d: int = -1) -> float:
+	var i: int = c.drv if d < 0 else d
+	if i >= c.drivers.size():
+		return 0.0
+	return float(c.drivers[i].get("fat", 0.0))
 
 
 func poisson(lam: float) -> int:
@@ -624,8 +701,9 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 					lam_fast += my_p - op
 		for i in poisson(lam_slow * sh):
 			t += uni(0.3, 1.6) * (1.3 - c.cons) * (1.4 if night else 1.0) * (1.0 + w)
-			if rnd() < 0.0005 * (1.0 + c.aggr) * (1.5 if night else 1.0):
+			if rnd() < 0.0005 * (1.0 + c.aggr) * (1.5 if night else 1.0) * (1.0 + fatigue(c)):
 				c.damage_now = "느린 클래스 차량과 접촉"
+				_traffic_victim(c)
 				break
 		for i in poisson(lam_fast * sh):
 			t += uni(0.15, 0.6)
@@ -639,7 +717,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var cold = maxf(0.0, 0.42 - c.tt)
 	var hot = maxf(0.0, c.tt - 0.80)
 	t += (cold * 4.0 + hot * 3.0 * float(PRESS_FX[c.press]["heat"])) * sh * ws
-	var fat: float = maxf(0.0, c.stint_drv - 1) * 0.04 if is_wec() else 0.0
+	var fat: float = (maxf(0.0, c.stint_drv - 1) * 0.04 + fatigue(c) * 0.3) if is_wec() else 0.0
 	var cons: float = c.cons - fat - (0.08 if night else 0.0)
 	var is_launch: bool = c.lap == 0 and c.sec == 0
 	var noise_scale = 0.18 if is_launch else 1.0
@@ -778,6 +856,20 @@ func damage(c, why: String) -> void:
 			flag_yellow(c.sec, float(CIRC["base"]) * 0.5, "%s 접촉" % name_of(c))
 	else:
 		retire(c, why)
+
+
+## 클래스 간 트래픽 사고: 부딪힌 느린 차도 손상될 수 있고, 그 구간에 옐로
+func _traffic_victim(c) -> void:
+	var my_p: float = CLASS_PACE.get(c.cls, 1.0)
+	var pool: Array = []
+	for o in cars:
+		if o.is_running() and o != c and float(CLASS_PACE.get(o.cls, 1.0)) > my_p and not is_pitting(o):
+			pool.append(o)
+	_tally("traffic_contact")
+	if not pool.is_empty() and rnd() < 0.45:
+		var o = pool[rng.randi_range(0, pool.size() - 1)]
+		o.damage_now = "%s 와(과) 접촉" % c.label
+	flag_yellow(c.sec, 40.0 * wsc(), "트래픽 접촉")
 
 
 ## 국지 옐로 플래그: 그 섹터는 추월 금지·감속
@@ -1082,6 +1174,36 @@ func _pick_ai_slick(c, pref: String, rem_laps: int) -> String:
 	return chosen
 
 
+## 마지막 스틴트에 가장 빠른 컴파운드 (끝까지 버틸 수 있는 것 중 예상 시간 최소). 없으면 ""
+func _best_final(c, rem: int) -> String:
+	var need_diff: bool = need_two() and c.used_slicks() < 2
+	var best := ""
+	var best_t := INF
+	for k in ["S", "M", "H"]:
+		if need_diff and c.used.has(k):
+			continue
+		var r: float = ai_nom_rate(k, c) * c.est_err
+		if rem * r > ai_lim(k) - 0.03:
+			continue
+		var tt: float = rem * float(COMP[k][0]) + float(COMP[k][2]) * r * r * rem * rem * rem / 3.0
+		if tt < best_t:
+			best_t = tt
+			best = k
+	return best
+
+
+## 전략 감각이 좋은 팀은 마지막 스틴트 타이어를 계산해서 고른다
+func _pick_smart(c, pref: String, rem: int, tact: float) -> String:
+	if tact >= 0.7 and c.stops_done >= c.plan["stops"].size():
+		var b: String = _best_final(c, rem)
+		if b != "" and int(c.ai_sets.get(b, 0)) > 0:
+			if b != pref:
+				_tally("타이어재선택")
+			c.ai_sets[b] -= 1
+			return b
+	return _pick_ai_slick(c, pref, rem)
+
+
 func _alt_slick(comp: String) -> String:
 	if comp == "S":
 		return "M"
@@ -1118,14 +1240,34 @@ func pit_decision(c) -> Variant:
 	ai_replan(c)
 	var ns: Variant = next_stop(c)
 	var have = kind_of(c.comp)
+	var tact: float = clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1)
 	if want != have:
 		var nw = ("M" if left > 8 else "S") if want == "slick" else want
 		var lose = weather_pen(c.comp, wet) - weather_pen(nw, wet)
-		if lose * minf(left, uni(2, 9)) > pit_loss() * c.nerve:
+		var horizon: float = minf(left, uni(2, 9))
+		if tact >= 0.7:
+			# 예보를 읽는 팀: 실제로 맞지 않는 타이어로 달릴 랩 수를 센다 (곧 그치거나 마르면 버틴다)
+			var n_wrong := 0
+			for l in range(cur, mini(laps, cur + 8) + 1):
+				if ideal_tyre(forecast_wet_at(l)) != have:
+					n_wrong += 1
+				else:
+					break
+			horizon = minf(float(left), float(n_wrong) * uni(0.85, 1.15) + 0.5)
+		if lose * horizon > pit_loss() * c.nerve:
 			c.weather_pit = true
 			c.crew_out = true
 			return {"comp": nw, "tyres": true}
 		return null
+	# 예보 선제 대응: 다음 랩에 노면이 바뀌고 어차피 2랩 안에 피트할 계획이면 지금 맞는 타이어로 (스톱 하나 절약)
+	if tact >= 0.8 and ns != null and int(ns["lap"]) - cur <= 2 and not sc and left > 2:
+		var want_next: String = ideal_tyre(forecast_wet_at(cur + 1))
+		if want_next != have:
+			_tally("예보선제")
+			c.stops_done += 1
+			c.weather_pit = true
+			c.crew_out = true
+			return {"comp": ("M" if left > 8 else "S") if want_next == "slick" else want_next, "tyres": true}
 	# 커버 피트: 바로 앞뒤 차가 피트 준비를 하면 전략 능력에 비례해 대응
 	if not sc and c.wear >= 0.26 and left > 3:
 		var ord = []
@@ -1154,7 +1296,6 @@ func pit_decision(c) -> Variant:
 			c.crew_out = true
 			c.covering = true
 			return {"comp": fin_comp, "tyres": true}
-	var tact: float = clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1)
 	if not c.weather_pit and ns != null and not sc and left > 4 and SLICK.has(c.comp):
 		var to_stop: int = int(ns["lap"]) - cur
 		var front: Variant = _front_same_class(c)
@@ -1192,13 +1333,23 @@ func pit_decision(c) -> Variant:
 		if not sc and (cur >= ns["lap"] or c.wear >= 0.80):
 			c.stops_done += 1
 			c.crew_out = true
-			return {"comp": _pick_ai_slick(c, ns["comp"], left) if want == "slick" else want, "tyres": true}
+			return {"comp": _pick_smart(c, ns["comp"], left, tact) if want == "slick" else want, "tyres": true}
 		# SC: 대부분 들어가지만, 일부는 트랙 포지션 도박(스테이 아웃), 감각 낮은 팀은 기회를 놓치기도
 		var sc_skip: bool = (c.sc_stay and c.wear < 0.55) or (tact < 0.7 and c.sc_miss)
 		if sc and not sc_skip and cur > 2 and c.wear >= 0.35 and (cur >= ns["lap"] or (c.sc_early and ns["lap"] - cur <= 4) or c.wear >= 0.50) and left > 2:
 			c.stops_done += 1
 			c.crew_out = true
-			return {"comp": _pick_ai_slick(c, ns["comp"], left) if want == "slick" else want, "tyres": true}
+			return {"comp": _pick_smart(c, ns["comp"], left, tact) if want == "slick" else want, "tyres": true}
+		# SC 찬스: 마지막 스톱이 남았고 새 타이어로 끝까지 갈 수 있으면 계획보다 일찍이라도 싸게 들어간다
+		if sc and not sc_skip and tact >= 0.62 and want == "slick" and left > 3 and c.wear >= 0.18 and c.stops_done == c.plan["stops"].size() - 1:
+			var fin: String = _best_final(c, left)
+			if fin != "":
+				_tally("SC찬스")
+				c.stops_done += 1
+				c.crew_out = true
+				if c.ai_sets.get(fin, 0) > 0:
+					c.ai_sets[fin] -= 1
+				return {"comp": fin, "tyres": true}
 	# 계획에 없던 피트: 남은 랩 동안 잃을 시간이 피트 손실보다 클 때만
 	var pen_now: float = c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear)
 	var fresh = "H" if left > 7 else ("M" if left > 4 else "S")
@@ -1275,12 +1426,12 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 			var fuel_line: float = c.fuel - one_lap * T.share[NS - 1]
 			if left >= 1 and fuel_line < one_lap * 0.90:
 				var d_t: bool = c.wear > 0.45 or kind_of(c.comp) != want_kind
-				var comp0: String = ("M" if want == "slick" else "W") if d_t else c.comp
+				var comp0: String = (wec_fit_comp(c.cls, "M") if want == "slick" else "W") if d_t else c.comp
 				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
 				return {"comp": comp0, "tyres": d_t, "driver": false, "fuel": true}
 			return null
 		var req: Dictionary = c.wec_req if c.wec_req != null else {"tyres": true, "fuel": true, "driver": false}
-		var comp1: String = c.pit_req
+		var comp1: String = wec_fit_comp(c.cls, c.pit_req)
 		c.pit_req = ""
 		c.wec_req = null
 		c.crew_out = true
@@ -1299,8 +1450,16 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	if not need_fuel and not worn_out and not early and not weather:
 		return null
 	var tyre_due: bool = c.stint_tyre + 1 >= c.tyre_every or c.wear >= 0.52 or worn_out
+	# 세트 제한: 남은 스틴트에 비해 새 세트가 모자라면 마모가 심하지 않은 한 한 스틴트 더 탄다
+	if tyre_due and not wrong and want == "slick":
+		var stints_after: int = int(ceil(float(left) / STINT))
+		var short_sets: bool = c.wec_sets < int(ceil(stints_after / 2.0))
+		if c.wec_sets <= 0 and not worn_out:
+			tyre_due = false
+		elif short_sets and c.wear < 0.45 and not worn_out:
+			tyre_due = false
 	var tyres: bool = tyre_due or wrong
-	var driver: bool = c.stint_drv + 1 >= c.driver_every
+	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c)
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
 		# 컴파운드 선택: 마지막 한 스틴트·서늘한 밤·공격형 팀은 소프트, 남은 게 길고 아끼는 팀은 하드
@@ -1313,8 +1472,38 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 			comp = "M"
 	if not tyres:
 		comp = c.comp
+	comp = wec_fit_comp(c.cls, comp)
 	c.crew_out = true
 	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true}
+
+
+## 랩마다: 드라이버 기록 · 피로 · 주행 시간 규정 확인 (내 차는 경고 후 위반 시 60초)
+func _drive_lap(c) -> void:
+	c.drv_log.append(c.drv)
+	var hpl: float = wec_hours() / maxf(1.0, float(laps))
+	for i in c.drivers.size():
+		var f: float = float(c.drivers[i].get("fat", 0.0))
+		if i == c.drv:
+			f += 0.06 * hpl * (1.7 if night else 1.0)
+		else:
+			f -= 0.09 * hpl
+		c.drivers[i]["fat"] = clampf(f, 0.0, 1.0)
+	if c.drivers.size() < 2:
+		return
+	var lim: Dictionary = drive_limits()
+	var inw: int = drive_in_window(c, c.drv)
+	var tot: int = int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0
+	var over: bool = inw > int(lim["max_win"]) or tot > int(lim["max_total"])
+	if over and c.drive_warned != c.drv + 100:
+		c.drive_warned = c.drv + 100
+		c.time_pen += 60.0
+		_tally("drive_viol")
+		if c.mine:
+			say(c, "주행 시간 규정 위반 (%s) → 60초 페널티" % c.name)
+		event("%s %s 주행 시간 초과 → 60초 페널티" % [name_of(c), c.name], "bad")
+	elif c.mine and not over and c.drive_warned != c.drv and (inw + 1 >= int(lim["max_win"]) or tot + 1 >= int(lim["max_total"])):
+		c.drive_warned = c.drv
+		say(c, "%s 주행 시간 한도 임박! 다음 피트에서 드라이버 교대하세요" % c.name)
 
 
 func ai_control(c, gap_ahead, gap_behind) -> void:
@@ -1419,6 +1608,8 @@ func on_cross(c, t: float) -> void:
 		c.stint_laps += 1
 		if c.drv < c.drv_laps.size():
 			c.drv_laps[c.drv] += 1
+		if is_wec():
+			_drive_lap(c)
 		c.lap_hist.push_front({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap})
 		c.pos_hist.append({"lap": c.lap, "pos": pos_at_line(c)})
 		c.lap_times.append({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap, "cliff": SLICK.has(c.comp) and c.wear > ai_lim(c.comp)})
@@ -1445,6 +1636,12 @@ func on_cross(c, t: float) -> void:
 			if need_two() and c.used_slicks() < 2:
 				c.penalty += 30.0
 				c.finish_t += 30.0
+			if is_wec() and int(drive_limits()["min_each"]) > 0 and c.drivers.size() >= 2:
+				for di in c.drivers.size():
+					if di < c.drv_laps.size() and int(c.drv_laps[di]) < int(drive_limits()["min_each"]):
+						c.penalty += 60.0
+						c.finish_t += 60.0
+						event("%s %s 최소 주행 시간(르망 6시간) 미달 → 60초 페널티" % [name_of(c), c.drivers[di]["name"]], "bad")
 			if min_drive != null and min_drive_short(c) > 0:
 				c.min_drive_fail = true
 				c.penalty += 60.0
@@ -1524,12 +1721,22 @@ func apply_pit(c) -> void:
 		c.used[c.comp] = true
 		c.wear = 0.0
 		c.used_set_pen = 0.0
-		if c.mine and c.tyre_sets != null and SLICK.has(c.comp):
+		if c.mine and c.tyre_sets != null and SLICK.has(c.comp) and not is_wec():
 			if c.tyre_sets[c.comp] > 0:
 				c.tyre_sets[c.comp] -= 1
 			else:
 				c.used_set_pen = 0.45
 		c.tt = 0.35
+		if is_wec():
+			# 타이어 워머 금지: 차가운 새 타이어로 나간다 (하드일수록·밤일수록 더 차갑다)
+			c.tt = float(WEC_COLD_TT.get(c.comp, 0.3)) - (0.04 if night else 0.0)
+			if SLICK.has(c.comp):
+				if c.wec_sets > 0:
+					c.wec_sets -= 1
+				else:
+					c.wear = 0.34 # 새 세트가 없으면 이전에 쓴 세트를 다시 낀다
+					if c.mine:
+						say(c, "새 드라이 세트가 없어 쓰던 세트를 다시 끼웠어요")
 		c.stint_laps = 0
 		c.stint_tyre = 0
 	elif not d.get("forced", false):
@@ -1545,6 +1752,7 @@ func apply_pit(c) -> void:
 			c.drv = (c.drv + 1) % c.drivers.size()
 			apply_driver(c)
 			c.stint_drv = 0
+			c.drive_warned = -1
 			acts.append(c.name + " 교대")
 		else:
 			c.stint_drv += 1
@@ -2086,6 +2294,7 @@ func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool) -> 
 	if not tyres and not fuel and not driver:
 		say(c, "타이어·급유·교대 중 하나는 골라주세요")
 		return
+	comp = wec_fit_comp(c.cls, comp)
 	c.pit_req = comp if tyres else c.comp
 	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver}
 	var parts: Array = []
@@ -2685,6 +2894,10 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 
 
 func _finish_wec_car(c, stall_keys: Array) -> void:
+	c.comp = wec_fit_comp(c.cls, c.comp)
+	if not c.mine and c.cls == "HY" and wec_comps("HY").has("S") and rnd() < 0.15:
+		c.comp = "S"
+	c.wec_sets = wec_race_sets(c.cls)
 	apply_driver(c)
 	c.used = {c.comp: true}
 	var key: String = c.cls + ":" + c.team

@@ -271,7 +271,14 @@ func _render_quali() -> void:
 		var card = K.card(_side, "[Q%d] #%d %s 어택 준비" % [st, c.slot + 1, c.name], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
 		card.add_child(K.label("어택 타이어 (새 세트가 없으면 헌 타이어 +0.45초)", 14, K.DIM))
-		K.seg(card, [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]], q_comp, _on_qcomp, 14, anim == null)
+		var qitems: Array = [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]]
+		if sim.is_wec():
+			var al: Array = ["M"] if st >= 2 else sim.wec_comps(c.cls)
+			qitems = qitems.filter(func(it): return al.has(it[0]))
+			if not al.has(q_comp):
+				q_comp = al[0]
+			card.add_child(K.label("WEC 규정: 이번 대회 드라이 %s · 하이퍼폴은 미디엄만" % "·".join(PackedStringArray(sim.wec_comps(c.cls))), 13, K.DIM))
+		K.seg(card, qitems, q_comp, _on_qcomp, 14, anim == null)
 		card.add_child(K.label("공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(c.slot), 14, anim == null)
 		card.add_child(K.label("드라이버 어택 강도", 14, K.DIM))
@@ -354,7 +361,10 @@ func _render_secs(res: Variant, upto: int) -> void:
 
 # ── 그리드 확정 ──
 func _render_grid() -> void:
-	_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. %s 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요." % ("하이퍼폴" if sim.is_wec() else "Q3"))
+	if sim.is_wec():
+		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "WEC 규정: 모든 차가 새 타이어로 출발 · 이번 대회 드라이 %s · 레이스용 새 세트는 정해진 수만큼 (더블 스틴트가 기본)" % "·".join(PackedStringArray(sim.wec_comps(wk.main_cls()))))
+	else:
+		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요.")
 	for c in wk.my_cars():
 		var card = K.card(_side, "#%d %s · 그리드 P%d" % [c.slot + 1, c.name, (sim.class_pos(c) if false else c.grid + 1)], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
@@ -363,7 +373,13 @@ func _render_grid() -> void:
 		card.add_child(info)
 		card.add_child(K.label("출발 타이어" + (" (Q3 타이어 고정)" if c.q3_locked else " (자유 선택 · 새 세트 1개 사용)"), 14, K.DIM))
 		var slot: int = c.slot
-		K.seg(card, [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]], c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
+		var sitems: Array = [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]]
+		if sim.is_wec():
+			var sal: Array = sim.wec_comps(c.cls)
+			sitems = []
+			for k in sal:
+				sitems.append([k, "%s (새 세트)" % RS.TYRE_KO[k]])
+		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
 		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):

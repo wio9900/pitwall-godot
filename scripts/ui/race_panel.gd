@@ -523,12 +523,17 @@ func _refresh_pit(c) -> void:
 	if String(d["comp"]) == "":
 		var it: String = sim.ideal_tyre(sim.wet)
 		d["comp"] = (String(ns["comp"]) if ns != null else "M") if it == "slick" else it
+	if wec:
+		d["comp"] = sim.wec_fit_comp(c.cls, String(d["comp"]))
+	var allowed: Array = sim.wec_comps(c.cls) if wec else ["S", "M", "H"]
 	for i in _tyre_btns.size():
 		var comp: String = _tyre_keys[i]
 		var b: Button = _tyre_btns[i]
-		b.visible = not (wec and comp == "I")
+		b.visible = not (wec and (comp == "I" or (RS.SLICK.has(comp) and not allowed.has(comp))))
 		var sub: String = RS.TYRE_KO[comp]
-		if RS.SLICK.has(comp) and c.tyre_sets != null and c.tyre_sets.has(comp):
+		if wec and RS.SLICK.has(comp):
+			sub = "새 %d세트 남음" % c.wec_sets if c.wec_sets > 0 else "새 세트 없음 (헌 세트)"
+		elif RS.SLICK.has(comp) and c.tyre_sets != null and c.tyre_sets.has(comp):
 			var rem := int(c.tyre_sets[comp])
 			sub = "새 %d세트" % rem if rem > 0 else "헌 (+0.45s)"
 		b.text = "%s\n%s" % [comp, sub]
@@ -556,7 +561,9 @@ func _refresh_pit(c) -> void:
 		st = "[color=#22c55e]✅ 크루 대기 (CREW OUT) · 이번 랩 %s[/color]" % what
 	else:
 		var sets_txt := ""
-		if c.tyre_sets != null:
+		if wec:
+			sets_txt = " · 새 드라이 %d세트 남음 (규정: %s)" % [c.wec_sets, "·".join(PackedStringArray(allowed))]
+		elif c.tyre_sets != null:
 			sets_txt = " · 새 타이어 S:%d M:%d H:%d" % [int(c.tyre_sets["S"]), int(c.tyre_sets["M"]), int(c.tyre_sets["H"])]
 		var est := ""
 		if wec:
@@ -605,8 +612,25 @@ func _refresh_power(c) -> void:
 		var fl: float = sim.fuel_laps(c)
 		_fuel_head.text = "[color=#8b98a5]연료 모드[/color]   남은 연료 [b]%.1f랩분[/b]" % fl
 		_fuel_hint.text = "[color=#8b98a5]세이브는 느린 대신 급유 간격을 늘려요. 리치는 빠르지만 연료를 더 써요. 막판엔 세이브로 마지막 급유를 건너뛸 수도 있어요.[/color]"
-		var t := "[b]드라이버[/b] %s (등급 %s) · 이번 차 %d스틴트째%s" % [c.name, String(c.drivers[c.drv].get("grade", "-")), c.stint_drv + 1, " [color=#ef4444](피로)[/color]" if c.stint_drv >= 2 else ""]
-		t += "\n[color=#8b98a5]타이어 %d스틴트째 · 피트 %d회[/color]" % [c.stint_tyre + 1, c.pits]
+		var fat: float = sim.fatigue(c)
+		var fcol: String = "#ef4444" if fat > 0.45 else ("#f59e0b" if fat > 0.25 else "#22c55e")
+		var t := "[b]드라이버[/b] %s (등급 %s) · 이번 차 %d스틴트째 · 피로 [color=%s][b]%d%%[/b][/color]%s" % [c.name, String(c.drivers[c.drv].get("grade", "-")), c.stint_drv + 1, fcol, int(round(fat * 100)), " [color=#8b98a5](밤엔 빨리 쌓여요)[/color]" if sim.night else ""]
+		var lim: Dictionary = sim.drive_limits()
+		var inw: int = sim.drive_in_window(c, c.drv)
+		var wcol: String = "#ef4444" if sim.must_swap(c) else "#8b98a5"
+		t += "\n[color=%s]주행 시간: 최근 6시간 구간 %d/%d랩[/color]" % [wcol, inw, int(lim["max_win"])]
+		if int(lim["max_total"]) < sim.laps:
+			t += "[color=#8b98a5] · 누적 %d/%d랩 · 최소 %d랩[/color]" % [int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0, int(lim["max_total"]), int(lim["min_each"])]
+		if sim.must_swap(c):
+			t += "\n[color=#f59e0b]⚠ 한 스틴트 더 달리면 주행 시간 초과 → 다음 피트에서 교대 필요[/color]"
+		var others: PackedStringArray = []
+		for di in c.drivers.size():
+			if di != c.drv:
+				var dn: String = String(c.drivers[di]["name"])
+				others.append("%s 피로 %d%%" % [dn.substr(dn.find(" ") + 1) if dn.find(". ") == 1 else dn, int(round(sim.fatigue(c, di) * 100))])
+		if not others.is_empty():
+			t += "\n[color=#8b98a5]대기: %s[/color]" % " · ".join(others)
+		t += "\n[color=#8b98a5]타이어 %d스틴트째 · 새 드라이 %d세트 남음 · 피트 %d회[/color]" % [c.stint_tyre + 1, c.wec_sets, c.pits]
 		if sim.min_drive != null:
 			var short: int = sim.min_drive_short(c)
 			var gk: String = RS.GRADE_KO.get(sim.min_drive["grade"], "")

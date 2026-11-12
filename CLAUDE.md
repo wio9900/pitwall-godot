@@ -32,4 +32,5 @@
 7. 편의·콘텐츠 (완료): 난이도 4단계(race_sim DIFF_PACE/DIFF_STRAT, 보통 = 원작), 레이스 지시·전략 A/B·자동 피트(make_plans/_my_auto_decision), 인터·웻 박스 버튼, WEC FA 시장·라인업, F2/F3 로스터 능력치(이름 해시), 시즌 결산 화면(season_view.gd·트로피), 저장 슬롯 3개(1번 = 예전 파일), "?" 도움말(help.gd·help_text.gd), 비·SC·우승 연출
 8. 레이스 화면·전략 깊이 (완료): race_panel.gd(칩·탭·엔지니어 제안·팀 오더), 세부 셋업(race_sim setup_extra — 표준이면 0), 그리드 플랜 직접 설계(eval_plan/set_custom_plans), 복기(debrief.gd), 라이벌 카드(rival_card.gd), 페널티(add_penalty), 커리어 이벤트(career _maybe_event/resolve_event, next_mods), 설정(settings.gd)
 9. 셋업 찾기·AI 전술 (완료): 셋업 슬라이더(setup_opt 숨은 최적값, weekend bands 엔지니어 추천 범위, 연습 16랩), AI 주행 전술(_ai_tactics), AI 언더컷·오버컷·트래픽 회피·두 대 전략 분리·팀 오더·SC 스테이아웃, 크루 실수(_crew_error). 횟수는 sim.tally 로 확인
+10. 이어하기·기록·WEC 규정 (완료): 레이스 중간 저장(race_save.gd, 선두 랩마다·앱 내릴 때·⏏ 버튼), 기록실(records.gd·records_view.gd), WEC 2026 타이어 규정(wecComps·세트 제한·워머 금지·하이퍼폴 미디엄)과 주행 시간 규정(wecHours, drive_limits/must_swap), 드라이버 피로·트래픽 접촉, AI 예보·SC 찬스·마지막 스틴트 타이어 계산, 성능 표시 설정
 - 참고: 보통 난이도에서 단순 봇이 AI보다 레이스당 약 2계단(예선 포함 3.5계단) 앞선다 (tests/calib.gd 난이도별 출력으로 비교).

@@ -3,6 +3,7 @@ extends SceneTree
 ## 실행: godot --headless --path . --script res://tests/sim_smoke.gd
 
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
+const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 
 
 func _init() -> void:
@@ -80,6 +81,31 @@ func _init() -> void:
 		print("직접 계획 %s | 평가 손실 %.1f초 경고 %s | #1 피트%d(계획 2) #2 피트%d(계획 1) | 세부셋업 dt %.3f 마모×%.2f · tip '%s'" % [key, float(ev["cost"]), ev["warn"], mc[0].pits, mc[1].pits, float(x0["dt"]), float(x0["wear"]), sim.setup_tip(mc[1])])
 		if not sim.ever_wet and (mc[0].dnf == "" and mc[0].pits != 2 or mc[1].dnf == "" and mc[1].pits != 1):
 			print("  ! 직접 계획대로 피트하지 않음")
+			fails += 1
+	# 레이스 중간 저장 → 불러오기: 이어 달린 결과가 저장 안 한 쪽과 똑같아야 한다 (F1 · WEC)
+	for key in ["silverstone", "lemans"]:
+		var a = RaceSimS.new()
+		a.new_race(key, 0, 12, "rain", ["M", "M"], 5150)
+		a.prepare_start()
+		var g1 = 0
+		while a.leader_lap < 5 and g1 < 200000:
+			a.advance(2.0)
+			g1 += 1
+		var b = RaceSaveS.unpack(RaceSaveS.pack(a))
+		for sm in [a, b]:
+			var g2 = 0
+			while not sm.done and g2 < 400000:
+				sm.advance(2.0)
+				g2 += 1
+		var ra: PackedStringArray = []
+		var rb: PackedStringArray = []
+		for r in a.results():
+			ra.append("%s:%.3f" % [r["car"].code, r["car"].finish_t])
+		for r in b.results():
+			rb.append("%s:%.3f" % [r["car"].code, r["car"].finish_t])
+		var same: bool = ra == rb
+		print("저장·이어하기 %s: %s (L5에서 저장, 우승 %s)" % [key, "같음" if same else "다름!", ra[0]])
+		if not same or not b.done:
 			fails += 1
 	print("총 %dms, 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)
