@@ -766,6 +766,8 @@ func _render_career_menu() -> void:
 	if menu_page != "new":
 		return
 	var c1 = KitS.card(career_left, "새 커리어 설정")
+	c1.add_child(KitS.label("시리즈", 14, DIM))
+	KitS.seg(c1, [["f1", "F1 (F3 → F2 → F1)"], ["wec", "WEC 내구 (LMGT3 → LMP2 → Hypercar)"]], new_series, _on_new_series, 16)
 	var top_name := "Hypercar" if new_series == "wec" else "F1"
 	KitS.seg(c1, [["select", "기존 팀으로 (%s)" % top_name], ["create", "신규 팀 창단"]], new_entry, _on_entry, 16)
 	if new_entry == "select":

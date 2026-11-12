@@ -160,6 +160,12 @@ func _process(_delta: float) -> bool:
 	main._show_menu()
 	main._on_mode("career")
 	main._open_new_career(3)
+	main._on_new_series("wec")
+	if main.new_series != "wec":
+		print("  ! 새 커리어 WEC 선택 실패")
+		quit(1)
+		return true
+	main._on_new_series("f1")
 	main._menu_back()
 	if main.menu_page != "slots":
 		print("  ! 뒤로 가기가 슬롯 화면으로 가지 않음")
