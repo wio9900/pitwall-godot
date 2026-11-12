@@ -630,8 +630,11 @@ class BandBar extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
-		draw_rect(Rect2(Vector2.ZERO, size), Color("#1b232d"))
-		draw_rect(Rect2(size.x * lo, 0, size.x * (hi - lo), size.y), Color(1.0, 0.77, 0.24, 0.75))
+		# 슬라이더(K.DragSlider)와 같은 눈금: 양옆 12px 안쪽
+		var x0 := 12.0
+		var w: float = size.x - 24.0
+		draw_rect(Rect2(x0, 0, w, size.y), Color("#1b232d"))
+		draw_rect(Rect2(x0 + w * lo, 0, w * (hi - lo), size.y), Color(1.0, 0.77, 0.24, 0.75))
 
 
 func _small_lab(t: String) -> Label:
