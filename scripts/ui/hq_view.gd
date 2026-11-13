@@ -319,6 +319,15 @@ func _tab_rnd() -> void:
 	var c0 = K.card(_body, "개발 환경 · 규정 주기 %d/%d년차" % [cr.reg_year(), int(cr.D["econ"]["regCycle"])])
 	if cr.is_wec() and not cr.is_spec_tier():
 		_txt(c0, "하이퍼카는 호몰로게이션으로 차가 고정돼서 성능 개발(공력·파워트레인·섀시)에 [b]EVO 조커[/b]가 필요해요. 남은 조커 [color=#ffc53d][b]%d/%d[/b][/color]. 신뢰성 개선은 조커 없이 가능해요. [b]BoP가 성능 이점의 40%%를 상쇄[/b]하고, 성적에 따라 매 경기 조정돼요 (현재 내 팀 BoP %+.2f%%)." % [int(h.get("jokers", 0)), int(cr.D["econ"]["jokersPerCycle"]), float(h.get("wec_bop", 0.0)) * 100])
+		var bm: Dictionary = h.get("bop_ai", {})
+		if not bm.is_empty():
+			var ks: Array = bm.keys()
+			ks.sort_custom(func(a, b): return float(bm[a]) > float(bm[b]))
+			var bt: PackedStringArray = []
+			for k in ks:
+				var v: float = float(bm[k])
+				bt.append("%s [color=%s]%+.2f%%[/color]" % [k, "#ef4444" if v > 0.0005 else ("#22c55e" if v < -0.0005 else "#8b98a5"), v * 100.0])
+			_txt(c0, "[b]BoP 현황[/b] (+ 핸디캡 / − 완화): " + " · ".join(bt), 13)
 	elif cr.is_spec_tier():
 		_txt(c0, "%s는 [b]공통 섀시·엔진[/b]을 쓰는 스펙 시리즈라 공력·파워트레인 개발이 금지돼요. 섀시와 신뢰성만 개선할 수 있고, 여기서 쌓은 [b]설비와 인력은 상위 리그로 그대로 이어져요.[/b]" % cr.tier_meta()["short"])
 	else:

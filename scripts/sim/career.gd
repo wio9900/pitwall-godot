@@ -678,7 +678,7 @@ func _race_opts(sprint: bool) -> Dictionary:
 	if not is_wec():
 		return {"teams": race_teams(), "engines": hq["engines"], "my_mods": my_mods(), "rules": race_rules(sprint)}
 	if not is_spec_tier():
-		return {"wec_hy": hq["teams"], "wec_field": {"hy": hq["field"], "gt": DB.wec["field"]["gt"]}, "my_mods": my_mods()}
+		return {"wec_hy": hq["teams"], "wec_field": {"hy": hq["field"], "gt": DB.wec["field"]["gt"]}, "my_mods": my_mods(), "bop_ai": hq.get("bop_ai", {})}
 	var cls: String = WEC_TIER_CLS.get(tier(), "P2")
 	var entries: Array = []
 	var rs: Array = DB.wec["rosters"][str(tier())]
@@ -1661,6 +1661,8 @@ func after_race(sim) -> Dictionary:
 				best = mini(best, p + 1)
 		var adj := 0.0025 if best == 1 else (0.0012 if best <= 3 else (-0.0012 if best >= 6 else 0.0))
 		hq["wec_bop"] = clampf(snappedf(float(hq.get("wec_bop", 0.0)) * 0.8 + adj, 0.0001), -0.006, 0.008)
+		if not is_spec_tier():
+			_ai_bop(sim, classified, notes)
 	# 드라이버 성장(25세 이하) · 노화(33세 이상) — F1. 하위 리그는 육성 중심이라 성장이 빠르다 (F3 ×2, F2 ×1.5)
 	var gm := 2.0 if race_format() == "f3" else (1.5 if race_format() == "f2" else 1.0)
 	for slot in (0 if is_wec() else 2):
@@ -1871,6 +1873,35 @@ func _season_end(notes: Array) -> void:
 	evaluate_engine_politics()
 	_refresh_offers()
 	_refresh_pay_pool()
+
+
+## 하이퍼카 BoP: 내 팀처럼 AI 제조사도 성적대로 매 경기 조정 (연승하면 무게·출력 제한, 부진하면 완화)
+func _ai_bop(sim, classified: Array, notes: Array) -> void:
+	var bm: Dictionary = hq.get("bop_ai", {})
+	var best := {}
+	for i in classified.size():
+		var c = classified[i]
+		if c.mine or c.cls != "HY" or c.dnf != "":
+			continue
+		var tn: String = c.team
+		if not best.has(tn):
+			best[tn] = i + 1
+	var moved: Array = []
+	for t in hq["teams"]:
+		var tn: String = t["name"]
+		if tn == hq["team_name"]:
+			continue
+		var b: int = int(best.get(tn, 99))
+		var adj := 0.0025 if b == 1 else (0.0012 if b <= 3 else (-0.0012 if b >= 6 else 0.0))
+		var nv: float = clampf(snappedf(float(bm.get(tn, 0.0)) * 0.8 + adj, 0.0001), -0.006, 0.008)
+		if absf(nv - float(bm.get(tn, 0.0))) >= 0.002:
+			moved.append("%s %s" % [tn, "▲핸디캡" if nv > float(bm.get(tn, 0.0)) else "▼완화"])
+		bm[tn] = nv
+	hq["bop_ai"] = bm
+	if not moved.is_empty():
+		var m := "⚖ BoP 조정: " + " · ".join(moved.slice(0, 4))
+		news(m)
+		notes.append(m)
 
 
 func _season_start(notes: Array) -> void:

@@ -76,6 +76,7 @@ var fc: Variant = null   # 예보 {lo, hi, p}
 var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
+var wave_clear_lap := -1     # WEC 웨이브 바이 후 리스타트 랩: 빠른 클래스 앞에 느린 클래스가 없음
 var pit_closed_until := -1   # 이 선두 랩 전까지 피트레인 폐쇄 (피트 입구 근처 사고로 SC 가 나온 직후 1랩)
 var wet_start := false       # 폭우 속 세이프티카 선도 스타트 (전 차량 풀 웻 의무)
 var sc_dist := -1.0
@@ -381,6 +382,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	var want_rain: bool = wx_opt == "rain" or (wx_opt == "auto" and rnd() < float(CIRC["rain"]))
 	wet_start = false
 	pit_closed_until = -1
+	wave_clear_lap = -1
 	if want_rain:
 		var st = maxi(2, int(round(uni(0.2, 0.55) * laps)))
 		rain = {"start": st, "end": mini(laps + 1, st + int(round(uni(0.3, 0.55) * laps))), "level": uni(0.8, 1.0) if rnd() < 0.4 else uni(0.4, 0.6)}
@@ -809,6 +811,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 					lam_slow += op - my_p
 				else:
 					lam_fast += my_p - op
+		if wave_clear_lap >= 0 and c.lap + 1 == wave_clear_lap:
+			lam_slow = 0.0 # 웨이브 바이로 리스타트 랩 앞이 깨끗하다
 		for i in poisson(lam_slow * sh):
 			t += uni(0.3, 1.6) * (1.3 - c.cons) * (1.4 if night else 1.0) * (1.0 + w)
 			if rnd() < 0.0005 * (1.0 + c.aggr) * (1.5 if night else 1.0) * (1.0 + fatigue(c)):
@@ -2151,6 +2155,11 @@ func on_leader_lap() -> void:
 	if sc and l == sc_end_lap - 1 and not sc_in_notified:
 		sc_in_notified = true
 		event("[%s 종료 예고] 이번 랩 끝에 세이프티카가 들어갑니다!" % sc_kind, "sc")
+		if is_wec() and sc_kind == "SC":
+			# 웨이브 바이: 클래스 선두 앞에 끼어 있던 하위 클래스·백마커를 SC 를 지나 대열 뒤로 보낸다
+			# → 리스타트 랩엔 빠른 클래스가 느린 차에 막히지 않고 같은 클래스끼리 붙는다
+			wave_clear_lap = l + 1
+			event("🏁 웨이브 바이: 하위 클래스·백마커가 세이프티카를 지나 대열 뒤로 — 클래스별로 정렬된 리스타트", "sc")
 		for c in cars:
 			if c.mine and c.is_running():
 				say(c, "이번 랩 끝에 SC 들어갑니다! 리스타트 준비!")
@@ -3054,7 +3063,9 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c.strategy = float(t["strategy"]) + DIFF_STRAT[difficulty]
 		c.drivers = e["crew"].duplicate(true)
 		c.fuel = TANK
-		c.bop = uni(-0.004, 0.004)
+		# BoP: 커리어는 제조사(팀)별 성적으로 조정된 값 + 작은 흔들림, 퀵 레이스는 무작위
+		var bop_map: Dictionary = opts.get("bop_ai", {})
+		c.bop = (float(bop_map[t["name"]]) + uni(-0.0015, 0.0015)) if (not mine and bop_map.has(t["name"])) else uni(-0.004, 0.004)
 		c.nerve = uni(0.5, 1.6)
 		if mine:
 			c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
