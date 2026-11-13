@@ -1612,13 +1612,16 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c)
 	# 하위 클래스 최소 주행(브론즈 등): 모자라면 늦지 않게 그 드라이버로 바꾸고, 채울 때까지 내리지 않는다
 	# (예전엔 순서대로만 돌려서 짧은 레이스에서 AI 가 거의 다 60초 페널티를 받았음)
-	var md_short: int = min_drive_short(c)
-	var bi: int = min_drive_idx(c)
-	if md_short > 0 and bi >= 0:
-		if c.drv == bi:
-			driver = must_swap(c)
-		elif left >= md_short and (driver or left <= md_short + STINT * 2 + 2):
-			driver = true
+	# 르망의 드라이버별 최소 주행(각자 6시간 분량)도 같이: 다른 드라이버들이 채워야 할 랩이 남은 랩에 가까워지면 교대
+	var cur_short: int = drv_short(c, c.drv)
+	var oth_short := 0
+	for di in c.drivers.size():
+		if di != c.drv:
+			oth_short += drv_short(c, di)
+	if oth_short > 0 and left <= oth_short + STINT * 2 + 2:
+		driver = true
+	elif cur_short > 0:
+		driver = must_swap(c)
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
 		# 컴파운드 선택: 마지막 한 스틴트·서늘한 밤·공격형 팀은 소프트, 남은 게 길고 아끼는 팀은 하드
@@ -1793,18 +1796,15 @@ func on_cross(c, t: float) -> void:
 				c.penalty += c.time_pen
 				c.finish_t += c.time_pen
 			if need_two() and c.used_slicks() < 2:
-				c.penalty += 30.0
-				c.finish_t += 30.0
+				_end_pen(c, 30.0, "드라이 2종 의무 미사용")
 			if is_wec() and int(drive_limits()["min_each"]) > 0 and c.drivers.size() >= 2:
 				for di in c.drivers.size():
 					if di < c.drv_laps.size() and int(c.drv_laps[di]) < int(drive_limits()["min_each"]):
-						c.penalty += 60.0
-						c.finish_t += 60.0
+						_end_pen(c, 60.0, "%s 최소 주행 미달 (%d/%d랩)" % [c.drivers[di]["name"], int(c.drv_laps[di]), int(drive_limits()["min_each"])])
 						event("%s %s 최소 주행 시간(르망 6시간) 미달 → 60초 페널티" % [name_of(c), c.drivers[di]["name"]], "bad")
 			if min_drive != null and min_drive_short(c) > 0:
 				c.min_drive_fail = true
-				c.penalty += 60.0
-				c.finish_t += 60.0
+				_end_pen(c, 60.0, "%s 드라이버 최소 주행 미달" % GRADE_KO.get(min_drive["grade"], ""))
 				event("%s %s 최소 주행 시간 미달 → 60초 페널티" % [name_of(c), GRADE_KO.get(min_drive["grade"], "")], "bad")
 			if not finishing:
 				finishing = true
@@ -2524,10 +2524,29 @@ func next_driver(c) -> int:
 	var n: int = c.drivers.size()
 	if n < 2:
 		return c.drv
-	var bi: int = min_drive_idx(c)
-	if bi >= 0 and bi != c.drv and min_drive_short(c) > 0:
-		return bi
+	var best := -1
+	var bs := 0
+	for di in n:
+		if di == c.drv:
+			continue
+		var sh: int = drv_short(c, di)
+		if sh > bs:
+			bs = sh
+			best = di
+	if best >= 0:
+		return best
 	return (c.drv + 1) % n
+
+
+## 드라이버 di 가 규정(르망 각자 최소 주행 · 하위 클래스 등급 최소 주행)을 채우려면 더 달려야 하는 랩
+func drv_short(c, di: int) -> int:
+	var done: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
+	var need := 0
+	if is_wec():
+		need = int(drive_limits()["min_each"])
+	if min_drive != null and di == min_drive_idx(c):
+		need = maxi(need, int(ceil(float(laps) * float(min_drive["pct"]))))
+	return maxi(0, need - done)
 
 
 ## 최소 주행 규정: 해당 등급 드라이버가 더 달려야 하는 랩 수 (0이면 충족)
@@ -2925,8 +2944,16 @@ func resolve_radio(idx: int) -> void:
 
 # ═════════ 팀 오더 ═════════
 ## 시간 페널티: 체커기 때 기록에 더한다
+## 체커기에서 붙는 페널티 (기록 시간에 바로 더함)
+func _end_pen(c, secs: float, why: String) -> void:
+	c.penalty += secs
+	c.finish_t += secs
+	c.pen_log.append({"lap": c.lap, "why": why, "secs": secs, "end": true})
+
+
 func add_penalty(c, secs: float, why: String) -> void:
 	c.time_pen += secs
+	c.pen_log.append({"lap": c.lap + 1, "why": why, "secs": secs})
 	_tally("페널티")
 	event("🟨 %s %d초 페널티 (%s)" % [name_of(c), int(secs), why], "bad")
 	if c.mine:

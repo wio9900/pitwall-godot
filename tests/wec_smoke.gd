@@ -72,6 +72,26 @@ func _init() -> void:
 					print("     위반 의심 %s%s cls=%s 드라이버%d명 로그 %s 피트 %s" % [c.label, " (내 차)" if c.mine else "", c.cls, c.drivers.size(), c.drv_log, c.pit_log.map(func(e): return int(e["lap"]))])
 		if gt_bad > 0 or sets_neg > 0 or ai_viol > 2:
 			fails += 1
+	# 르망 60랩: AI 가 드라이버별 최소 주행(각자 6시간 분량)을 지키는가
+	var lm = RaceSimS.new()
+	lm.new_race("lemans", 0, 60, "dry", ["M", "M"], 3131)
+	lm.prepare_start()
+	var gl := 0
+	while not lm.done and gl < 200000:
+		lm.advance(20.0)
+		gl += 1
+	var lm_fail := 0
+	var lm_ai := 0
+	for c in lm.cars:
+		if c.mine:
+			continue
+		lm_ai += 1
+		for pe in c.pen_log:
+			if String(pe["why"]).find("최소 주행") >= 0:
+				lm_fail += 1
+	print("   르망 60랩 AI 최소 주행 위반 %d / %d" % [lm_fail, lm_ai])
+	if lm_fail * 20 > lm_ai:
+		fails += 1
 	# 하위 리그 최소 주행(브론즈·실버) 규정: AI 가 짧은 커리어 레이스에서도 지키는가
 	for tier in [0, 1, 2]:
 		var cr = CareerS.new()
