@@ -3,6 +3,7 @@ extends Control
 ## (상대의 실제 마모·연료·집중력은 비공개 — HTML 설계 원칙 그대로).
 
 const K = preload("res://scripts/ui/kit.gd")
+const TraitsS = preload("res://scripts/sim/traits.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const STYLE_DESC := {"aggressive": "스톱을 늘리고 소프트를 선호", "balanced": "계산상 최적에 가깝게 운영", "conservative": "스톱을 줄이고 긴 스틴트 선호", "reactive": "주변 차의 피트에 민감하게 커버"}
 
@@ -136,6 +137,8 @@ func refresh() -> void:
 	if c.dnf != "":
 		t += "[color=#ef4444]리타이어: %s[/color]\n" % c.dnf
 	t += "현재 [b]P%d[/b] · 타이어 [color=%s][b]%s[/b][/color] [b]%d랩째[/b] · 피트 %d회\n" % [pos, RS.TYRE_HEX[c.comp], RS.TYRE_KO[c.comp], c.stint_laps, c.pits]
+	if not c.traits.is_empty():
+		t += "[color=#ffc53d]◆ %s[/color]\n" % TraitsS.label(c.traits)
 	t += "피트월 크루: %s\n" % ("[bgcolor=#ef4444][color=#ffffff] CREW OUT [/color][/bgcolor] 곧 박스할 수 있어요!" if c.crew_out else "차고 대기")
 	# 피트 이력·사용한 타이어
 	var ph: PackedStringArray = []

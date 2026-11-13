@@ -7,6 +7,7 @@ extends RefCounted
 
 const CarS = preload("res://scripts/sim/car.gd")
 const DB = preload("res://scripts/data/game_db.gd")
+const TraitsS = preload("res://scripts/sim/traits.gd")
 
 const NS := 6
 const FPL := 1.6
@@ -423,6 +424,9 @@ func apply_driver(c) -> void:
 	c.def_ = d["def"]
 	c.wet = d["wet"]
 	c.tyre_deg_rate = clampf(1.0 + (0.80 - c.tyre_mgmt) * 0.65 + (c.aggr - 0.60) * 0.30, 0.78, 1.28)
+	c.traits = TraitsS.of(d)
+	if c.traits.has("saver"):
+		c.tyre_deg_rate *= 0.93
 	c.fuel_burn_rate = clampf(1.0 + (c.aggr - 0.60) * 0.22 + (0.82 - c.cons) * 0.18 - (c.tyre_mgmt - 0.78) * 0.12, 0.88, 1.14)
 	c.name = d["name"]
 	var parts: PackedStringArray = String(d["name"]).strip_edges().split(" ", false)
@@ -766,6 +770,14 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		t += 0.45 * sh * ws # 옐로 구간 감속
 	if c.lamp_out and night:
 		t *= 1.05 # 헤드라이트 없이 밤 주행
+	# 드라이버 특성
+	if not c.traits.is_empty():
+		if c.traits.has("saver") and c.stint_laps < 2:
+			t += 0.12 * sh * ws # 타이어를 아끼느라 스틴트 초반 조심
+		if c.traits.has("rain") and w > 0.3:
+			t -= 0.25 * w * sh * ws
+		if c.traits.has("closer") and laps > 0 and float(c.lap) >= float(laps) * 0.85:
+			t -= 0.12 * sh * ws
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
 	if not is_wec():
@@ -823,7 +835,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var pressure = 1.5 if (not is_launch and gap_ahead != null and gap_ahead < 0.5) else 1.0
 	var p_err = 0.0
 	if not is_launch:
-		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * (1.5 if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
+		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet) * (0.7 if c.traits.has("rain") else 1.0)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * ((1.15 if c.traits.has("night") else 1.5) if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
 	# 트랙 리밋: 연석 공략이 과하면 경고, 세 번째부터 5초 페널티 (F1, 그린 상황에서만)
 	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if c.instr == "attack" else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
 		c.tl_warn += 1
@@ -2043,6 +2055,7 @@ func schedule_next(c, t: float) -> void:
 				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
 					+ (0.15 if c.drs else 0.0) + (0.06 if (not is_wec() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
 					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (not is_wec() and ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
+				p += (0.06 if c.traits.has("dive") else 0.0) - (0.06 if ahead.traits.has("wall") else 0.0)
 				p = clampf(p, 0.02, 0.9) * K["overtake_scale"]
 				if rnd() < p:
 					dur = maxf(0.4, (ahead.sec_end - t) - 0.15)
@@ -2053,7 +2066,7 @@ func schedule_next(c, t: float) -> void:
 						say(c, "%s 추월 성공!%s" % [ahead.code, " (DRS)" if c.drs else ""])
 					if ahead.mine:
 						say(ahead, "%s에게 추월당했어요" % c.code)
-				elif rnd() < K["crash"] * c.aggr * float(PACE[c.pace][2]) * (1.0 + 2.0 * wet) * (1.6 if c.instr == "attack" else 1.0) * (1.3 if ahead.instr == "defend" else 1.0):
+				elif rnd() < K["crash"] * c.aggr * float(PACE[c.pace][2]) * (1.0 + 2.0 * wet) * (1.6 if c.instr == "attack" else 1.0) * (1.3 if ahead.instr == "defend" else 1.0) * (1.35 if c.traits.has("dive") else 1.0):
 					if is_wec():
 						damage(c, "경합 중 접촉")
 						if c.dnf != "":
@@ -2567,7 +2580,7 @@ func prepare_start() -> void:
 	for i in cars.size():
 		var c = cars[i]
 		c.grid = i
-		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) + gauss(0.012), 0.01, 0.09)
+		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) - (0.012 if c.traits.has("rocket") else 0.0) + gauss(0.012), 0.01, 0.09)
 		if not is_wec() and react <= 0.011 and rnd() < 0.08:
 			add_penalty(c, 5.0, "부정 출발")
 		c.start_t = i * (0.42 if is_wec() else 0.25) + react

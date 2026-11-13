@@ -11,6 +11,7 @@ const RS = preload("res://scripts/sim/race_sim.gd")
 const WK = preload("res://scripts/sim/weekend.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
 const HUB = preload("res://scripts/ui/data_hub.gd")
+const TraitsS = preload("res://scripts/sim/traits.gd")
 
 var sim
 var wk
@@ -167,7 +168,7 @@ func _trait(c) -> String:
 		cons.append("뚜렷한 약점 없음")
 	return "[b]%s[/b] · %s\n속도 %d · 일관 %d · 타이어 %d · 공격 %d · 방어 %d · 우천 %d\n[color=#22c55e]강점[/color] %s · [color=#ef4444]약점[/color] %s" % [
 		c.name, style, int(d["speed"] * 100), int(d["cons"] * 100), int(d["tyreMgmt"] * 100), int(d["aggr"] * 100), int(d["def"] * 100), int(d["wet"] * 100),
-		" · ".join(pros), " · ".join(cons)]
+		" · ".join(pros), " · ".join(cons)] + ("\n[color=#ffc53d]◆ 특성: %s[/color]" % TraitsS.label(c.traits) if not c.traits.is_empty() else "")
 
 
 func _wing_desc(w: float) -> String:

@@ -50,6 +50,7 @@ var speed := 0.0
 var cons := 0.0
 var tyre_mgmt := 0.0
 var aggr := 0.0
+var traits: Array = []   # 드라이버 특성 태그 (traits.gd)
 var def_ := 0.0
 var wet := 0.0
 var tyre_deg_rate := 1.0

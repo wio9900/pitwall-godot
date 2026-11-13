@@ -15,6 +15,7 @@ const RS = preload("res://scripts/sim/race_sim.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 const TrackMapS = preload("res://scripts/ui/track_map.gd")
+const TraitsS = preload("res://scripts/sim/traits.gd")
 const REC = preload("res://scripts/sim/records.gd")
 
 const TABS := [["home", "개요"], ["rnd", "개발"], ["base", "설비"], ["staff", "인력"], ["spon", "스폰서"], ["league", "리그"]]
@@ -486,7 +487,7 @@ func _tab_staff() -> void:
 		var pay := ""
 		if h["pay_drivers"].has(str(slot)):
 			pay = " · [color=#22c55e]페이 드라이버 +%.2fM/시즌[/color]" % float(h["pay_drivers"][str(slot)])
-		K.row(c1, "#%d [b]%s[/b] (%d세)%s\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.1fM%s[/color]" % [slot + 1, d["name"], age, tag, int(float(d["speed"]) * 100), int(float(d["cons"]) * 100), int(float(d["tyreMgmt"]) * 100), int(float(d["wet"]) * 100), cr.driver_salary(d), pay], [], 14)
+		K.row(c1, "#%d [b]%s[/b] (%d세)%s\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.1fM%s[/color]%s" % [slot + 1, d["name"], age, tag, int(float(d["speed"]) * 100), int(float(d["cons"]) * 100), int(float(d["tyreMgmt"]) * 100), int(float(d["wet"]) * 100), cr.driver_salary(d), pay, _tags(d)], [], 14)
 	var rv: Dictionary = h["reserve"]
 	K.row(c1, "리저브 [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 추가 비용 없음[/color]" % [rv["name"], int(rv.get("age", 22)), int(float(rv["speed"]) * 100), int(float(rv["cons"]) * 100), int(float(rv["tyre"]) * 100)],
 		[K.sbtn("#1과 교대", _on_swap.bind(0)), K.sbtn("#2와 교대", _on_swap.bind(1))], 14)
@@ -548,7 +549,7 @@ func _staff_wec() -> void:
 				K.sbtn("↔ #%d" % (2 - slot), _on_wec_swap.bind(i), true),
 				K.sbtn("교체 대상 ✓" if sel else "교체 대상", _on_wec_target.bind(slot, i), not sel, K.AMBER),
 			]
-			K.row(c1, "%s%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]" % ["▶ " if sel else "", _grade_tag(d.get("grade", "-")), d["name"], int(d.get("age", 28)), int(float(d["speed"]) * 100), int(float(d.get("cons", 0.75)) * 100), int(float(d.get("tyreMgmt", 0.75)) * 100), int(float(d.get("wet", 0.75)) * 100), cr.driver_salary(d)], btns, 13)
+			K.row(c1, "%s%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]%s" % ["▶ " if sel else "", _grade_tag(d.get("grade", "-")), d["name"], int(d.get("age", 28)), int(float(d["speed"]) * 100), int(float(d.get("cons", 0.75)) * 100), int(float(d.get("tyreMgmt", 0.75)) * 100), int(float(d.get("wet", 0.75)) * 100), cr.driver_salary(d), _tags(d)], btns, 13)
 	# FA 시장
 	var tgt: Array = cr.my_crew(wec_target[0])
 	var tname: String = tgt[wec_target[1]]["name"] if wec_target[1] < tgt.size() else "-"
@@ -559,7 +560,7 @@ func _staff_wec() -> void:
 		var fa: Dictionary = mk[i]
 		var why: String = cr.wec_hire_block(i, wec_target[0], wec_target[1])
 		var lab: String = ("%.2fM 영입" % float(fa["cost"])) if why == "" else why
-		K.row(cm, "%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]" % [_grade_tag(fa["grade"]), fa["name"], int(fa["age"]), int(float(fa["speed"]) * 100), int(float(fa["cons"]) * 100), int(float(fa["tyreMgmt"]) * 100), int(float(fa["wet"]) * 100), float(fa["salary"])],
+		K.row(cm, "%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]%s" % [_grade_tag(fa["grade"]), fa["name"], int(fa["age"]), int(float(fa["speed"]) * 100), int(float(fa["cons"]) * 100), int(float(fa["tyreMgmt"]) * 100), int(float(fa["wet"]) * 100), float(fa["salary"]), _tags(fa)],
 			[K.sbtn(lab, _on_wec_hire.bind(i), why == "", K.GOOD)], 13)
 	var c2 = K.card(_body, "수석 엔지니어")
 	var ce: Dictionary = h["chief"]
@@ -731,3 +732,14 @@ func _on_season() -> void:
 
 func _on_tier_up() -> void:
 	_act(cr.tier_up())
+
+
+## 드라이버 특성 태그 한 줄 (없으면 빈 문자열)
+func _tags(d: Dictionary) -> String:
+	var tg: Array = TraitsS.of(d)
+	if tg.is_empty():
+		return ""
+	var parts: PackedStringArray = []
+	for t in tg:
+		parts.append("[color=#ffc53d]◆ %s[/color] [color=#8b98a5](%s)[/color]" % [TraitsS.KO[t], TraitsS.DESC[t]])
+	return "\n" + "  ".join(parts)
