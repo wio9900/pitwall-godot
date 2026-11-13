@@ -294,12 +294,27 @@ func start_quali() -> void:
 func q_len(stage: int = -1) -> float:
 	var st: int = int(Q.get("stage", 1)) if stage < 0 else stage
 	var arr: Array = QLEN_WEC if sim.is_wec() else QLEN_F1
-	return float(arr[clampi(st, 1, arr.size() - 1)])
+	# 랩이 긴 서킷(르망 3분 반)은 세션도 비례해서 길게: 아웃랩·어택·인랩 한 번에 랩 3바퀴 남짓 걸리므로
+	return float(arr[clampi(st, 1, arr.size() - 1)]) * maxf(1.0, lap_min() / 1.7)
+
+
+## 이 서킷 기준 랩 (분)
+func lap_min() -> float:
+	return float(sim.CIRC.get("base", 90.0)) / 60.0
+
+
+## 아웃랩·인랩 (분): 서킷 랩타임에 비례 (어택 랩보다 조금 느리게 한 바퀴)
+func out_min() -> float:
+	return maxf(OUT_MIN, lap_min() * 1.2)
+
+
+func in_min() -> float:
+	return maxf(IN_MIN, lap_min() * 1.15)
 
 
 ## 마지막으로 피트를 나갈 수 있는 시각: 아웃랩을 마치고 체커기 전에 어택 랩을 시작해야 한다
 func q_last_dep(stage: int = -1) -> float:
-	return q_len(stage) - OUT_MIN
+	return q_len(stage) - out_min()
 
 
 ## 지금 노면·트래픽 {evo 초, risk 트래픽 확률}: 노면은 달린 랩 수와 시간으로 좋아지고, 트래픽은 트랙 위 차 수로 정해진다
@@ -401,11 +416,11 @@ func _ai_plan(c, st: int) -> Array:
 	var T: float = q_len(st)
 	var plan: Array = []
 	if c.mine:
-		plan.append(sim.uni(T - 5.0, T - OUT_MIN - 0.5))
+		plan.append(sim.uni(T - out_min() - 3.4, T - out_min() - 0.5))
 		return plan
 	if sim.rnd() < 0.55:
 		plan.append(sim.uni(0.3, T * 0.35))
-	plan.append(sim.uni(T - 6.0, T - OUT_MIN - 0.3))
+	plan.append(sim.uni(T - out_min() - 4.4, T - out_min() - 0.3))
 	return plan
 
 
@@ -445,7 +460,7 @@ func _ai_comp(c, st: int, run_i: int, plan_left: int) -> Array:
 
 
 func _depart(c, comp: String, push: String, used: bool) -> void:
-	Q["run"][c.id] = {"phase": "out", "t0": float(Q["t"]), "dur": OUT_MIN, "comp": comp, "push": push, "used": used, "res": null}
+	Q["run"][c.id] = {"phase": "out", "t0": float(Q["t"]), "dur": out_min(), "d0": 0.0, "comp": comp, "push": push, "used": used, "res": null}
 	if c.mine:
 		Q["ver"] = int(Q["ver"]) + 1
 
@@ -477,9 +492,12 @@ func player_abort(slot: int) -> void:
 	var c = my_cars()[slot]
 	var r: Variant = Q["run"].get(c.id)
 	if r != null and r["phase"] == "out":
+		# 지금 위치에서 남은 바퀴만 돌아 피트로 (화면에서 끊기지 않게)
+		var f: float = clampf((float(Q["t"]) - float(r["t0"])) / maxf(0.01, float(r["dur"])), 0.0, 1.0)
 		r["phase"] = "in"
 		r["t0"] = float(Q["t"])
-		r["dur"] = IN_MIN * 0.5
+		r["d0"] = f
+		r["dur"] = maxf(0.05, in_min() * (1.0 - f))
 		Q["ver"] = int(Q["ver"]) + 1
 
 
@@ -534,9 +552,10 @@ func _q_step(h: float) -> void:
 		match String(r["phase"]):
 			"out":
 				if t > T:
-					r["phase"] = "in" # 체커기 전에 어택을 시작하지 못했다
+					r["phase"] = "in" # 체커기 전에 어택을 시작하지 못했다 → 천천히 한 바퀴 돌아 피트로
 					r["t0"] = t
-					r["dur"] = IN_MIN * 0.5
+					r["d0"] = 0.0
+					r["dur"] = in_min()
 					if c.mine:
 						_log("%s 체커기에 걸려 어택 못 함" % c.code)
 					continue
@@ -557,7 +576,8 @@ func _q_step(h: float) -> void:
 					_log("%s %s · P%d%s" % [c.code, "기록 삭제" if res2["deleted"] else _fmt(float(res2["total"])), pos, (" · " + String(res2["note"])) if String(res2["note"]) != "" and c.mine else ""])
 				r["phase"] = "in"
 				r["t0"] = t
-				r["dur"] = IN_MIN
+				r["d0"] = 0.0
+				r["dur"] = in_min()
 			"in":
 				Q["run"].erase(id)
 				Q["runs"][id] = int(Q["runs"].get(id, 0)) + 1

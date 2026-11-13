@@ -5,12 +5,14 @@ extends Control
 signal go_weekend
 signal go_menu
 signal go_season
+signal go_resume
 
 const K = preload("res://scripts/ui/kit.gd")
 const DB = preload("res://scripts/data/game_db.gd")
 const CS = preload("res://scripts/sim/career.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
+const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 
 const TABS := [["home", "개요"], ["rnd", "개발"], ["base", "설비"], ["staff", "인력"], ["spon", "스폰서"], ["league", "리그"]]
 const REGION_KO := {"uk": "영국 (공력)", "italy": "이탈리아 (엔진)", "germany": "독일 (섀시·내구)", "japan": "일본 (타이어)"}
@@ -75,7 +77,14 @@ func refresh() -> void:
 	K.clear(_foot)
 	_foot.add_child(K.btn("◀ 메뉴", 15, _on_menu))
 	var nc: Dictionary = DB.circuits[cr.next_circuit()]
-	var go = K.btn("R%d %s 레이스 주말 ▶" % [cr.round_idx() + 1, nc["name"]], 18, _on_weekend)
+	var go: Button
+	# 레이스 도중 나왔으면 주말을 처음부터가 아니라 그 랩부터 이어서
+	var rs: Dictionary = RaceSaveS.peek()
+	if not rs.is_empty() and rs.get("mode", "") == "career" and int(rs.get("slot", 0)) == cr.save_slot:
+		go = K.btn("▶ %s 레이스 이어하기 · L%d/%d" % [rs.get("circ", nc["name"]), int(rs.get("lap", 0)), int(rs.get("laps", 0))], 18, func(): go_resume.emit())
+		go.add_theme_color_override("font_color", K.AMBER)
+	else:
+		go = K.btn("R%d %s 레이스 주말 ▶" % [cr.round_idx() + 1, nc["name"]], 18, _on_weekend)
 	go.size_flags_stretch_ratio = 3.0
 	_foot.add_child(go)
 
@@ -203,8 +212,7 @@ func _tab_home() -> void:
 	_txt(c3, "%s · %s · 강우 확률 [color=#3b82f6]%d%%[/color] · %d랩\n[color=#8b98a5]%s[/color]" % [nc["dir"], nc["desc"], int(float(nc["rain"]) * 100), cr.race_laps(), nc["setupHint"]])
 	if cr.is_wec():
 		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "GT": "LMGT3"}[cr.my_class()], _min_drive_txt()], 13)
-	_txt(c3, "[b]스폰서 미션 약속[/b] — 레이스 전에 목표를 약속해요. 달성하면 보너스, 못 하면 평판과 스폰서 만족도가 떨어져요.", 14)
-	_mission_seg(c3)
+	# 스폰서 미션 약속은 메인에서 빼고 '스폰서' 탭에만 둔다 (메인 화면 간결하게)
 	var cal := ""
 	var cal_arr: Array = cr.calendar()
 	for ci in cal_arr.size():
@@ -229,17 +237,6 @@ func _tab_home() -> void:
 			break
 		nt += "• %s\n" % s
 	_txt(c5, nt, 13)
-	var c6 = K.card(_body, "난이도 — AI 차의 속도와 전략 판단")
-	var d_items: Array = []
-	for di in RS.DIFF_KO.size():
-		d_items.append([str(di), RS.DIFF_KO[di]])
-	K.seg(c6, d_items, str(int(h.get("difficulty", 1))), _on_diff, 14)
-	_txt(c6, "[color=#8b98a5]보통이 원작 밸런스예요. 어려움·전설은 AI가 더 빠르고 피트 타이밍도 날카로워요. 언제든 바꿀 수 있어요.[/color]", 12)
-
-
-func _on_diff(v) -> void:
-	_h()["difficulty"] = int(v)
-	_act(true)
 
 
 func _on_event(i) -> void:

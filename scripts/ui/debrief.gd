@@ -249,7 +249,7 @@ func _car_report(c, ord: Array) -> void:
 				deg = " · 스틴트 동안 [b]%+.2f초[/b] 느려짐" % (a1 - a0) if a1 >= a0 else " · 스틴트 동안 [b]%.2f초[/b] 빨라짐 (연료가 줄어서)" % (a0 - a1)
 		t += "S%d [color=%s]%s[/color] %d랩 · 평균 %s · 최고 %s%s%s\n" % [si + 1, RS.TYRE_HEX[comp], RS.TYRE_KO[comp], st.size(), avg_s, best_s, deg, " [color=#ef4444][절벽 구간!][/color]" if cliff else ""]
 	# 피트 평가: 피트 들어갈 때 예상한 복귀 순위 vs 2랩 뒤 실제 순위
-	t += "[b]피트 결정 평가[/b] [color=#8b98a5](들어갈 때 예상한 복귀 순위와 2랩 뒤 실제 순위 비교)[/color]\n"
+	t += "[b]피트 결정 평가[/b] [color=#8b98a5](들어갈 때 예상한 복귀 순위와 2랩 뒤 실제 순위 비교%s)[/color]\n" % (" · 같은 때 피트한 차는 빼고 계산 · 클래스 순위" if sim.is_wec() else "")
 	if c.pit_log.is_empty():
 		t += "[color=#8b98a5]• 피트 없음 (원스틴트 주행)[/color]\n"
 	for ev in c.pit_log:
@@ -258,6 +258,21 @@ func _car_report(c, ord: Array) -> void:
 			if int(ph["lap"]) <= int(ev["lap"]) + 2:
 				after = int(ph["pos"])
 		var pred: int = int(ev.get("pred", ev["pos"]))
+		# WEC: 다들 비슷한 때 피트에 들어가므로, '앞설 것'으로 셌던 차 중 앞뒤 몇 랩 안에 같이 피트한 차는 빼고 다시 센다
+		# (안 그러면 "P1에서 들어가 예상 P18 → P6, 12계단 이득" 같은 엉뚱한 평가가 나옴)
+		if sim.is_wec() and ev.has("ahead_ids"):
+			pred = 1
+			for oid in ev["ahead_ids"]:
+				var o = sim.car_by_id(int(oid))
+				if o == null:
+					continue
+				var pitted := false
+				for pl in o.pit_log:
+					if absi(int(pl["lap"]) - int(ev["lap"])) <= 3:
+						pitted = true
+						break
+				if not pitted:
+					pred += 1
 		var better: int = pred - after
 		var tag := ""
 		if better >= 1:

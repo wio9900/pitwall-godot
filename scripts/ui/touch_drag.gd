@@ -45,9 +45,18 @@ func _local(ev: InputEvent) -> Vector2:
 
 
 func _blocked_by_modal() -> bool:
+	# target 이 들어 있는 창(모달)보다 '위에' 뜬 창만 막는다.
+	# (예전엔 아래에 깔린 결과 창 때문에 그 위에 뜬 복기 화면이 스크롤되지 않았음)
+	var own: Node = null
+	var p: Node = target
+	while p != null:
+		if p.is_in_group("modal"):
+			own = p
+		p = p.get_parent()
 	for m in get_tree().get_nodes_in_group("modal"):
 		if m is CanvasItem and m.is_visible_in_tree() and m != target and not m.is_ancestor_of(target):
-			return true
+			if own == null or m.is_greater_than(own):
+				return true
 	return false
 
 

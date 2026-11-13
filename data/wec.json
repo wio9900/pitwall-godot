@@ -1485,7 +1485,7 @@
  "rosters": {
   "1": [
    {
-    "name": "Kessel Racing Ferrari #74",
+    "name": "Kessel Racing",
     "color": "#dc2626",
     "perf": 0.52,
     "rel": 0.9,
@@ -1496,7 +1496,7 @@
     ]
    },
    {
-    "name": "Kessel Racing Ferrari #57",
+    "name": "Kessel Racing Ferrari",
     "color": "#b91c1c",
     "perf": 0.51,
     "rel": 0.9,
@@ -1518,7 +1518,7 @@
     ]
    },
    {
-    "name": "TF Sport Corvette #2",
+    "name": "TF Sport Corvette",
     "color": "#facc15",
     "perf": 0.5,
     "rel": 0.89,

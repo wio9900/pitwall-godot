@@ -163,6 +163,7 @@ func _ready() -> void:
 	hq_view.go_weekend.connect(_start_weekend_career)
 	hq_view.go_menu.connect(_show_menu)
 	hq_view.go_season.connect(_open_season)
+	hq_view.go_resume.connect(_resume_race)
 	wk_view = WeekendViewS.new()
 	wk_view.visible = false
 	add_child(wk_view)
@@ -488,11 +489,7 @@ func _build_menu() -> void:
 	opt_weather = OptionButton.new()
 	for w in ["자동 (서킷 강우 확률)", "맑음", "비"]:
 		opt_weather.add_item(w)
-	opt_diff = OptionButton.new()
-	for dn in RaceSimS.DIFF_KO:
-		opt_diff.add_item(dn)
-	opt_diff.select(1)
-	var rows = [["서킷", opt_circuit], ["내 팀", opt_team], ["레이스 길이", opt_laps], ["날씨", opt_weather], ["난이도", opt_diff]]
+	var rows = [["서킷", opt_circuit], ["내 팀", opt_team], ["레이스 길이", opt_laps], ["날씨", opt_weather]]
 	opt_start.clear()
 	for k in 2:
 		var o = OptionButton.new()
@@ -843,11 +840,6 @@ func _render_career_menu() -> void:
 			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
 		c1.add_child(KitS.label("본부 지역", 14, DIM))
 		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
-	c1.add_child(KitS.label("난이도 (HQ에서 언제든 변경)", 14, DIM))
-	var d_items: Array = []
-	for di in RaceSimS.DIFF_KO.size():
-		d_items.append([str(di), RaceSimS.DIFF_KO[di]])
-	KitS.seg(c1, d_items, str(new_opts["difficulty"]), _on_new_diff, 15)
 	var info = KitS.rtl(15)
 	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n• [b]코스트캡[/b] 안에서 R&D와 설비에 투자하세요. 넘기면 벌금과 제재.\n• [b]스폰서[/b]는 시즌 전 제안 중 카테고리마다 하나를 골라요. 안정형·성과연동형·단기 고액은 성과 조항과 홍보 의무가 달라요.\n• 레이스 전에 [b]미션을 약속[/b]하면 보너스, 실패하면 평판 하락.\n• 신규 팀은 F3부터 시작해 승격을 노려요 (오너가 5시즌 동안 자본 지원).[/color]"
 	career_right.add_child(info)
@@ -978,6 +970,7 @@ func _new_career() -> void:
 		nm = "Korea GP Racing"
 	new_opts["name"] = nm
 	new_opts["series"] = new_series
+	new_opts["difficulty"] = clampi(int(ST.get_v("difficulty")), 0, 3)
 	career.new_career(new_entry, new_team, new_opts)
 	career.save_slot = new_slot
 	career.save()
@@ -988,6 +981,7 @@ func _new_career() -> void:
 func _continue_career(sl: int = 1) -> void:
 	career = CareerS.new()
 	if career.load_save(sl):
+		career.hq["difficulty"] = clampi(int(ST.get_v("difficulty")), 0, 3) # 난이도는 설정(⚙) 값을 따른다
 		mode = "career"
 		_open_hq()
 
@@ -1003,6 +997,10 @@ func _open_settings() -> void:
 
 func _apply_settings() -> void:
 	ST.apply_audio()
+	# 난이도는 설정 한 곳에서: 진행 중인 커리어에도 바로 반영
+	if career != null and career.hq.get("difficulty", 1) != int(ST.get_v("difficulty")):
+		career.hq["difficulty"] = int(ST.get_v("difficulty"))
+		career.save()
 	if sim != null:
 		sim.prompts_enabled = bool(ST.get_v("prompts"))
 	_on_resize()
@@ -1039,7 +1037,7 @@ func _read_quick_settings() -> void:
 		"laps": _quick_laps(),
 		"wx": ["auto", "dry", "rain"][opt_weather.selected],
 		"start": [["S", "M", "H"][opt_start[0].selected], ["S", "M", "H"][opt_start[1].selected]],
-		"diff": maxi(0, opt_diff.selected),
+		"diff": clampi(int(ST.get_v("difficulty")), 0, 3), # 난이도는 설정(⚙)에서
 	}
 
 
@@ -1056,6 +1054,11 @@ func _start_weekend_quick() -> void:
 
 
 func _start_weekend_career() -> void:
+	# 이 커리어의 레이스가 중간 저장돼 있으면 주말을 새로 시작하지 않고 이어서 (다시 하기로 결과 바꾸기 방지)
+	var rs: Dictionary = RaceSaveS.peek()
+	if career != null and not rs.is_empty() and rs.get("mode", "") == "career" and int(rs.get("slot", 0)) == career.save_slot:
+		_resume_race()
+		return
 	mode = "career"
 	career.resolve_event_default()
 	sim = RaceSimS.new()

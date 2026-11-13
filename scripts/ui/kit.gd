@@ -193,6 +193,8 @@ static func card(parent: Control, title: String = "", accent: Color = LINE) -> V
 ## 토글 버튼 묶음. items: [[값, 글자], …]. cb(값) 호출.
 static func seg(parent: Control, items: Array, current: String, cb: Callable, fsize := 14, enabled := true) -> Array:
 	var row = hbox(4)
+	# 부모가 가운데 정렬 상자여도 폭을 꽉 채운다 (안 그러면 버튼이 최소 폭으로 줄어 글자가 한 자씩 꺾여 빈 막대처럼 보임)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
 	var grp = ButtonGroup.new()
 	var out: Array = []

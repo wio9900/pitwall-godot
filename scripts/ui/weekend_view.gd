@@ -26,7 +26,7 @@ var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
 var p_comp := "M"            # 연습 주행 타이어
-var q_speed := 30            # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤
+var q_speed := 20            # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤. 레이스와 같은 기준: 1× = 4초
 var q_comps: Array = ["S", "S"]
 var q_pushes: Array = ["std", "std"]
 var _q_ver := -1
@@ -302,7 +302,8 @@ func _render_quali() -> void:
 	var hc = K.card(_side, "", K.RED)
 	_q_head = K.rtl(17)
 	hc.add_child(_q_head)
-	K.seg(hc, [["0", "⏸ 멈춤"], ["10", "10×"], ["30", "30×"], ["60", "60×"]], str(q_speed), _on_qspeed, 14)
+	# 배속 표시는 레이스 화면과 같은 기준 (1× = 시뮬레이션 4배)
+	K.seg(hc, [["0", "⏸ 멈춤"], ["4", "1×"], ["20", "5×"], ["40", "10×"]], str(q_speed), _on_qspeed, 14)
 	if wk.Q["stage_over"]:
 		var oc = K.card(_side, "Q%d 종료" % st, K.AMBER)
 		oc.add_child(K.label("탈락: %s" % ", ".join(wk.Q.get("cut_names", PackedStringArray())), 15, K.INK))
@@ -352,7 +353,7 @@ func _render_quali() -> void:
 	_q_log = K.rtl(13)
 	lc.add_child(_q_log)
 	var hint = K.rtl(12)
-	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요. 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 +0.45초).[/color]" % WK.OUT_MIN
+	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요(아웃랩 한 바퀴). 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 +0.45초).[/color]" % wk.out_min()
 	_side.add_child(hint)
 	_side.add_child(K.btn("⚡ 남은 예선 자동 진행", 15, _on_auto_quali))
 	_q_live_update()
@@ -375,7 +376,7 @@ func _on_q_go(slot: int) -> void:
 	if err != "":
 		_live.text = "[color=#ef4444]%s[/color]" % err
 	if q_speed == 0:
-		q_speed = 30
+		q_speed = 20
 	refresh()
 
 
@@ -881,7 +882,9 @@ func _quali_tick(delta: float) -> void:
 				if c.mine and my_push == null:
 					my_push = [res, sec, el]
 			_:
-				d = f * T.L * 0.5
+				# 인랩: 어택을 마친 곳(또는 포기한 곳)부터 남은 바퀴를 돌아 피트로
+				var d0: float = float(r.get("d0", 0.0))
+				d = (d0 + f * (1.0 - d0)) * T.L
 		lst.append([c, d])
 	_view.solo = {"list": lst}
 	if my_push != null:

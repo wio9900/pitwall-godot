@@ -55,7 +55,15 @@ func _process(_delta: float) -> bool:
 				print("  ! 나가기 후 저장 없음")
 				quit(1)
 				return true
-			main._resume_race()
+			if main.mode == "career":
+				# 커리어: 나가면 본부(HQ)로 → '레이스 주말' 버튼을 눌러도 주말을 새로 시작하지 않고 그 랩부터 이어야 한다
+				if not main.hq_view.visible:
+					print("  ! 커리어 레이스 나가기 후 본부가 안 보임")
+					quit(1)
+					return true
+				main._start_weekend_career()
+			else:
+				main._resume_race()
 			if main.sim == null or main.sim.leader_lap != lap0:
 				print("  ! 이어하기 실패")
 				quit(1)
@@ -140,11 +148,16 @@ func _process(_delta: float) -> bool:
 	main.hq_view._on_wec_swap(1)
 	main.hq_view._on_tab("league")
 	main.hq_view._on_tab("home")
-	main.hq_view._on_diff("2")
+	main._open_settings()
+	main.settings_view._on_diff("2") # 난이도는 설정에서 바꾸면 진행 중인 커리어에도 반영
+	main.settings_view._on_close()
+	if int(main.career.hq["difficulty"]) != 2:
+		push_error("설정 난이도가 커리어에 반영되지 않음")
 	var names: Array = []
 	for d in main.career.my_crew(0):
 		names.append(d["name"])
 	print("WEC 인력 탭 · 라인업: #1 차 %s · 난이도 %d" % [names, int(main.career.hq["difficulty"])])
+	main.ST.set_v("difficulty", 1)
 	main.CareerS.delete_save(main.career.save_slot)
 	main._open_settings()
 	main.settings_view._on_scale("1.1")

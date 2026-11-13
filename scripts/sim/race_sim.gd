@@ -419,7 +419,32 @@ func apply_driver(c) -> void:
 	for ch in last:
 		if ch.to_upper() != ch.to_lower():
 			letters += ch
-	c.code = letters.substr(0, 3).to_upper() if letters != "" else "DRV"
+	c.code = _unique_code(c, letters.to_upper(), parts[0].substr(0, 1).to_upper() if parts.size() > 1 else "")
+
+
+## 같은 레이스에 같은 약칭이 있으면 다른 글자 조합으로 (Hanafin·Hanses 둘 다 HAN 이던 것 → HAN · HNS)
+func _unique_code(c, L: String, ini: String) -> String:
+	if L == "":
+		return "DRV"
+	var cands: Array = [L.substr(0, 3)]
+	if L.length() >= 3:
+		cands.append(L.substr(0, 2) + L.substr(L.length() - 1, 1))
+		for i in range(2, L.length()):
+			cands.append(L.substr(0, 1) + L.substr(1, 1) + L.substr(i, 1))
+		for i in range(1, L.length()):
+			for j in range(i + 1, L.length()):
+				cands.append(L.substr(0, 1) + L.substr(i, 1) + L.substr(j, 1))
+	if ini != "":
+		cands.append(ini + L.substr(0, 2))
+	for cd in cands:
+		var used := false
+		for o in cars:
+			if o != c and o.code == cd:
+				used = true
+				break
+		if not used:
+			return cd
+	return cands[0]
 
 
 # ═════════ 성능 모델 ═════════
@@ -1477,6 +1502,15 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 			tyre_due = false
 	var tyres: bool = tyre_due or wrong
 	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c)
+	# 하위 클래스 최소 주행(브론즈 등): 모자라면 늦지 않게 그 드라이버로 바꾸고, 채울 때까지 내리지 않는다
+	# (예전엔 순서대로만 돌려서 짧은 레이스에서 AI 가 거의 다 60초 페널티를 받았음)
+	var md_short: int = min_drive_short(c)
+	var bi: int = min_drive_idx(c)
+	if md_short > 0 and bi >= 0:
+		if c.drv == bi:
+			driver = must_swap(c)
+		elif left >= md_short and (driver or left <= md_short + STINT * 2 + 2):
+			driver = true
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
 		# 컴파운드 선택: 마지막 한 스틴트·서늘한 밤·공격형 팀은 소프트, 남은 게 길고 아끼는 팀은 하드
@@ -1720,7 +1754,8 @@ func apply_pit(c) -> void:
 			if pg != null:
 				pr_green = int(pg["pos"])
 		c.pit_log.append({"lap": c.lap + 1, "pos": class_pos(c), "from": c.comp, "to": c.boxing["comp"] if c.boxing["tyres"] else c.comp, "tyres": bool(c.boxing["tyres"]), "sc": sc_kind if sc else "",
-			"pred": int(pr["pos"]) if pr != null else class_pos(c), "pred_green": pr_green})
+			"pred": int(pr["pos"]) if pr != null else class_pos(c), "pred_green": pr_green,
+			"ahead_ids": pr["ahead_ids"] if pr != null else []})
 	c.covering = false
 	c.stint_start_lap = c.lap + 1
 	c.stint_start_wear = 0.0
@@ -1766,7 +1801,7 @@ func apply_pit(c) -> void:
 			c.fuel = TANK
 			acts.append("연료 급유")
 		if d.get("driver", false):
-			c.drv = (c.drv + 1) % c.drivers.size()
+			c.drv = next_driver(c)
 			apply_driver(c)
 			c.stint_drv = 0
 			c.drive_warned = -1
@@ -2340,6 +2375,27 @@ func set_fuel_mode(c, m: String) -> void:
 	say(c, "연료 %s 모드" % WEC_FUEL_KO[m])
 
 
+## 최소 주행 규정 대상 드라이버 번호 (없으면 -1)
+func min_drive_idx(c) -> int:
+	if min_drive == null:
+		return -1
+	for i in c.drivers.size():
+		if c.drivers[i].get("grade", "") == min_drive["grade"]:
+			return i
+	return -1
+
+
+## 교대할 다음 드라이버: 최소 주행이 모자란 드라이버가 있으면 그 사람, 아니면 순서대로
+func next_driver(c) -> int:
+	var n: int = c.drivers.size()
+	if n < 2:
+		return c.drv
+	var bi: int = min_drive_idx(c)
+	if bi >= 0 and bi != c.drv and min_drive_short(c) > 0:
+		return bi
+	return (c.drv + 1) % n
+
+
 ## 최소 주행 규정: 해당 등급 드라이버가 더 달려야 하는 랩 수 (0이면 충족)
 func min_drive_short(c) -> int:
 	if min_drive == null:
@@ -2368,6 +2424,14 @@ func pos_at_line(c) -> int:
 		if o.cross.size() > k and float(o.cross[k]) < float(c.cross[k]):
 			n += 1
 	return n
+
+
+## id 로 차 찾기 (없으면 null)
+func car_by_id(id: int) -> Variant:
+	for o in cars:
+		if o.id == id:
+			return o
+	return null
 
 
 func class_pos(c) -> int:
@@ -2793,6 +2857,7 @@ func predict_pit(c) -> Variant:
 	var best_a: Variant = null
 	var best_b: Variant = null
 	var n_ahead := 0
+	var ahead_ids: Array = []
 	for o in ord:
 		if o == c:
 			continue
@@ -2807,6 +2872,7 @@ func predict_pit(c) -> Variant:
 		var after: float = d + loss
 		if after > 0.0:
 			n_ahead += 1
+			ahead_ids.append(o.id)
 			if best_a == null or after < float(best_a[1]):
 				best_a = [o, after]
 		elif best_b == null or after > float(best_b[1]):
@@ -2826,7 +2892,7 @@ func predict_pit(c) -> Variant:
 			var front_lap: float = fw * fw * float(COMP[front.comp][2])
 			var gp: float = float(c.cross[k]) - float(front.cross[k])
 			under = {"code": front.code, "net": (gain_lap + front_lap * 0.5) * 2.0 - 1.0 - gp}
-	return {"pos": n_ahead + 1, "ahead": best_a, "behind": best_b, "loss": loss, "under": under}
+	return {"pos": n_ahead + 1, "ahead": best_a, "behind": best_b, "loss": loss, "under": under, "ahead_ids": ahead_ids}
 
 
 ## WEC 엔트리: 하이퍼카(HY) 팀별 1~2대 + LMGT3(GT) 9팀 × 2대. 팀·크루는 data/wec.json (HTML WEC_FIELD 그대로).

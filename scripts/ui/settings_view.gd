@@ -4,6 +4,7 @@ extends Control
 signal changed
 
 const K = preload("res://scripts/ui/kit.gd")
+const RS = preload("res://scripts/sim/race_sim.gd")
 const ST = preload("res://scripts/ui/settings.gd")
 
 var _box: VBoxContainer
@@ -58,6 +59,11 @@ func _render() -> void:
 	_box.add_child(K.slider(0.0, 1.0, 0.05, vol, _on_vol.bind(vl)))
 	_box.add_child(K.label("엔진 소리 (배경 웅웅거림)", 15, K.DIM))
 	K.seg(_box, [["on", "켜기"], ["off", "끄기"]], "on" if ST.get_v("engine") else "off", _on_engine, 15)
+	_box.add_child(K.label("난이도 (AI 차의 속도·전략 판단) — 퀵 레이스와 진행 중인 커리어에 함께 적용", 15, K.DIM))
+	var d_items: Array = []
+	for di in RS.DIFF_KO.size():
+		d_items.append([str(di), RS.DIFF_KO[di]])
+	K.seg(_box, d_items, str(int(ST.get_v("difficulty"))), _on_diff, 15)
 	_box.add_child(K.label("레이스 시작 배속", 15, K.DIM))
 	var items: Array = []
 	for s in ST.SPEEDS:
@@ -84,6 +90,11 @@ func _on_vol(v: float, vl: Label) -> void:
 
 func _on_engine(v) -> void:
 	ST.set_v("engine", v == "on")
+	changed.emit()
+
+
+func _on_diff(v) -> void:
+	ST.set_v("difficulty", int(v))
 	changed.emit()
 
 
