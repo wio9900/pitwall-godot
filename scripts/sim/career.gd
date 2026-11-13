@@ -472,15 +472,15 @@ func hq_bonus(stat: String) -> float:
 			dv[k] = float(dv[k]) * (1.0 - float(D["econ"]["bopAbsorb"]))
 	match stat:
 		"aero":
-			return float(dv["aero"]) + (int(b["wind"]) - 1) * 0.006 + s_aero + syn - CE0["aero"]
+			return float(dv["aero"]) + (fac_x("wind") - 1.0) * 0.006 + s_aero + syn - CE0["aero"]
 		"engine":
-			return float(dv["engine"]) + (int(b["bench"]) - 1) * 0.006 + s_eng + syn - CE0["eng"]
+			return float(dv["engine"]) + (fac_x("bench") - 1.0) * 0.006 + s_eng + syn - CE0["eng"]
 		"chassis":
-			return float(dv["chassis"]) + (int(b["rig"]) - 1) * 0.006 + s_tyre + syn - CE0["tyre"]
+			return float(dv["chassis"]) + (fac_x("rig") - 1.0) * 0.006 + s_tyre + syn - CE0["tyre"]
 		"rel":
-			return float(dv["rel"]) + (int(b["bench"]) - 1) * 0.003 + s_rel + syn - CE0["rel"]
+			return float(dv["rel"]) + (fac_x("bench") - 1.0) * 0.003 + s_rel + syn - CE0["rel"]
 		"crew":
-			return (int(b["pit"]) - 1) * 0.025
+			return (fac_x("pit") - 1.0) * 0.025
 	return 0.0
 
 
@@ -839,8 +839,12 @@ func dev_cost(sz: String) -> float:
 
 
 func dev_lead(sz: String) -> int:
-	var f := int(hq["base"]["factory"])
-	return maxi(1, int(D["dev"][sz]["lead"]) - (1 if f >= 3 else 0) - (1 if f >= 5 else 0))
+	var f: float = fac_x("factory")
+	var lead: int = maxi(1, int(D["dev"][sz]["lead"]) - (1 if f >= 3.0 else 0) - (1 if f >= 4.99 else 0))
+	# 일정이 짧은 리그(아시안 르망 6경기)는 경기 수 비율만큼 빨리 투입 → 한 시즌에 돌릴 수 있는 개발 횟수를 다른 리그와 같게
+	if cal_len() < 9:
+		lead = maxi(1, int(round(lead * float(cal_len()) / 9.0)))
+	return lead
 
 
 func frontier_gap(k: String) -> float:
@@ -873,14 +877,14 @@ func gain_mult(k: String) -> float:
 
 
 func corr_mean(k: String) -> float:
-	var f := int(hq["base"][D["dev"]["fac"][k]])
-	var sm := int(hq["base"]["sim"])
-	return 0.62 + 0.07 * (f - 1) + 0.025 * (sm - 1)
+	var f: float = fac_x(D["dev"]["fac"][k])
+	var sm: float = fac_x("sim")
+	return 0.62 + 0.07 * (f - 1.0) + 0.025 * (sm - 1.0)
 
 
 func corr_spread(k: String, sz: String) -> float:
-	var f := int(hq["base"][D["dev"]["fac"][k]])
-	return float(D["dev"][sz]["sd"]) * (1.15 - 0.15 * (f - 1))
+	var f: float = fac_x(D["dev"]["fac"][k])
+	return float(D["dev"][sz]["sd"]) * (1.15 - 0.15 * (f - 1.0))
 
 
 func _pkg_count(k: String, next: bool) -> int:
@@ -938,14 +942,49 @@ func _complete_projects(notes: Array) -> void:
 
 
 # ═════════ 설비 ═════════
+## 설비는 1~10레벨로 잘게 (예전 1~5레벨을 9단계로 쪼갬: 레벨 10 = 예전 레벨 5와 같은 효과).
+## fac_x = 예전 기준 환산 레벨(1.0~5.0) — 효과 공식은 예전 그대로 이 값을 쓴다
+const FAC_MAX := 10
+## 리그별 최대 레벨: 하위 리그에서 설비를 끝까지 올려 1부에 '완성된 팀'으로 올라가지 않게 (1부에서 키울 여지)
+const FAC_CAP_F1 := {1: 4, 2: 6, 3: 10}
+const FAC_CAP_WEC := {0: 3, 1: 4, 2: 6, 3: 10}
+
+
+func fac_lv(k: String) -> int:
+	_fac_migrate()
+	return int(hq["base"][k])
+
+
+func fac_x(k: String) -> float:
+	return 1.0 + (fac_lv(k) - 1) * 4.0 / 9.0
+
+
+func fac_cap() -> int:
+	var t: int = int(hq["tier"])
+	if hq.get("entry", "") != "create":
+		return FAC_MAX
+	return int((FAC_CAP_WEC if is_wec() else FAC_CAP_F1).get(t, FAC_MAX))
+
+
+## 예전 저장(1~5레벨)을 새 단계(1~10)로 한 번 바꾼다
+func _fac_migrate() -> void:
+	if int(hq.get("fac_v", 1)) >= 2:
+		return
+	for k in hq["base"]:
+		var old: int = int(hq["base"][k])
+		hq["base"][k] = clampi(int(round(1.0 + (old - 1) * 9.0 / 4.0)), 1, FAC_MAX)
+	hq["fac_v"] = 2
+
+
+## 다음 레벨 비용: 예전 한 단계 비용을 단계 수 비율(4/9)로 나눈 것 → 끝까지 올리는 총비용은 예전과 거의 같음
 func fac_cost(k: String) -> float:
-	return snappedf(float(D["fac_cost"][k]) * int(hq["base"][k]), 0.1)
+	return snappedf(float(D["fac_cost"][k]) * fac_x(k) * 4.0 / 9.0, 0.05)
 
 
 func build_facility(k: String) -> bool:
-	var lv := int(hq["base"][k])
+	var lv := fac_lv(k)
 	var cost := fac_cost(k)
-	if lv >= 5 or float(hq["cash"]) < cost:
+	if lv >= mini(FAC_MAX, fac_cap()) or float(hq["cash"]) < cost:
 		return false
 	var ds := int(D["econ"]["deprSeasons"])
 	var per := snappedf(cost / ds, 0.001)
@@ -954,7 +993,7 @@ func build_facility(k: String) -> bool:
 	hq["spent_cap"] = r2(hq["spent_cap"] + per)
 	book("fac", per)
 	hq["base"][k] = lv + 1
-	news("🏗 %s Lv.%d 완공 (%.1fM · 코스트캡 %.2fM × %d시즌 감가상각)" % [D["fac_ko"][k], lv + 1, cost, per, ds])
+	news("🏗 %s Lv.%d 완공 (%.2fM · 코스트캡 %.2fM × %d시즌 감가상각)" % [D["fac_ko"][k], lv + 1, cost, per, ds])
 	return true
 
 
@@ -1010,7 +1049,7 @@ func _regulation_reset(notes: Array) -> void:
 		notes.append(mw)
 		return
 	var b: Dictionary = hq["base"]
-	var my_infra := (int(b["wind"]) + int(b["bench"]) + int(b["rig"]) + int(b["sim"]) + int(b["factory"])) / 5.0
+	var my_infra := (fac_x("wind") + fac_x("bench") + fac_x("rig") + fac_x("sim") + fac_x("factory")) / 5.0
 	var teams: Array = hq["teams"]
 	for ti in teams.size():
 		var t: Dictionary = teams[ti]
@@ -1025,6 +1064,18 @@ func _regulation_reset(notes: Array) -> void:
 
 
 func _on_tier_change() -> void:
+	# 신규 팀이 F1(1부)에 올라오면 기본 차를 그리드 최하위 팀 수준까지는 맞춘다 — 승격 직후엔 후미권, 개발로 올라가는 곡선
+	if not is_wec() and int(hq["tier"]) >= 3 and hq.get("entry", "") == "create":
+		var t: Dictionary = hq["teams"][my_team()]
+		var lo_a := 1.0
+		var lo_c := 1.0
+		for i in hq["teams"].size():
+			if i == my_team():
+				continue
+			lo_a = minf(lo_a, float(hq["teams"][i].get("aero", 1.0)))
+			lo_c = minf(lo_c, float(hq["teams"][i].get("chassis", 1.0)))
+		t["aero"] = maxf(float(t.get("aero", 0.72)), lo_a)
+		t["chassis"] = maxf(float(t.get("chassis", 0.72)), lo_c)
 	for k in DEV_AREAS:
 		hq["dev"][k] = snappedf(float(hq["dev"][k]) * 0.25, 0.0001)
 		hq["dev_next"][k] = 0.0
@@ -1220,7 +1271,7 @@ func train_junior(i: int) -> bool:
 	hq["cash"] = r2(hq["cash"] - 0.8)
 	book("staff", 0.8)
 	j["last_train"] = int(hq["race_count"])
-	var gain := snappedf(0.04 * (1.0 + (int(hq["base"]["sim"]) - 1) * 0.25), 0.001)
+	var gain := snappedf(0.04 * (1.0 + (fac_x("sim") - 1.0) * 0.25), 0.001)
 	j["cur"] = minf(float(j["pot"]), snappedf(float(j["cur"]) + gain, 0.01))
 	j["value"] = junior_value(j)
 	return true
@@ -1885,7 +1936,7 @@ func _settle(mine: Array, classified: Array, total: int) -> Dictionary:
 		salary += driver_salary(salary_driver(slot)) * (0.15 if is_spec_tier() else 1.0) / cl
 	var ops: float = float(D["econ"]["ops"][ser()]) * ts
 	var overhead: float = float(D["econ"]["overhead"][ser()]) * ts
-	var fac_red := 1.0 - 0.1 * (int(hq["base"]["factory"]) - 1)
+	var fac_red := 1.0 - 0.1 * (fac_x("factory") - 1.0)
 	var repair := 0.0
 	for c in mine:
 		if c.dnf == "":
@@ -2073,7 +2124,9 @@ func _season_lifecycle(rank: int, notes: Array) -> void:
 				news("📰 %s(%d세) 은퇴, 루키 %s(%d세) 데뷔" % [old, age, rk2, nage])
 	for j in hq["juniors"]:
 		j["age"] = int(j["age"]) + 1
-		j["cur"] = minf(float(j["pot"]), snappedf(float(j["cur"]) + 0.01 + (int(hq["base"]["sim"]) - 1) * 0.005, 0.01))
+		# 일정이 짧은 리그는 훈련 효과를 경기 수 비율만큼 크게 (시즌당 성장 같게)
+		var tb: float = 9.0 / float(mini(9, cal_len()))
+		j["cur"] = minf(float(j["pot"]), snappedf(float(j["cur"]) + (0.01 + (fac_x("sim") - 1.0) * 0.005) * tb, 0.01))
 		j["value"] = junior_value(j)
 
 

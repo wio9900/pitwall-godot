@@ -365,7 +365,7 @@ func _tab_rnd() -> void:
 			status = "예상 효과 · 소형(%d경기) +%.1f~%.1f%% / 대형(%d경기) +%.1f~%.1f%%" % [cr.dev_lead("s"), rs[0] * 100, rs[1] * 100, cr.dev_lead("l"), rl[0] * 100, rl[1] * 100]
 		var nxt: float = h["dev_next"][k]
 		var fk: String = cr.D["dev"]["fac"][k]
-		var txt := "[b]%s[/b] · 누적 [color=#22c55e]+%.1f%%[/color]%s\n%s\n[color=#8b98a5]%s Lv.%d · 평균 상관도 %d%%[/color]" % [cr.D["dev_ko_full"][k], float(h["dev"][k]) * 100, (" [color=#a855f7]차세대 +%.1f%%[/color]" % (nxt * 100)) if nxt > 0 else "", status, cr.D["fac_ko"][fk], int(h["base"][fk]), int(round(cr.corr_mean(k) * 100))]
+		var txt := "[b]%s[/b] · 누적 [color=#22c55e]+%.1f%%[/color]%s\n%s\n[color=#8b98a5]%s Lv.%d · 평균 상관도 %d%%[/color]" % [cr.D["dev_ko_full"][k], float(h["dev"][k]) * 100, (" [color=#a855f7]차세대 +%.1f%%[/color]" % (nxt * 100)) if nxt > 0 else "", status, cr.D["fac_ko"][fk], cr.fac_lv(fk), int(round(cr.corr_mean(k) * 100))]
 		var btns: Array = []
 		for sz in ["s", "l"]:
 			var cost: float = cr.dev_cost(sz)
@@ -454,26 +454,31 @@ func _tab_base() -> void:
 	for d in h["depr"]:
 		if int(d["left"]) > 0:
 			depr_next += float(d["per"])
-	var c1 = K.card(_body, "설비 (최대 Lv.5)")
+	var c1 = K.card(_body, "설비 (Lv.1~10)")
 	_txt(c1, "[color=#8b98a5]설비는 개발 효율과 [b]규정 변경 때 새 차의 출발점[/b]을 정해요. 현금은 착공 때 전액 나가고, 코스트캡에는 %d시즌에 나눠 감가상각돼요. 다음 시즌 캡에 이미 잡힌 감가상각: [b]%.2fM[/b][/color]" % [int(cr.D["econ"]["deprSeasons"]), depr_next], 13)
 	var desc := {
-		"wind": ["풍동", "공력 개발 상관도↑·편차↓ · 공력 +0.6%/Lv"],
-		"bench": ["파워트레인 다이나모", "파워트레인·신뢰성 개발 상관도↑ · 엔진 +0.6%/Lv · 신뢰성 +0.3%/Lv"],
-		"rig": ["섀시 리그", "섀시 개발 상관도↑ · 섀시 +0.6%/Lv"],
-		"sim": ["드라이버 시뮬레이터", "모든 개발 상관도 +2.5%/Lv · 유망주 성장 가속"],
-		"factory": ["카본 복합재 공장", "Lv3·Lv5에서 개발 기간 -1경기 · 사고 수리비 -10%/Lv"],
-		"pit": ["피트 크루 훈련센터", "피트 정차 시간 단축 (Lv당 약 0.2초)"],
+		"wind": ["풍동", "공력 개발 상관도↑·편차↓ · 공력 최대 +2.4% (Lv10)"],
+		"bench": ["파워트레인 다이나모", "파워트레인·신뢰성 개발 상관도↑ · 엔진 최대 +2.4% · 신뢰성 최대 +1.2% (Lv10)"],
+		"rig": ["섀시 리그", "섀시 개발 상관도↑ · 섀시 최대 +2.4% (Lv10)"],
+		"sim": ["드라이버 시뮬레이터", "모든 개발 상관도 최대 +10% · 유망주 성장 가속"],
+		"factory": ["카본 복합재 공장", "Lv6·Lv10에서 개발 기간 -1경기 · 사고 수리비 최대 -40%"],
+		"pit": ["피트 크루 훈련센터", "피트 정차 시간 단축 (Lv10 약 -0.8초)"],
 	}
 	var proj: float = cr.projected_spend()
 	var ds := int(cr.D["econ"]["deprSeasons"])
+	var cap: int = cr.fac_cap()
+	if cap < cr.FAC_MAX:
+		_txt(c1, "[color=#8b98a5]이 리그에선 설비를 [b]Lv.%d[/b]까지만 올릴 수 있어요 (상위 리그에서 상한이 풀려요).[/color]" % cap, 13)
 	for k in CS.FAC_KEYS:
-		var lv := int(h["base"][k])
+		var lv: int = cr.fac_lv(k)
 		var cost: float = cr.fac_cost(k)
 		var per := cost / ds
 		var over := proj + per > float(h["cost_cap_limit"]) + 0.000001
-		var ok := lv < 5 and float(h["cash"]) >= cost
-		var lab := "MAX" if lv >= 5 else ("확장 %.1fM · 캡 %.2f×%d%s" % [cost, per, ds, " ⚠" if over else ""])
-		K.row(c1, "[b]%s[/b] Lv.%d/5\n[color=#8b98a5]%s[/color]" % [desc[k][0], lv, desc[k][1]], [K.sbtn(lab, _on_fac.bind(k), ok, K.BAD if over else K.GOOD)], 14)
+		var top: int = mini(cap, cr.FAC_MAX)
+		var ok := lv < top and float(h["cash"]) >= cost
+		var lab := ("MAX" if lv >= cr.FAC_MAX else "리그 상한") if lv >= top else ("확장 %.2fM · 캡 %.2f×%d%s" % [cost, per, ds, " ⚠" if over else ""])
+		var bar := "[color=#22c55e]%s[/color][color=#3a4250]%s[/color][color=#5d2a2a]%s[/color]" % ["■".repeat(lv), "■".repeat(maxi(0, top - lv)), "■".repeat(maxi(0, cr.FAC_MAX - top))]
+		K.row(c1, "[b]%s[/b] Lv.%d/%d  %s\n[color=#8b98a5]%s[/color]" % [desc[k][0], lv, cr.FAC_MAX, bar, desc[k][1]], [K.sbtn(lab, _on_fac.bind(k), ok, K.BAD if over else K.GOOD)], 14)
 
 
 func _on_region(v) -> void:
