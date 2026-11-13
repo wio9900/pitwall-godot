@@ -780,7 +780,7 @@ func _pu_card() -> void:
 			bh.add_child(bb)
 	c.add_child(K.label("연습 주행에 쓸 부품", 14, K.DIM))
 	K.seg(c, [["old", "낡은 부품 (레이스 부품 아낌)"], ["new", "레이스 부품 (수명 더 씀)"]], "old" if bool(_h().get("pu_old_practice", true)) else "new", _on_pu_practice, 14)
-	_txt(c, "[color=#8b98a5]부품은 레이스마다 닳고, 수명 70%%를 넘으면 고장 위험이 커져요. 100%%가 되면 자동 교체돼요. 할당을 넘겨 새 부품을 넣으면 첫 번째는 10계단, 그 뒤로는 5계단 그리드 강등이에요 — 강등을 감수하고 미리 바꾸는 것도 전략이에요.[/color]", 12)
+	_txt(c, "[color=#8b98a5]부품은 레이스마다 닳고, 수명 70%를 넘으면 고장 위험이 커져요. 100%가 되면 자동 교체돼요. 할당을 넘겨 새 부품을 넣으면 첫 번째는 10계단, 그 뒤로는 5계단 그리드 강등이에요 — 강등을 감수하고 미리 바꾸는 것도 전략이에요.[/color]", 12)
 
 
 func _on_pu(slot: int, k: String) -> void:
