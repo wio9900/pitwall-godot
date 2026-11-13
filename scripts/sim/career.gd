@@ -263,7 +263,11 @@ func race_rules(sprint: bool = false) -> Dictionary:
 ## 이번 레이스 랩 수 (F1 15랩, F2 피처 15·스프린트 10, F3 12, WEC 는 서킷별 '짧게')
 func race_laps(sprint: bool = false) -> int:
 	if is_wec():
-		return int(DB.circuits[next_circuit()]["lapsOpt"]["short"])
+		# 하위 리그(아시안 르망·LMGT3·LMP2)는 표준 길이: 스틴트가 5~8개라 브론즈·실버 최소 주행을 '언제 태울지' 고를 여유가 생긴다
+		# (짧은 길이에선 스틴트 2~4개라 사실상 매 스틴트 교대해야 했음). 하이퍼카는 예전 그대로
+		var lo: Dictionary = DB.circuits[next_circuit()]["lapsOpt"]
+		# 단, 르망처럼 원래 긴 레이스는 하이퍼카(1부)보다 길어지지 않게 최대 30랩
+		return maxi(int(lo["short"]), mini(int(lo["std"]), 30)) if is_spec_tier() else int(lo["short"])
 	match race_format():
 		"f3":
 			return 12
