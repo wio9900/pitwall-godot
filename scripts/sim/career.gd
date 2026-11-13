@@ -156,6 +156,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	_starting_sponsors()
 	_refresh_offers()
 	_refresh_pay_pool()
+	_staff_migrate()
 	news("시즌 1 개막! %s 본부에 오신 걸 환영합니다." % hq["team_name"])
 
 
@@ -455,9 +456,11 @@ func hq_bonus(stat: String) -> float:
 	var s_eng := 0.0
 	var s_tyre := 0.0
 	var s_rel := 0.0
+	var s_crew := 0.0
 	for k in ce:
 		var e: Dictionary = ce[k]
-		if e["tier"] != "S급" and e["tier"] != "A급":
+		s_crew += float(e.get("crewMod", 0.0))
+		if k in ["aero", "power", "chassis"] and e["tier"] != "S급" and e["tier"] != "A급":
 			all_high = false
 		s_aero += float(e.get("aeroMod", 0.0))
 		s_eng += float(e.get("engMod", 0.0))
@@ -480,7 +483,7 @@ func hq_bonus(stat: String) -> float:
 		"rel":
 			return float(dv["rel"]) + (fac_x("bench") - 1.0) * 0.003 + s_rel + syn - CE0["rel"]
 		"crew":
-			return (fac_x("pit") - 1.0) * 0.025
+			return (fac_x("pit") - 1.0) * 0.025 + s_crew
 	return 0.0
 
 
@@ -569,20 +572,58 @@ func _roster_crew(names: Array) -> Array:
 const PU_ALLOC := {"ice": 4, "ers": 3, "gb": 4}
 const PU_LIFE := {"ice": 6.0, "ers": 7.0, "gb": 5.0}
 const PU_KO := {"ice": "엔진(ICE)", "ers": "ERS", "gb": "기어박스"}
+const PU_PRAC := 0.25 # 연습 주행 = 레이스 거리의 1/4
 
 
 func pu_on() -> bool:
 	return not is_wec() and not is_spec_tier()
 
 
+## 차 한 대의 부품 재고: {종류: {pool: [{no, wear}], cur: 장착 번호(인덱스), prac: 연습용(-1 = 자동), pen: 할당 초과 횟수}}
 func pu_state(slot: int) -> Dictionary:
 	if not hq.has("pu") or (hq["pu"] as Array).size() < 2:
 		hq["pu"] = [_pu_fresh(), _pu_fresh()]
-	return hq["pu"][slot]
+	var st: Dictionary = hq["pu"][slot]
+	for k in PU_ALLOC:
+		var e: Dictionary = st[k]
+		if not e.has("pool"):
+			# 예전 저장(n·wear)을 재고 목록으로: 지난 부품은 거의 다 쓴 것으로
+			var pool: Array = []
+			for i in int(e.get("n", 1)) - 1:
+				pool.append({"no": i + 1, "wear": 0.9})
+			pool.append({"no": int(e.get("n", 1)), "wear": float(e.get("wear", 0.0))})
+			st[k] = {"pool": pool, "cur": pool.size() - 1, "prac": -1, "pen": int(e.get("pen", 0))}
+	return st
 
 
 func _pu_fresh() -> Dictionary:
-	return {"ice": {"n": 1, "wear": 0.0, "pen": 0}, "ers": {"n": 1, "wear": 0.0, "pen": 0}, "gb": {"n": 1, "wear": 0.0, "pen": 0}}
+	var d := {}
+	for k in PU_ALLOC:
+		d[k] = {"pool": [{"no": 1, "wear": 0.0}], "cur": 0, "prac": -1, "pen": 0}
+	return d
+
+
+func pu_part(slot: int, k: String) -> Dictionary:
+	var e: Dictionary = pu_state(slot)[k]
+	return e["pool"][int(e["cur"])]
+
+
+func pu_used(slot: int, k: String) -> int:
+	return (pu_state(slot)[k]["pool"] as Array).size()
+
+
+## 다음 할당 초과 부품의 강등 칸 수 (할당 안이면 0)
+func pu_next_pen(slot: int, k: String) -> int:
+	var e: Dictionary = pu_state(slot)[k]
+	if (e["pool"] as Array).size() < int(PU_ALLOC[k]):
+		return 0
+	return 10 if int(e["pen"]) == 0 else 5
+
+
+## 다음 레이스에 쌓인 그리드 강등 (여러 부품이면 합산)
+func pu_pending_pen(slot: int) -> int:
+	var gl: Array = hq.get("next_mods", {}).get("grid_pen", [0, 0])
+	return int(gl[slot]) if slot < gl.size() else 0
 
 
 ## 낡은 부품일수록 신뢰성 하락 (수명 70% 넘으면 급격히)
@@ -590,40 +631,126 @@ func pu_rel_pen(slot: int) -> float:
 	if not pu_on():
 		return 0.0
 	var p := 0.0
-	var st := pu_state(slot)
 	for k in PU_ALLOC:
-		p += maxf(0.0, float(st[k]["wear"]) - 0.7) * 0.12
+		p += maxf(0.0, float(pu_part(slot, k)["wear"]) - 0.7) * 0.12
 	return p
 
 
-## 새 부품 투입. 할당 초과면 다음 레이스 그리드 강등. 돌려주는 값 = 강등 칸 수
-func pu_replace(slot: int, k: String, forced: bool = false) -> int:
-	var st := pu_state(slot)
-	var e: Dictionary = st[k]
-	e["n"] = int(e["n"]) + 1
-	e["wear"] = 0.0
-	var pen := 0
-	if int(e["n"]) > int(PU_ALLOC[k]):
-		pen = 10 if int(e.get("pen", 0)) == 0 else 5
-		e["pen"] = int(e.get("pen", 0)) + 1
+## 새 부품 추가 + 장착. 할당 초과면 다음 레이스 그리드 강등(첫 초과 10, 이후 5 — 여러 개면 합산). 돌려주는 값 = 이번 강등 칸 수
+func pu_add(slot: int, k: String, forced: bool = false) -> int:
+	var e: Dictionary = pu_state(slot)[k]
+	var pool: Array = e["pool"]
+	var pen := pu_next_pen(slot, k)
+	pool.append({"no": pool.size() + 1, "wear": 0.0})
+	e["cur"] = pool.size() - 1
+	if pen > 0:
+		e["pen"] = int(e["pen"]) + 1
 		_add_mod("grid_pen", slot, pen)
-	news("🔧 %s %s 새 부품 (%d/%d)%s%s" % [_slot_name(slot), PU_KO[k], int(e["n"]), int(PU_ALLOC[k]), (" — 할당 초과, 그리드 %d계단 강등" % pen) if pen > 0 else "", " (수명 다해 교체)" if forced else ""])
+	news("🔧 %s %s #%d 추가 (%d/%d)%s%s" % [_slot_name(slot), PU_KO[k], pool.size(), pool.size(), int(PU_ALLOC[k]), (" — 할당 초과, 그리드 %d계단 강등" % pen) if pen > 0 else "", " (남은 부품이 없어 자동)" if forced else ""])
 	save()
 	return pen
+
+
+## 예전 이름 (테스트·이벤트 호환)
+func pu_replace(slot: int, k: String, forced: bool = false) -> int:
+	return pu_add(slot, k, forced)
+
+
+## 재고에 있는 부품 장착 (수명이 다한 부품은 못 씀). 강등 없음
+func pu_mount(slot: int, k: String, idx: int) -> bool:
+	var e: Dictionary = pu_state(slot)[k]
+	if idx < 0 or idx >= (e["pool"] as Array).size() or float(e["pool"][idx]["wear"]) >= 1.0:
+		return false
+	e["cur"] = idx
+	if int(e["prac"]) == idx:
+		e["prac"] = -1
+	save()
+	return true
+
+
+## 연습 주행용 부품 (-1 = 자동: 장착 안 한 가장 낡은 쓸 수 있는 부품, 없으면 장착 부품)
+func pu_set_practice(slot: int, k: String, idx: int) -> void:
+	pu_state(slot)[k]["prac"] = idx
+	save()
+
+
+func pu_practice_idx(slot: int, k: String) -> int:
+	var e: Dictionary = pu_state(slot)[k]
+	var pool: Array = e["pool"]
+	var pi: int = int(e["prac"])
+	if pi >= 0 and pi < pool.size() and float(pool[pi]["wear"]) < 1.0:
+		return pi
+	var best := -1
+	for i in pool.size():
+		if i == int(e["cur"]) or float(pool[i]["wear"]) >= 1.0:
+			continue
+		if best < 0 or float(pool[i]["wear"]) > float(pool[best]["wear"]):
+			best = i
+	return best if best >= 0 else int(e["cur"])
 
 
 func _pu_after_race(notes: Array) -> void:
 	if not pu_on():
 		return
-	var old_practice: bool = bool(hq.get("pu_old_practice", true))
 	for slot in 2:
-		var st := pu_state(slot)
 		for k in PU_ALLOC:
-			# 레이스 거리 + (연습에 새 부품을 쓰면) 연습 거리
-			st[k]["wear"] = snappedf(float(st[k]["wear"]) + (1.0 + (0.0 if old_practice else 0.25)) / float(PU_LIFE[k]), 0.001)
-			if float(st[k]["wear"]) >= 1.0:
-				var pen := pu_replace(slot, k, true)
-				notes.append("🔧 %s %s 수명 다해 교체%s" % [_slot_name(slot), PU_KO[k], (" · 그리드 -%d" % pen) if pen > 0 else ""])
+			var e: Dictionary = pu_state(slot)[k]
+			var pool: Array = e["pool"]
+			var life: float = float(PU_LIFE[k])
+			var pi := pu_practice_idx(slot, k)
+			# 자동인데 여분 부품이 없으면 연습은 할당 밖 시험용 부품으로 친다 (예전 '낡은 부품' 기본값과 같은 밸런스)
+			if pi != int(e["cur"]) or int(e["prac"]) >= 0:
+				pool[pi]["wear"] = snappedf(minf(1.0, float(pool[pi]["wear"]) + PU_PRAC / life), 0.001)
+			var cp: Dictionary = pool[int(e["cur"])]
+			cp["wear"] = snappedf(minf(1.0, float(cp["wear"]) + 1.0 / life), 0.001)
+			if float(cp["wear"]) < 1.0:
+				continue
+			# 수명이 다하면 재고에서 가장 쌩쌩한 부품으로, 없으면 새 부품
+			var best := -1
+			for i in pool.size():
+				if float(pool[i]["wear"]) < 1.0 and (best < 0 or float(pool[i]["wear"]) < float(pool[best]["wear"])):
+					best = i
+			if best >= 0:
+				e["cur"] = best
+				notes.append("🔧 %s %s #%d 수명 끝 → 재고 #%d 장착" % [_slot_name(slot), PU_KO[k], int(cp["no"]), best + 1])
+			else:
+				var pen := pu_add(slot, k, true)
+				notes.append("🔧 %s %s 수명 끝 → 새 부품%s" % [_slot_name(slot), PU_KO[k], (" · 그리드 -%d" % pen) if pen > 0 else ""])
+	_ai_pu_after_race()
+
+
+## AI 도 같은 규칙: 부품이 다음 레이스를 못 버틸 것 같으면 새 부품, 할당 넘기면 강등(첫 10, 이후 5, 합산)
+func _ai_pu_after_race() -> void:
+	if not hq.has("ai_pu"):
+		hq["ai_pu"] = {}
+	var ap: Dictionary = hq["ai_pu"]
+	var pens := {}
+	for ti in hq["teams"].size():
+		if ti == my_team():
+			continue
+		var tn: String = hq["teams"][ti]["name"]
+		for slot in 2:
+			var key := "%s|%d" % [tn, slot]
+			if not ap.has(key):
+				var d := {}
+				for k in PU_ALLOC:
+					d[k] = {"n": 1, "wear": snappedf(uni(0.0, 0.3), 0.001), "pen": 0}
+				ap[key] = d
+			for k in PU_ALLOC:
+				var e: Dictionary = ap[key][k]
+				var life: float = float(PU_LIFE[k])
+				e["wear"] = snappedf(float(e["wear"]) + 1.0 / life * uni(0.9, 1.1), 0.001)
+				if float(e["wear"]) + 1.0 / life <= 1.02:
+					continue
+				e["n"] = int(e["n"]) + 1
+				e["wear"] = 0.0
+				if int(e["n"]) > int(PU_ALLOC[k]):
+					var pn := 10 if int(e["pen"]) == 0 else 5
+					e["pen"] = int(e["pen"]) + 1
+					if not pens.has(tn):
+						pens[tn] = [0, 0]
+					pens[tn][slot] = int(pens[tn][slot]) + pn
+	hq["ai_pen"] = pens
 
 
 ## 레이스 시뮬레이션에 넘길 옵션 (팀·엔진·내 차 보정·WEC 엔트리)
@@ -631,6 +758,7 @@ func race_opts(sprint: bool = false) -> Dictionary:
 	var o: Dictionary = _race_opts(sprint)
 	if pu_on():
 		o["pu_rel"] = [pu_rel_pen(0), pu_rel_pen(1)]
+		o["ai_grid_pen"] = hq.get("ai_pen", {})
 	o["difficulty"] = int(hq.get("difficulty", 1))
 	var em: Dictionary = hq.get("next_mods", {})
 	if not em.is_empty():
@@ -873,6 +1001,8 @@ func gain_mult(k: String) -> float:
 			m *= 1.12
 		elif ce["tier"] == "A급":
 			m *= 1.06
+		if ce.get("trait", "") == "innov":
+			m *= 1.04
 	return m
 
 
@@ -1181,10 +1311,131 @@ func change_engine(e: String) -> bool:
 	return true
 
 
-# ═════════ 인력: 수석 엔지니어 ═════════
+# ═════════ 인력: 파트별 책임자 (공력·파워트레인·섀시·전략·피트 크루) ═════════
+## hq["eng_pool"] = 이번 시즌 후보 전체(파트 섞임), hq["chief"][파트] = 현재 책임자.
+## 후보는 시즌마다 새로 뽑고, 개막 전에 영입 안 한 상위 후보는 AI 팀이 데려갈 수 있다(rival).
+const STAFF_DEPTS := ["aero", "power", "chassis", "strategy", "pit"]
+const STAFF_TRAIT_KO := {"innov": "혁신가 · 개발 효율 +4%", "steady": "꼼꼼함 · 신뢰성 +0.3%", "drill": "훈련 교관 · 피트 크루 +0.5%", "sharp": "날카로운 분석 · 셋업 추천 정확도↑", "cheap": "합리적 몸값 · 계약금 -20%"}
+const STAFF_TIER_BASE := {"S": {"cost": 4.0, "pop": 0.68}, "A": {"cost": 2.5, "pop": 0.52}, "B": {"cost": 1.3, "pop": 0.3}, "C": {"cost": 0.5, "pop": 0.0}}
+
+
+func _staff_migrate() -> void:
+	var HD: Dictionary = D["hq_default"]
+	for k in ["strategy", "pit"]:
+		if not hq["chief"].has(k):
+			hq["chief"][k] = HD["staffDefaults"][k].duplicate(true)
+	if not hq.get("staff_v2", false):
+		hq["staff_v2"] = true
+		staff_refresh_pool()
+
+
+## 시즌 후보 새로 뽑기: 파트마다 4~5명 (S 0~1 · A 1~2 · B 2 · C 1)
+func staff_refresh_pool() -> void:
+	var HD: Dictionary = D["hq_default"]
+	var names: Array = HD["staffNames"]
+	var base_pool: Array = HD["engineerPool"]
+	var deps: Dictionary = HD["staffDepts"]
+	var pool: Array = []
+	var used := {}
+	for dk in STAFF_DEPTS:
+		var tiers: Array = []
+		if rnd() < 0.6:
+			tiers.append("S")
+		tiers.append("A")
+		if rnd() < 0.5:
+			tiers.append("A")
+		tiers.append("B")
+		tiers.append("B")
+		tiers.append("C")
+		for tr in tiers:
+			var nm := ""
+			for _t in 20:
+				nm = "%s. %s" % [String("ABCDEFGHJKLMNPRSTW")[rng.randi_range(0, 17)], names[rng.randi_range(0, names.size() - 1)]]
+				if not used.has(nm):
+					break
+			used[nm] = true
+			var jit: float = uni(0.85, 1.15)
+			var e := {"name": nm, "dept": dk, "deptKo": deps[dk]["ko"], "role": deps[dk]["role"], "tier": tr + "급", "hired": false,
+				"aeroMod": 0.0, "engMod": 0.0, "tyreMod": 0.0, "relMod": 0.0, "eqMod": 0.0, "crewMod": 0.0, "trait": "", "rival": ""}
+			if dk in ["aero", "power", "chassis"]:
+				var ref: Dictionary = {}
+				for bp in base_pool:
+					if bp["dept"] == dk and String(bp["tier"]).begins_with(tr):
+						ref = bp
+				if ref.is_empty():
+					ref = HD["chiefEngineers"][dk]
+				for mk in ["aeroMod", "engMod", "tyreMod", "relMod"]:
+					e[mk] = snappedf(float(ref[mk]) * jit, 0.0005)
+			elif dk == "strategy":
+				e["eqMod"] = snappedf(float(deps[dk]["eq"][tr]) * jit, 0.005)
+			else:
+				e["crewMod"] = snappedf(float(deps[dk]["crew"][tr]) * jit, 0.0005)
+			var cost: float = float(STAFF_TIER_BASE[tr]["cost"]) * jit * (0.6 if dk in ["strategy", "pit"] else 1.0)
+			if rnd() < 0.45 and tr != "C":
+				var tk: Array = ["innov", "steady", "cheap"]
+				if dk == "pit":
+					tk = ["drill", "steady", "cheap"]
+				elif dk == "strategy":
+					tk = ["sharp", "cheap"]
+				e["trait"] = tk[rng.randi_range(0, tk.size() - 1)]
+			if e["trait"] == "steady":
+				e["relMod"] = float(e["relMod"]) + 0.003
+			elif e["trait"] == "drill":
+				e["crewMod"] = float(e["crewMod"]) + 0.005
+			elif e["trait"] == "sharp":
+				e["eqMod"] = float(e["eqMod"]) + 0.05
+			elif e["trait"] == "cheap":
+				cost *= 0.8
+			e["cost"] = snappedf(maxf(0.2, cost), 0.1)
+			e["reqPop"] = clampf(snappedf(float(STAFF_TIER_BASE[tr]["pop"]) + (jit - 1.0) * 0.3, 0.01), 0.0, 0.9)
+			# 상위 후보는 AI 팀이 노린다 — 개막 전에 안 데려오면 그 팀으로 간다
+			if tr in ["S", "A"] and not is_spec_tier() and rnd() < 0.55:
+				var ti: int = rng.randi_range(0, hq["teams"].size() - 1)
+				if ti != my_team():
+					e["rival"] = String(hq["teams"][ti]["name"])
+			pool.append(e)
+	hq["eng_pool"] = pool
+
+
+## 한 파트의 후보 인덱스들 (eng_pool 안 위치)
+func staff_cands(dk: String) -> Array:
+	_staff_migrate()
+	var out: Array = []
+	for i in hq["eng_pool"].size():
+		if hq["eng_pool"][i]["dept"] == dk and not hq["eng_pool"][i].get("gone", false):
+			out.append(i)
+	return out
+
+
+func staff_chief(dk: String) -> Dictionary:
+	_staff_migrate()
+	return hq["chief"][dk]
+
+
+## 개막 첫 레이스가 끝나면, 영입 안 된 '관심' 후보는 그 AI 팀으로 (팀 성능 소폭 상승)
+func _ai_staff_scout(notes: Array) -> void:
+	if not hq.get("staff_v2", false):
+		return
+	for e in hq["eng_pool"]:
+		if e["hired"] or e.get("gone", false) or String(e.get("rival", "")) == "":
+			continue
+		e["gone"] = true
+		var gain: float = 0.004 if String(e["tier"]).begins_with("S") else 0.0025
+		for t in hq["teams"]:
+			if t["name"] != e["rival"]:
+				continue
+			if t.has("perf"):
+				t["perf"] = snappedf(float(t["perf"]) + gain * 0.5, 0.0001)
+			else:
+				var key: String = {"aero": "aero", "chassis": "chassis", "power": "rel"}.get(e["dept"], "chassis")
+				t[key] = snappedf(minf(0.99, float(t.get(key, 0.8)) + gain), 0.0001)
+		notes.append("👔 %s이(가) %s %s %s 영입" % [e["rival"], e["tier"], e["role"], e["name"]])
+
+
 func can_hire_engineer(i: int) -> bool:
+	_staff_migrate()
 	var en: Dictionary = hq["eng_pool"][i]
-	return is_preseason() and not en["hired"] and float(hq["pop"]) >= float(en["reqPop"]) and float(hq["cash"]) >= float(en["cost"])
+	return is_preseason() and not en["hired"] and not en.get("gone", false) and float(hq["pop"]) >= float(en["reqPop"]) and float(hq["cash"]) >= float(en["cost"])
 
 
 func hire_engineer(i: int) -> bool:
@@ -1198,7 +1449,7 @@ func hire_engineer(i: int) -> bool:
 			x["hired"] = false
 	en["hired"] = true
 	hq["chief"][en["dept"]] = en.duplicate(true)
-	news("[%s] 수석 엔지니어 %s 영입 완료!" % [en["deptKo"], en["name"]])
+	news("[%s] %s %s 영입 완료!" % [en["deptKo"], en.get("role", "수석 엔지니어"), en["name"]])
 	return true
 
 
@@ -1482,7 +1733,8 @@ func eng_quality() -> float:
 		var t: String = String(ce.get("tier", "B급"))
 		tot += {"S": 1.0, "A": 0.75, "B": 0.5, "C": 0.25}.get(t.substr(0, 1), 0.5)
 		n += 1
-	return tot / maxf(1.0, n)
+	var st: Dictionary = hq.get("chief", {}).get("strategy", {})
+	return clampf(tot / maxf(1.0, n) + float(st.get("eqMod", 0.0)), 0.0, 1.0)
 
 
 func duty_laps() -> int:
@@ -1766,6 +2018,7 @@ func after_race(sim) -> Dictionary:
 	var ec := _settle(mine, classified, total)
 	hq["race_count"] = int(hq["race_count"]) + 1
 	_pu_after_race(notes)
+	_ai_staff_scout(notes)
 	_complete_projects(notes)
 	var cl := cal_len()
 	var ri := round_idx()
@@ -1847,6 +2100,15 @@ func _track_season(classified: Array, mine: Array, pts_table: Array, mult: int, 
 		if p <= 2:
 			st["podiums"] = int(st["podiums"]) + 1
 		st["best"] = mini(int(st["best"]), p + 1)
+	# 라운드별 내 결과 (HQ 일정 칸에 표시): [가장 좋은 순위, 다른 차 순위] — 0 = 리타이어
+	var rr: Array = []
+	for c in mine:
+		var p2 := classified.find(c)
+		rr.append(0 if (c.dnf != "" or p2 < 0) else p2 + 1)
+	rr.sort_custom(func(a, b): return (a if a > 0 else 99) < (b if b > 0 else 99))
+	if not hq.has("round_res"):
+		hq["round_res"] = []
+	hq["round_res"].append(rr)
 
 
 func driver_standings() -> Array:
@@ -2027,9 +2289,14 @@ func _ai_bop(sim, classified: Array, notes: Array) -> void:
 func _season_start(notes: Array) -> void:
 	hq["season_base"] = int(hq["race_count"])
 	hq["pu"] = [_pu_fresh(), _pu_fresh()]
+	hq["ai_pu"] = {}
+	hq["ai_pen"] = {}
 	hq["team_pts"] = {}
 	hq["drv_pts"] = {}
 	hq["season_stats"] = {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99}
+	hq["round_res"] = []
+	_staff_migrate()
+	staff_refresh_pool()
 	hq["last_ledger"] = hq["ledger"]
 	hq["ledger"] = _new_ledger()
 	var carry := 0.0
@@ -2183,6 +2450,7 @@ func load_save(s: int = -1) -> bool:
 		return false
 	hq = data
 	rng.randomize()
+	_staff_migrate()
 	return true
 
 

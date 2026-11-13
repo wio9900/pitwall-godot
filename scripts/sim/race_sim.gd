@@ -365,8 +365,15 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		for c in cars:
 			if c.mine and c.slot < pr.size():
 				c.rel = clampf(c.rel - float(pr[c.slot]), 0.5, 0.99)
-			elif not c.mine and rnd() < 0.04:
-				c.grid_pen = 10 if rnd() < 0.5 else 5 # AI 도 가끔 할당을 넘겨 부품 교체
+			elif not c.mine and not opts.has("ai_grid_pen") and rnd() < 0.04:
+				c.grid_pen = 10 if rnd() < 0.5 else 5 # (예전 저장 호환) AI 도 가끔 할당을 넘겨 부품 교체
+	# AI 부품 강등 (커리어가 AI 부품 재고를 같은 규칙으로 계산해서 넘김)
+	if opts.has("ai_grid_pen"):
+		var ag: Dictionary = opts["ai_grid_pen"]
+		for c in cars:
+			if not c.mine and ag.has(c.team):
+				var arr: Array = ag[c.team]
+				c.grid_pen = int(arr[c.slot]) if c.slot < arr.size() else 0
 	# 그리드: 예선 페이스 순
 	var qp = {}
 	for c in cars:
@@ -2653,8 +2660,9 @@ func prepare_start() -> void:
 		if c.grid_pen > 0:
 			var i: int = cars.find(c)
 			cars.remove_at(i)
-			cars.insert(mini(cars.size(), i + c.grid_pen), c)
-			event("%s 그리드 %d계단 강등 (파워유닛 교체)" % [name_of(c), c.grid_pen], "bad")
+			var ni: int = mini(cars.size(), i + c.grid_pen)
+			cars.insert(ni, c)
+			event("%s 그리드 %d계단 강등 (파워유닛 교체)%s" % [name_of(c), c.grid_pen, " → 맨 뒤 출발" if ni >= cars.size() - 1 else ""], "bad")
 			c.grid_pen = 0
 	for i in cars.size():
 		var c = cars[i]

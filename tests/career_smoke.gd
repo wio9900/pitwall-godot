@@ -152,11 +152,20 @@ func _init() -> void:
 	cp.new_career("select", 6, {}, 6161)
 	for r in 8:
 		_run_race(cp)
-	var w0: float = float(cp.pu_state(0)["gb"]["wear"])
-	var used: int = int(cp.pu_state(0)["gb"]["n"])
+	var w0: float = float(cp.pu_part(0, "gb")["wear"])
+	var used: int = cp.pu_used(0, "gb")
 	for i in 4:
 		cp.pu_replace(1, "ers")
 	var gl: Array = cp.hq.get("next_mods", {}).get("grid_pen", [0, 0])
+	# 재고 부품 다시 장착 (강등 없음) · AI 도 같은 규칙으로 부품을 쓴다
+	var ok_mount: bool = cp.pu_mount(0, "gb", 0) == (float(cp.pu_state(0)["gb"]["pool"][0]["wear"]) < 1.0)
+	var ai_used := 0
+	for key in cp.hq.get("ai_pu", {}):
+		ai_used += int(cp.hq["ai_pu"][key]["gb"]["n"])
+	print("  AI 기어박스 평균 %.1f개 · 재고 장착 %s" % [float(ai_used) / maxf(1.0, cp.hq.get("ai_pu", {}).size()), "OK" if ok_mount else "실패"])
+	if ai_used == 0 or not ok_mount:
+		print("  ! 부품 재고 이상")
+		fails += 1
 	print("파워유닛: 8경기 후 #1 기어박스 %d개째 · 수명 %d%% · #2 ERS 4번 교체 → 그리드 강등 %d" % [used, int(w0 * 100), int(gl[1])])
 	if used < 2 or int(gl[1]) < 10:
 		print("  ! 파워유닛 마일리지 이상")

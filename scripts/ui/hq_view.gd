@@ -25,6 +25,8 @@ const MISSION_KO := {"none": "약속 안 함", "both_finish": "두 대 모두 �
 
 var cr
 var tab := "home"
+var _staff_open := ""  # 열린 인력 파트
+var _pu_open := ""  # 열린 부품 목록 "차|종류"
 var wec_target: Array = [0, 2]  # WEC 영입 시 바꿀 자리 [차, 순번]
 var _head: VBoxContainer
 var _tabs_row: HBoxContainer
@@ -205,15 +207,10 @@ func _tab_home() -> void:
 		lv.custom_minimum_size = Vector2(70, 0)
 		lv.text = "[b]%d[/b] [color=#22c55e]%+d[/color]" % [v, row[2]]
 		hb.add_child(lv)
-	# 순위
+	# 순위 (표: 순위 · 팀 · 포인트 · 선두와 차이)
 	var c2 = K.card(top, "시즌 %d 컨스트럭터 순위" % int(h["season"]))
-	var t := ""
-	var i := 0
-	for s in cr.standings():
-		i += 1
-		var col := "#ffc53d" if s["mine"] else "#e6edf3"
-		t += "P%-2d [color=%s]■[/color] [color=%s]%s[/color]  [b]%d[/b]\n" % [i, s["color"], col, s["name"], s["pts"]]
-	_txt(c2, t, 14)
+	c2.get_parent().size_flags_stretch_ratio = 1.4
+	_standings_grid(c2, cr.standings())
 	# 다음 레이스 + 미션
 	var nk: String = cr.next_circuit()
 	var nc: Dictionary = DB.circuits[nk]
@@ -250,17 +247,7 @@ func _tab_home() -> void:
 	if cr.is_wec():
 		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}.get(cr.my_class(), cr.my_class()), _min_drive_txt()], 13)
 	# 스폰서 미션 약속은 메인에서 빼고 '스폰서' 탭에만 둔다 (메인 화면 간결하게)
-	var cal := ""
-	var cal_arr: Array = cr.calendar()
-	for ci in cal_arr.size():
-		var nm: String = DB.circuits[cal_arr[ci]]["name"]
-		if ci < cr.round_idx():
-			cal += "[color=#5d6674]✓%s[/color]  " % nm
-		elif ci == cr.round_idx():
-			cal += "[color=#ffc53d][b]R%d %s[/b][/color]  " % [ci + 1, nm]
-		else:
-			cal += "[color=#8b98a5]%d %s[/color]  " % [ci + 1, nm]
-	_txt(c3, cal, 13)
+	_schedule_card(_body)
 	# 재무 + 뉴스
 	var bot = K.hbox(10)
 	_body.add_child(bot)
@@ -274,6 +261,107 @@ func _tab_home() -> void:
 			break
 		nt += "• %s\n" % s
 	_txt(c5, nt, 13)
+
+
+func _standings_grid(parent: Control, rows: Array) -> void:
+	var g = GridContainer.new()
+	g.columns = 5
+	g.add_theme_constant_override("h_separation", 10)
+	g.add_theme_constant_override("v_separation", 4)
+	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(g)
+	var lead_pts := 0
+	if not rows.is_empty():
+		lead_pts = int(rows[0]["pts"])
+	var i := 0
+	for s in rows:
+		i += 1
+		var mine: bool = s["mine"]
+		var ink: Color = K.AMBER if mine else K.INK
+		var lp = K.label("P%d" % i, 15, K.DIM if not mine else K.AMBER)
+		lp.custom_minimum_size = Vector2(34, 0)
+		g.add_child(lp)
+		var sw = ColorRect.new()
+		sw.color = Color(String(s["color"]))
+		sw.custom_minimum_size = Vector2(5, 20)
+		sw.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		g.add_child(sw)
+		var ln = K.label(String(s["name"]), 15, ink)
+		ln.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ln.autowrap_mode = TextServer.AUTOWRAP_OFF
+		ln.clip_text = true
+		ln.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		g.add_child(ln)
+		var lpt = K.label(str(int(s["pts"])), 15, ink)
+		lpt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lpt.custom_minimum_size = Vector2(40, 0)
+		g.add_child(lpt)
+		var gap: int = lead_pts - int(s["pts"])
+		var lg = K.label(("-%d" % gap if gap > 0 else "-") if i > 1 else "선두", 13, K.DIM)
+		lg.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lg.custom_minimum_size = Vector2(48, 0)
+		g.add_child(lg)
+
+
+## 시즌 일정: 라운드마다 칸 하나 (지난 라운드는 내 결과, 이번 라운드는 강조)
+func _schedule_card(parent: Control) -> void:
+	var cal_arr: Array = cr.calendar()
+	var cs = K.card(parent, "시즌 일정 · %d라운드" % cal_arr.size())
+	var vw: float = get_viewport_rect().size.x
+	var g = GridContainer.new()
+	g.columns = clampi(int((minf(vw, 1600.0) - 60.0) / 150.0), 3, 8)
+	g.add_theme_constant_override("h_separation", 6)
+	g.add_theme_constant_override("v_separation", 6)
+	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cs.add_child(g)
+	var res: Array = _h().get("round_res", [])
+	var cur: int = cr.round_idx()
+	for ci in cal_arr.size():
+		var ck: String = cal_arr[ci]
+		var circ: Dictionary = DB.circuits[ck]
+		var pc = PanelContainer.new()
+		pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = K.PANEL2 if ci != cur else Color("#2a2410")
+		sb.set_border_width_all(1 if ci != cur else 2)
+		sb.border_color = K.LINE if ci != cur else K.AMBER
+		sb.set_corner_radius_all(4)
+		sb.content_margin_left = 8
+		sb.content_margin_right = 6
+		sb.content_margin_top = 5
+		sb.content_margin_bottom = 6
+		pc.add_theme_stylebox_override("panel", sb)
+		g.add_child(pc)
+		var v = K.vbox(1)
+		pc.add_child(v)
+		var done: bool = ci < cur
+		var tag := "R%d" % (ci + 1)
+		if ck == "lemans":
+			tag += " · 포인트 ×2"
+		if ci == cur:
+			tag += " · 다음"
+		v.add_child(K.label(tag, 12, K.AMBER if ci == cur else K.DIM))
+		var nm = K.label(String(circ["name"]), 15, K.DIM if done else K.INK)
+		nm.autowrap_mode = TextServer.AUTOWRAP_OFF
+		nm.clip_text = true
+		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		v.add_child(nm)
+		var rt := ""
+		var rc: Color = K.DIM
+		if done and ci < res.size():
+			var parts: Array = []
+			var best := 99
+			for p in res[ci]:
+				parts.append("P%d" % int(p) if int(p) > 0 else "DNF")
+				if int(p) > 0:
+					best = mini(best, int(p))
+			rt = " · ".join(parts)
+			rc = K.PURPLE if best == 1 else (K.GOOD if best <= 3 else (K.INK if best <= 10 else K.DIM))
+		elif done:
+			rt = "✓ 완료"
+		else:
+			rt = "비 %d%%" % int(float(circ.get("rain", 0.0)) * 100)
+		v.add_child(K.label(rt, 13, rc))
 
 
 func _on_event(i) -> void:
@@ -514,23 +602,8 @@ func _tab_staff() -> void:
 	var rv: Dictionary = h["reserve"]
 	K.row(c1, "리저브 [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 추가 비용 없음[/color]" % [rv["name"], int(rv.get("age", 22)), int(float(rv["speed"]) * 100), int(float(rv["cons"]) * 100), int(float(rv["tyre"]) * 100)],
 		[K.sbtn("#1과 교대", _on_swap.bind(0)), K.sbtn("#2와 교대", _on_swap.bind(1))], 14)
-	# 엔지니어
-	var c2 = K.card(_body, "수석 엔지니어 (최고 연봉 3인 → 코스트캡 제외)")
-	var ce: Dictionary = h["chief"]
-	_txt(c2, "공력 [b]%s[/b] [%s] · 파워 [b]%s[/b] [%s] · 섀시 [b]%s[/b] [%s]\n[color=#8b98a5]담당 부문 개발 효과 S급 +12%%, A급 +6%%. 세 부문 모두 A·S급이면 전 부문 +0.5%% 시너지.[/color]" % [ce["aero"]["name"], ce["aero"]["tier"], ce["power"]["name"], ce["power"]["tier"], ce["chassis"]["name"], ce["chassis"]["tier"]], 14)
-	for i in h["eng_pool"].size():
-		var en: Dictionary = h["eng_pool"][i]
-		var lab := "%.1fM 영입" % float(en["cost"])
-		if en["hired"]:
-			lab = "재직 중"
-		elif not pre:
-			lab = "시즌 전"
-		elif float(h["pop"]) < float(en["reqPop"]):
-			lab = "평판 %d%% 필요" % int(float(en["reqPop"]) * 100)
-		elif float(h["cash"]) < float(en["cost"]):
-			lab = "자금 부족"
-		K.row(c2, "[%s] [b]%s[/b] %s\n[color=#8b98a5]공력 +%.1f%% · 엔진 +%.1f%% · 섀시 +%.1f%% · 내구 +%.1f%%[/color]" % [en["tier"], en["name"], en["deptKo"], float(en["aeroMod"]) * 100, float(en["engMod"]) * 100, float(en["tyreMod"]) * 100, float(en["relMod"]) * 100],
-			[K.sbtn(lab, _on_hire_eng.bind(i), cr.can_hire_engineer(i), K.GOOD)], 13)
+	# 파트별 책임자 (후보 목록에서 영입)
+	_staff_depts()
 	# FA
 	var c3 = K.card(_body, "FA 드라이버 이적 시장")
 	for i in h["market"].size():
@@ -585,11 +658,42 @@ func _staff_wec() -> void:
 		var lab: String = ("%.2fM 영입" % float(fa["cost"])) if why == "" else why
 		K.row(cm, "%s [b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 우천 %d · 연봉 %.2fM[/color]%s" % [_grade_tag(fa["grade"]), fa["name"], int(fa["age"]), int(float(fa["speed"]) * 100), int(float(fa["cons"]) * 100), int(float(fa["tyreMgmt"]) * 100), int(float(fa["wet"]) * 100), float(fa["salary"]), _tags(fa)],
 			[K.sbtn(lab, _on_wec_hire.bind(i), why == "", K.GOOD)], 13)
-	var c2 = K.card(_body, "수석 엔지니어")
-	var ce: Dictionary = h["chief"]
-	_txt(c2, "공력 [b]%s[/b] [%s] · 파워 [b]%s[/b] [%s] · 섀시 [b]%s[/b] [%s]" % [ce["aero"]["name"], ce["aero"]["tier"], ce["power"]["name"], ce["power"]["tier"], ce["chassis"]["name"], ce["chassis"]["tier"]], 14)
+	_staff_depts()
+
+
+func _staff_fx(e: Dictionary) -> String:
+	var dk: String = e["dept"]
+	if dk == "strategy":
+		return "셋업 추천 정확도 +%d" % int(round(float(e.get("eqMod", 0.0)) * 100))
+	if dk == "pit":
+		return "피트 크루 +%.1f%%" % (float(e.get("crewMod", 0.0)) * 100)
+	return "공력 +%.1f%% · 엔진 +%.1f%% · 섀시 +%.1f%% · 내구 +%.1f%%" % [float(e["aeroMod"]) * 100, float(e["engMod"]) * 100, float(e["tyreMod"]) * 100, float(e["relMod"]) * 100]
+
+
+func _staff_depts() -> void:
+	var h := _h()
 	var pre: bool = cr.is_preseason()
-	for i in h["eng_pool"].size():
+	var c2 = K.card(_body, "팀 인력 · 파트별 책임자")
+	_txt(c2, "[color=#8b98a5]파트를 누르면 이번 시즌 후보 목록이 열려요. 후보는 시즌마다 바뀌고, 영입은 개막 전에만 돼요. [color=#ef4444]관심[/color] 표시가 붙은 후보는 개막 전에 안 데려오면 그 팀으로 가요. 공력·파워·섀시가 모두 A·S급이면 전 부문 +0.5% 시너지.[/color]", 13)
+	var g = GridContainer.new()
+	g.columns = 5 if get_viewport_rect().size.x >= 900.0 else 2
+	g.add_theme_constant_override("h_separation", 4)
+	g.add_theme_constant_override("v_separation", 4)
+	c2.add_child(g)
+	for dk in cr.STAFF_DEPTS:
+		var ch: Dictionary = cr.staff_chief(dk)
+		var open: bool = _staff_open == dk
+		var b = K.btn("%s%s\n%s %s" % ["▾ " if open else "", h["chief"][dk].get("deptKo", dk), ch["tier"], String(ch["name"]).get_slice(" (", 0)], 13, _on_staff_open.bind(dk))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(0, 52)
+		var tc: String = String(ch["tier"]).substr(0, 1)
+		b.add_theme_color_override("font_color", {"S": K.PURPLE, "A": K.GOOD, "B": K.INK, "C": K.DIM}.get(tc, K.INK))
+		g.add_child(b)
+	if _staff_open == "":
+		return
+	var cur: Dictionary = cr.staff_chief(_staff_open)
+	_txt(c2, "현재 [b]%s[/b] [%s] — %s%s" % [cur["name"], cur["tier"], _staff_fx(cur), ("  ·  " + String(cr.STAFF_TRAIT_KO.get(cur.get("trait", ""), ""))) if String(cur.get("trait", "")) != "" else ""], 14)
+	for i in cr.staff_cands(_staff_open):
 		var en: Dictionary = h["eng_pool"][i]
 		var lab := "%.1fM 영입" % float(en["cost"])
 		if en["hired"]:
@@ -598,7 +702,26 @@ func _staff_wec() -> void:
 			lab = "시즌 전"
 		elif float(h["pop"]) < float(en["reqPop"]):
 			lab = "평판 %d%% 필요" % int(float(en["reqPop"]) * 100)
-		K.row(c2, "[%s] [b]%s[/b] %s" % [en["tier"], en["name"], en["deptKo"]], [K.sbtn(lab, _on_hire_eng.bind(i), cr.can_hire_engineer(i), K.GOOD)], 13)
+		elif float(h["cash"]) < float(en["cost"]):
+			lab = "자금 부족"
+		var tr: String = String(en.get("trait", ""))
+		var extra := ""
+		if tr != "":
+			extra += "  [color=#ffc53d]★ %s[/color]" % cr.STAFF_TRAIT_KO[tr]
+		if String(en.get("rival", "")) != "" and not en["hired"]:
+			extra += "  [color=#ef4444]%s 관심[/color]" % _short(String(en["rival"]))
+		var tcol: String = {"S": "#a855f7", "A": "#22c55e", "B": "#e6edf3", "C": "#8b98a5"}.get(String(en["tier"]).substr(0, 1), "#e6edf3")
+		K.row(c2, "[color=%s][%s][/color] [b]%s[/b] %s%s\n[color=#8b98a5]%s · 계약금 %.1fM · 평판 %d%%[/color]" % [tcol, en["tier"], en["name"], en.get("role", ""), extra, _staff_fx(en), float(en["cost"]), int(float(en["reqPop"]) * 100)],
+			[K.sbtn(lab, _on_hire_eng.bind(i), cr.can_hire_engineer(i), K.GOOD)], 13)
+
+
+func _short(n: String) -> String:
+	return n.get_slice(" ", 0) if n.length() > 14 else n
+
+
+func _on_staff_open(dk: String) -> void:
+	_staff_open = "" if _staff_open == dk else dk
+	refresh()
 
 
 func _grade_tag(g: String) -> String:
@@ -732,14 +855,16 @@ func _tab_league() -> void:
 			c0.add_child(b)
 	# 진행 중인 시즌 드라이버 순위
 	var cd = K.card(_body, "시즌 %d 드라이버 순위" % int(h["season"]))
-	var td := ""
-	var di := 0
+	var drows: Array = []
 	for r in cr.driver_standings():
-		di += 1
-		if di > 10:
-			break
-		td += "P%-2d [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [b]%d[/b]\n" % [di, r["color"], "#ffc53d" if r["mine"] else "#e6edf3", r["name"], r["team"], int(r["pts"])]
-	_txt(cd, td if td != "" else "[color=#8b98a5]아직 레이스가 없어요.[/color]", 14)
+		drows.append({"name": "%s  ·  %s" % [r["name"], r["team"]], "color": r["color"], "pts": r["pts"], "mine": r["mine"]})
+	if drows.is_empty():
+		_txt(cd, "[color=#8b98a5]아직 레이스가 없어요.[/color]", 14)
+	else:
+		_standings_grid(cd, drows)
+	var cc = K.card(_body, "시즌 %d 컨스트럭터 순위" % int(h["season"]))
+	_standings_grid(cc, cr.standings())
+	_schedule_card(_body)
 	var c1 = K.card(_body, "지난 시즌 기록")
 	var t2 := ""
 	for s in h["season_log"]:
@@ -770,37 +895,82 @@ func _tags(d: Dictionary) -> String:
 
 ## 파워유닛·기어박스: 차마다 부품 수명·사용 개수, 교체 버튼, 연습 낡은 부품 사용 여부
 func _pu_card() -> void:
-	var c = K.card(_body, "🔧 파워유닛 · 기어박스 (시즌 할당 엔진 %d · ERS %d · 기어박스 %d, 넘기면 그리드 강등)" % [cr.PU_ALLOC["ice"], cr.PU_ALLOC["ers"], cr.PU_ALLOC["gb"]])
+	var c = K.card(_body, "🔧 파워유닛 · 기어박스 부품 재고 (시즌 할당 엔진 %d · ERS %d · 기어박스 %d)" % [cr.PU_ALLOC["ice"], cr.PU_ALLOC["ers"], cr.PU_ALLOC["gb"]])
 	for slot in 2:
-		var st: Dictionary = cr.pu_state(slot)
-		var parts: PackedStringArray = []
-		var btns: Array = []
-		for k in ["ice", "ers", "gb"]:
-			var e: Dictionary = st[k]
-			var wv: float = float(e["wear"])
-			var col: String = "#22c55e" if wv < 0.5 else ("#f59e0b" if wv < 0.8 else "#ef4444")
-			var over: bool = int(e["n"]) >= int(cr.PU_ALLOC[k])
-			parts.append("%s [b]%d/%d[/b] · 수명 [color=%s]%d%%[/color]" % [cr.PU_KO[k], int(e["n"]), int(cr.PU_ALLOC[k]), col, int(round(wv * 100))])
-			btns.append(["%s 교체%s" % [cr.PU_KO[k], " (강등)" if over else ""], _on_pu.bind(slot, k)])
-		var pen: float = cr.pu_rel_pen(slot)
-		K.row(c, "[b]#%d %s[/b]\n%s%s" % [slot + 1, cr.my_driver(slot)["name"], "  ·  ".join(parts), ("\n[color=#ef4444]낡은 부품 때문에 신뢰성 -%d%%[/color]" % int(round(pen * 100))) if pen > 0.001 else ""], [], 13)
+		var pen_now: int = cr.pu_pending_pen(slot)
+		var rp: float = cr.pu_rel_pen(slot)
+		var head := "[b]#%d %s[/b]" % [slot + 1, cr.my_driver(slot)["name"]]
+		if pen_now > 0:
+			head += "  [color=#ef4444]다음 레이스 그리드 -%d%s[/color]" % [pen_now, " (사실상 맨 뒤)" if pen_now >= 15 else ""]
+		if rp > 0.001:
+			head += "  [color=#f59e0b]낡은 부품 신뢰성 -%d%%[/color]" % int(round(rp * 100))
+		_txt(c, head, 14)
 		var bh = K.hbox(4)
 		c.add_child(bh)
-		for b in btns:
-			var bb = K.btn(b[0], 13, b[1])
-			bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			bh.add_child(bb)
-	c.add_child(K.label("연습 주행에 쓸 부품", 14, K.DIM))
-	K.seg(c, [["old", "낡은 부품 (레이스 부품 아낌)"], ["new", "레이스 부품 (수명 더 씀)"]], "old" if bool(_h().get("pu_old_practice", true)) else "new", _on_pu_practice, 14)
-	_txt(c, "[color=#8b98a5]부품은 레이스마다 닳고, 수명 70%를 넘으면 고장 위험이 커져요. 100%가 되면 자동 교체돼요. 할당을 넘겨 새 부품을 넣으면 첫 번째는 10계단, 그 뒤로는 5계단 그리드 강등이에요 — 강등을 감수하고 미리 바꾸는 것도 전략이에요.[/color]", 12)
+		for k in ["ice", "ers", "gb"]:
+			var part: Dictionary = cr.pu_part(slot, k)
+			var wv: float = float(part["wear"])
+			var used: int = cr.pu_used(slot, k)
+			var open: bool = _pu_open == "%d|%s" % [slot, k]
+			var b = K.btn("%s%s\n#%d 장착 · 수명 %d%% · %d/%d" % ["▾ " if open else "", cr.PU_KO[k], int(part["no"]), int(round(wv * 100)), used, int(cr.PU_ALLOC[k])], 13, _on_pu_open.bind(slot, k))
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.custom_minimum_size = Vector2(0, 52)
+			if wv >= 0.8:
+				b.add_theme_color_override("font_color", K.BAD)
+			elif wv >= 0.5:
+				b.add_theme_color_override("font_color", K.WARN)
+			bh.add_child(b)
+		if _pu_open.begins_with("%d|" % slot):
+			_pu_list(c, slot, _pu_open.get_slice("|", 1))
+	_txt(c, "[color=#8b98a5]부품 버튼을 누르면 재고 목록이 열려요. 재고 부품은 강등 없이 바꿔 낄 수 있고, 연습 주행에 낡은 부품을 쓰면 레이스용 부품을 아낄 수 있어요. 수명 70%를 넘으면 고장 위험이 커지고, 100%가 되면 재고의 다른 부품(없으면 새 부품)으로 자동 교체돼요.\n할당을 다 쓴 뒤 새 부품을 추가하면 첫 번째는 10계단, 그 뒤로는 5계단 그리드 강등 — 한 주말에 여러 개 넣으면 합산되고, 크면 맨 뒤에서 출발해요. AI 팀도 같은 규칙이에요.[/color]", 12)
 
 
-func _on_pu(slot: int, k: String) -> void:
-	cr.pu_replace(slot, k)
+func _pu_list(c: Control, slot: int, k: String) -> void:
+	var e: Dictionary = cr.pu_state(slot)[k]
+	var pool: Array = e["pool"]
+	var pi: int = cr.pu_practice_idx(slot, k)
+	var box = K.vbox(3)
+	c.add_child(box)
+	for i in pool.size():
+		var wv: float = float(pool[i]["wear"])
+		var dead: bool = wv >= 1.0
+		var col: String = "#5d6674" if dead else ("#22c55e" if wv < 0.5 else ("#f59e0b" if wv < 0.8 else "#ef4444"))
+		var tag := ""
+		if i == int(e["cur"]):
+			tag = " [color=#ffc53d][b]레이스 장착[/b][/color]"
+		elif i == pi:
+			tag = " [color=#3b82f6]연습용[/color]"
+		if dead:
+			tag += " [color=#5d6674]수명 끝[/color]"
+		var btns: Array = []
+		if not dead and i != int(e["cur"]):
+			btns.append(["장착", _on_pu_mount.bind(slot, k, i)])
+			btns.append(["연습용", _on_pu_prac.bind(slot, k, i)])
+		K.row(box, "%s [b]#%d[/b]  수명 [color=%s]%d%%[/color]%s" % [cr.PU_KO[k], int(pool[i]["no"]), col, int(round(wv * 100)), tag], btns, 14)
+	var np: int = cr.pu_next_pen(slot, k)
+	var lab := "＋ 새 부품 추가 (할당 %d/%d)" % [pool.size(), int(cr.PU_ALLOC[k])] if np == 0 else "＋ 새 부품 추가 — 할당 초과, 그리드 -%d" % np
+	var ab = K.btn(lab, 14, _on_pu.bind(slot, k))
+	if np > 0:
+		ab.add_theme_color_override("font_color", K.BAD)
+	box.add_child(ab)
+
+
+func _on_pu_open(slot: int, k: String) -> void:
+	var key := "%d|%s" % [slot, k]
+	_pu_open = "" if _pu_open == key else key
 	refresh()
 
 
-func _on_pu_practice(v) -> void:
-	_h()["pu_old_practice"] = v == "old"
-	cr.save()
+func _on_pu(slot: int, k: String) -> void:
+	cr.pu_add(slot, k)
+	refresh()
+
+
+func _on_pu_mount(slot: int, k: String, i: int) -> void:
+	cr.pu_mount(slot, k, i)
+	refresh()
+
+
+func _on_pu_prac(slot: int, k: String, i: int) -> void:
+	cr.pu_set_practice(slot, k, i)
 	refresh()

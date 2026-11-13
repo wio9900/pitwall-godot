@@ -34,3 +34,4 @@
 9. 셋업 찾기·AI 전술 (완료): 셋업 슬라이더(setup_opt 숨은 최적값, weekend bands 엔지니어 추천 범위, 연습 16랩), AI 주행 전술(_ai_tactics), AI 언더컷·오버컷·트래픽 회피·두 대 전략 분리·팀 오더·SC 스테이아웃, 크루 실수(_crew_error). 횟수는 sim.tally 로 확인
 10. 이어하기·기록·WEC 규정 (완료): 레이스 중간 저장(race_save.gd, 선두 랩마다·앱 내릴 때·⏏ 버튼), 기록실(records.gd·records_view.gd), WEC 2026 타이어 규정(wecComps·세트 제한·워머 금지·하이퍼폴 미디엄)과 주행 시간 규정(wecHours, drive_limits/must_swap), 드라이버 피로·트래픽 접촉, AI 예보·SC 찬스·마지막 스틴트 타이어 계산, 성능 표시 설정
 - 참고: 보통 난이도에서 단순 봇이 AI보다 레이스당 약 2계단(예선 포함 3.5계단) 앞선다 (tests/calib.gd 난이도별 출력으로 비교).
+11. 커리어 깊이 (완료): 설비 Lv.1~10(fac_lv/fac_x, 리그 상한 fac_cap), 아시안 르망 성장 보정(cal_len 비례), F1 승격 시 기본 차 = 그리드 최하위 수준(_on_tier_change), HQ 순위표·라운드별 일정 칸(_standings_grid/_schedule_card, hq round_res), F1 부품 재고(pu_state pool/cur/prac, pu_add·pu_mount·pu_set_practice, 강등 합산, AI는 _ai_pu_after_race → ai_grid_pen), 파트별 인력(STAFF_DEPTS 5파트, staff_refresh_pool 시즌마다, 특성·AI 스카우트 _ai_staff_scout)

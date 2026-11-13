@@ -230,16 +230,23 @@ func _process(_delta: float) -> bool:
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
 			main._open_hq()
+			main.hq_view._pu_open = "0|ice"
 			main.hq_view._on_tab("rnd")
 			wait = 3
 			step = 15
 		15:
 			_shot("hq_rnd")
+			main.hq_view._staff_open = "aero"
 			main.hq_view._on_tab("staff")
 			wait = 3
 			step = 16
 		16:
 			_shot("hq_staff")
+			main.hq_view._on_tab("league")
+			wait = 3
+			step = 116
+		116:
+			_shot("hq_league")
 			main.hq_view._on_tab("spon")
 			wait = 3
 			step = 17

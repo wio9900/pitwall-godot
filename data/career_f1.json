@@ -1180,6 +1180,108 @@
     "name": "두 차량 모두 리타이어 없이 완주",
     "reward": 0.35
    }
+  },
+  "staffNames": [
+   "Bauer",
+   "Lindqvist",
+   "Moreau",
+   "Okafor",
+   "Tanaka",
+   "Rossi",
+   "Hughes",
+   "Kowalski",
+   "Ferreira",
+   "Nakamura",
+   "Dubois",
+   "Schmidt",
+   "O'Brien",
+   "Varga",
+   "Castillo",
+   "Andersen",
+   "Kim",
+   "Patel",
+   "Novak",
+   "Laurent",
+   "Bianchi",
+   "Fischer",
+   "Walsh",
+   "Sato",
+   "Mendes",
+   "Horvat",
+   "Larsen",
+   "Choi",
+   "Bennett",
+   "Ricci",
+   "Weber",
+   "Costa",
+   "Murphy",
+   "Yamada",
+   "Leclair",
+   "Hoffmann",
+   "Duarte",
+   "Price",
+   "Jung",
+   "Marchetti"
+  ],
+  "staffDepts": {
+   "aero": {
+    "ko": "공력(에어로)",
+    "role": "수석 공력"
+   },
+   "power": {
+    "ko": "파워트레인",
+    "role": "수석 파워트레인"
+   },
+   "chassis": {
+    "ko": "섀시·트랙사이드",
+    "role": "수석 섀시"
+   },
+   "strategy": {
+    "ko": "전략",
+    "role": "전략 책임자",
+    "eq": {
+     "S": 0.15,
+     "A": 0.1,
+     "B": 0.05,
+     "C": 0.0
+    }
+   },
+   "pit": {
+    "ko": "피트 크루",
+    "role": "피트 크루 코치",
+    "crew": {
+     "S": 0.02,
+     "A": 0.013,
+     "B": 0.007,
+     "C": 0.0
+    }
+   }
+  },
+  "staffDefaults": {
+   "strategy": {
+    "name": "R. Hale (전략 기본)",
+    "tier": "C급",
+    "dept": "strategy",
+    "deptKo": "전략",
+    "aeroMod": 0,
+    "engMod": 0,
+    "tyreMod": 0,
+    "relMod": 0,
+    "eqMod": 0.0,
+    "crewMod": 0.0
+   },
+   "pit": {
+    "name": "T. Ward (피트 기본)",
+    "tier": "C급",
+    "dept": "pit",
+    "deptKo": "피트 크루",
+    "aeroMod": 0,
+    "engMod": 0,
+    "tyreMod": 0,
+    "relMod": 0,
+    "eqMod": 0.0,
+    "crewMod": 0.0
+   }
   }
  }
 }
