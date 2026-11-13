@@ -139,6 +139,10 @@ func refresh() -> void:
 	t += "현재 [b]P%d[/b] · 타이어 [color=%s][b]%s[/b][/color] [b]%d랩째[/b] · 피트 %d회\n" % [pos, RS.TYRE_HEX[c.comp], RS.TYRE_KO[c.comp], c.stint_laps, c.pits]
 	if not c.traits.is_empty():
 		t += "[color=#ffc53d]◆ %s[/color]\n" % TraitsS.label(c.traits)
+	for pe in c.pen_log:
+		t += "[color=#ef4444]🟨 L%d %s +%d초[/color]\n" % [int(pe["lap"]), pe["why"], int(pe["secs"])]
+	if c.dnf != "" and c.dnf_detail != "":
+		t += "[color=#ef4444]🔧 리타이어: %s[/color]\n" % c.dnf_detail
 	t += "피트월 크루: %s\n" % ("[bgcolor=#ef4444][color=#ffffff] CREW OUT [/color][/bgcolor] 곧 박스할 수 있어요!" if c.crew_out else "차고 대기")
 	# 피트 이력·사용한 타이어
 	var ph: PackedStringArray = []

@@ -1844,6 +1844,7 @@ func _show_result() -> void:
 		var fc = sim.cars.filter(func(x): return x.id == sim.fastest_id)
 		if not fc.is_empty():
 			s += "\n[color=#a855f7]최고 랩[/color] %s %.3f초" % [fc[0].code, sim.fastest_t]
+	s += _pen_dnf_summary()
 	btn_again.visible = mode != "career"
 	btn_menu.visible = mode != "career"
 	btn_hq.visible = mode == "career" and not sprint_mode
@@ -1872,3 +1873,24 @@ func _show_result() -> void:
 	btn_hq.text = "시즌 결산 ▶" if season_pending else "본부(HQ)로 ▶"
 	result_text.text = rec_note + s
 	result_box.visible = true
+
+
+## 결과 화면 아래: 모든 차의 페널티 사유 · 리타이어 사유
+func _pen_dnf_summary() -> String:
+	var pen_t := ""
+	var dnf_t := ""
+	for c in sim.order():
+		var nm: String = (c.label + " " + c.code) if sim.is_wec() else "%s (%s)" % [c.code, c.team]
+		if not c.pen_log.is_empty():
+			var parts: PackedStringArray = []
+			for p in c.pen_log:
+				parts.append("L%d %s +%d초" % [int(p["lap"]), p["why"], int(p["secs"])])
+			pen_t += "%s%s[/color]  %s\n" % ["[color=#ffc53d]" if c.mine else "[color=#e6edf3]", nm, " · ".join(parts)]
+		if c.dnf != "":
+			dnf_t += "%s%s[/color]  %s\n" % ["[color=#ffc53d]" if c.mine else "[color=#e6edf3]", nm, c.dnf_detail if c.dnf_detail != "" else c.dnf]
+	var out := ""
+	if pen_t != "":
+		out += "\n\n[b]🟨 페널티[/b]\n[font_size=14]" + pen_t + "[/font_size]"
+	if dnf_t != "":
+		out += "\n[b]🔧 리타이어[/b]\n[font_size=14]" + dnf_t + "[/font_size]"
+	return out

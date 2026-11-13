@@ -91,10 +91,10 @@ func _draw() -> void:
 	if narrow:
 		x_team = 46.0
 	var x_pit: float = w - 8.0
-	var w_pit: float = 0.0 if narrow else 44.0  # 좁으면 피트 열은 뺀다 (라이벌 카드에 있음)
-	var w_tyre: float = 50.0 if narrow else 72.0
-	var w_last: float = 78.0 if narrow else clampf(w * 0.16, 92.0, 130.0)
-	var w_gap: float = 62.0 if narrow else clampf(w * 0.15, 84.0, 130.0)
+	var w_pit: float = 26.0 if narrow else 44.0  # 피트 횟수는 좁아도 항상
+	var w_tyre: float = 46.0 if narrow else 72.0
+	var w_last: float = 74.0 if narrow else clampf(w * 0.16, 92.0, 130.0)
+	var w_gap: float = 60.0 if narrow else clampf(w * 0.15, 84.0, 130.0)
 	var x_tyre: float = x_pit - w_pit - w_tyre
 	var x_last: float = x_tyre - 6.0 - w_last
 	var x_gap: float = x_last - 6.0 - w_gap
@@ -110,8 +110,7 @@ func _draw() -> void:
 	draw_string(font, Vector2(x_gap, hy), gap_t, HORIZONTAL_ALIGNMENT_RIGHT, w_gap, 14, Color("#ffc53d"))
 	draw_string(font, Vector2(x_last, hy), "최근 랩", HORIZONTAL_ALIGNMENT_RIGHT, w_last, 14, DIM)
 	draw_string(font, Vector2(x_tyre, hy), "타이어", HORIZONTAL_ALIGNMENT_CENTER, w_tyre, 14, DIM)
-	if not narrow:
-		draw_string(font, Vector2(x_pit - w_pit, hy), "피트", HORIZONTAL_ALIGNMENT_RIGHT, w_pit, 14, DIM)
+	draw_string(font, Vector2(x_pit - w_pit - 4, hy), "PIT" if narrow else "피트", HORIZONTAL_ALIGNMENT_RIGHT, w_pit + 4, 12 if narrow else 14, DIM)
 	var y: float = HEAD_H
 	var lead: Variant = null
 	var prev: Variant = null
@@ -171,8 +170,7 @@ func _draw() -> void:
 		if not out:
 			draw_string(font, Vector2(x_tyre + 6, by), c.comp, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(sim.TYRE_HEX[c.comp]))
 			draw_string(font, Vector2(x_tyre + 24, by), "%dL" % c.stint_laps, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, DIM)
-		if not narrow:
-			draw_string(font, Vector2(x_pit - w_pit, by), str(c.pits), HORIZONTAL_ALIGNMENT_RIGHT, w_pit, fs, DIM)
+		draw_string(font, Vector2(x_pit - w_pit, by), str(c.pits), HORIZONTAL_ALIGNMENT_RIGHT, w_pit, fs, DIM)
 		_rows.append([y, y + ROW_H, c.id])
 		prev = c
 		y += ROW_H

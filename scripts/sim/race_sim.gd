@@ -933,7 +933,44 @@ func alive() -> Array:
 	return out
 
 
+## 리타이어 자세한 사유: 어디서(코너·섹터) · 어떻게 · 그때 상황(랩·타이어·노면)
+func _dnf_detail(c, why: String) -> String:
+	var where := "S%d" % (c.sec + 1)
+	var labels: Array = T.C.get("labels", [])
+	if not labels.is_empty():
+		var my_d: float = fposmod(car_dist(c), T.L)
+		var best := INF
+		for lb in labels:
+			var si: int = (int(lb[0]) * T.SPC) % T.m
+			var ld: float = float(T.cum[si])
+			var dd: float = absf(wrapf(ld - my_d, -T.L * 0.5, T.L * 0.5))
+			if dd < best and dd < T.L * 0.12:
+				best = dd
+				where = "%s 부근" % String(lb[1])
+	var how := why
+	match why:
+		"스핀":
+			how = "스핀 후 방호벽에 부딪힘"
+			if wet > 0.3:
+				how += " (젖은 노면, 수막 %.1fmm)" % wet_mm(wet)
+			elif c.tt < 0.3:
+				how += " (타이어가 식어 그립 부족)"
+		"충돌":
+			how = ("%s 와(과) 경합 중 접촉해 손상" % c.crash_with) if c.crash_with != "" else "경합 중 접촉해 손상"
+		"고장":
+			var kinds := ["엔진", "기어박스", "유압 계통", "전기 계통", "냉각 계통", "서스펜션", "브레이크"]
+			if c.mech_trouble.find("브레이크") >= 0:
+				how = "브레이크 과열로 고장"
+			elif c.mech_trouble.find("기어박스") >= 0:
+				how = "기어박스 유압 문제로 고장"
+			else:
+				how = "%s 고장" % kinds[rng.randi_range(0, kinds.size() - 1)]
+	var tyre: String = "%s %d%%" % [TYRE_KO.get(c.comp, c.comp), int(round(c.wear * 100))] if SLICK.has(c.comp) else TYRE_KO.get(c.comp, c.comp)
+	return "%s · %s · L%d · 타이어 %s" % [where, how, c.lap + 1, tyre]
+
+
 func retire(c, why: String) -> void:
+	c.dnf_detail = _dnf_detail(c, why)
 	c.dnf = why
 	c.boxing = null
 	c.pit_phase = 0
@@ -944,7 +981,7 @@ func retire(c, why: String) -> void:
 	var tag := ""
 	if is_wec():
 		tag = "[%s] " % CLS_TAG.get(c.cls, c.cls)
-	event("%s%s %s → 리타이어" % [tag, name_of(c), why], "bad")
+	event("%s%s 리타이어 — %s" % [tag, name_of(c), c.dnf_detail], "bad")
 	if c.mine:
 		say(c, "%s 발생으로 리타이어합니다." % why)
 	if not sc and leader_lap < laps - 1:
@@ -2101,8 +2138,10 @@ func schedule_next(c, t: float) -> void:
 					c.sec_end = t + dur * 0.5
 					c.sec_base = c.sec_end - t
 					c.pending_crash = "충돌"
+					c.crash_with = ahead.code
 					if rnd() < K["victim"]:
 						ahead.pending_victim = true
+						ahead.crash_with = c.code
 					return
 				else:
 					dur = maxf(dur, (ahead.sec_end - t) + K["ot_gap"])

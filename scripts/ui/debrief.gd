@@ -224,6 +224,16 @@ func _render() -> void:
 func _car_report(c, ord: Array) -> void:
 	var fin: String = "DNF (%s)" % c.dnf if c.dnf != "" else "P%d" % (ord.find(c) + 1)
 	var card = K.card(_body, "#%d %s (%s) · 그리드 P%d → 최종 %s" % [c.slot + 1, c.name, c.code, c.grid + 1, fin], K.AMBER)
+	# 페널티 · 리타이어 사유
+	var pd := ""
+	for p in c.pen_log:
+		pd += "🟨 L%d %s [b]+%d초[/b]\n" % [int(p["lap"]), p["why"], int(p["secs"])]
+	if c.dnf != "" and c.dnf_detail != "":
+		pd += "🔧 리타이어: %s\n" % c.dnf_detail
+	if pd != "":
+		var pr = K.rtl(15)
+		pr.text = pd.strip_edges()
+		card.add_child(pr)
 	# 스틴트
 	var stints: Array = []
 	var cur: Array = []
