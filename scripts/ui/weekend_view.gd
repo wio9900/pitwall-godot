@@ -28,7 +28,7 @@ var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
 var p_comp := "M"            # 연습 주행 타이어
-var q_speed := 20            # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤. 레이스와 같은 기준: 1× = 4초
+var q_speed := 4             # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤. 레이스와 같은 기준: 1× = 4초 (기본 1×)
 var q_comps: Array = ["S", "S"]
 var q_pushes: Array = ["std", "std"]
 var _q_ver := -1
@@ -397,7 +397,7 @@ func _on_q_go(slot: int) -> void:
 	if err != "":
 		_live.text = "[color=#ef4444]%s[/color]" % err
 	if q_speed == 0:
-		q_speed = 20
+		q_speed = 4
 	refresh()
 
 
@@ -888,9 +888,18 @@ func _quali_tick(delta: float) -> void:
 		var c = wk._car(id)
 		var f: float = clampf((t - float(r["t0"])) / maxf(0.01, float(r["dur"])), 0.0, 1.0)
 		var d: float = 0.0
+		# 피트 입구·출구 (트랙 위 거리)
+		var exit_d: float = fposmod(float(T.cum[T.pit_out]), T.L)
+		var entry_d: float = fposmod(float(T.cum[T.pit_in]), T.L)
+		const LANE_F := 0.15 # 아웃랩·인랩 중 피트레인에 있는 시간 비율
 		match String(r["phase"]):
 			"out":
-				d = f * T.L
+				# 차고 → 피트레인 → 출구에서 트랙 합류 → 출발선까지
+				if f < LANE_F:
+					var pl: Array = T.pit_lane_point(sim._lane_u(0.35 + 0.65 * (f / LANE_F), sim._stall_u(c.stall_idx)))
+					lst.append([c, pl[0], pl[1]])
+					continue
+				d = exit_d + (T.L - exit_d) * ((f - LANE_F) / (1.0 - LANE_F))
 			"push":
 				var res: Dictionary = r["res"]
 				var el: float = (t - float(r["t0"])) * 60.0
@@ -903,9 +912,17 @@ func _quali_tick(delta: float) -> void:
 				if c.mine and my_push == null:
 					my_push = [res, sec, el]
 			_:
-				# 인랩: 어택을 마친 곳(또는 포기한 곳)부터 남은 바퀴를 돌아 피트로
-				var d0: float = float(r.get("d0", 0.0))
-				d = (d0 + f * (1.0 - d0)) * T.L
+				# 인랩: 어택을 마친 곳(또는 포기한 곳)부터 피트 입구까지 돌고 → 피트레인으로 들어가 차고에서 사라짐
+				var d0: float = float(r.get("d0", 0.0)) * T.L
+				var tgt: float = entry_d if entry_d > d0 else entry_d + T.L
+				if f < 1.0 - LANE_F:
+					d = d0 + (tgt - d0) * (f / (1.0 - LANE_F))
+				else:
+					if f >= 0.999:
+						continue
+					var pl2: Array = T.pit_lane_point(sim._lane_u(0.35 * ((f - (1.0 - LANE_F)) / LANE_F), sim._stall_u(c.stall_idx)))
+					lst.append([c, pl2[0], pl2[1]])
+					continue
 		lst.append([c, d])
 	_view.solo = {"list": lst}
 	if my_push != null:

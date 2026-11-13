@@ -2437,10 +2437,13 @@ func car_pos_angle(c) -> Array:
 		return T.pit_lane_point(_lane_u(0.35 * u, stall))
 	if c.pit_phase == 2 and c.sec == 0:
 		var t_out: float = base * T.exit_frac
-		var lane: float = total - (base - t_out)
+		# 출구에서 섹터 끝까지 남은 구간을 실제 달리는 속도로: SC·VSC 중엔 대열 속도(느림)라 피트레인에 더 오래 있다가
+		# 천천히 합류해야 대열 앞으로 튀어나갔다가 뒤로 밀리는 것처럼 보이지 않는다
+		var slow: float = 1.6 if sc else 1.0
+		var lane: float = maxf(total * 0.3, total - (base - t_out) * slow)
 		if e < lane:
 			return T.pit_lane_point(_lane_u(0.35 + 0.65 * (e / maxf(0.01, lane)), stall))
-		var f_out: float = T.exit_frac + (1.0 - T.exit_frac) * clampf((e - lane) / maxf(0.01, base - t_out), 0.0, 1.0)
+		var f_out: float = T.exit_frac + (1.0 - T.exit_frac) * clampf((e - lane) / maxf(0.01, total - lane), 0.0, 1.0)
 		return [T.point_at(0, f_out), T.head_at_dist(T.dist_at(0, f_out))]
 	var fr = e / total
 	return [T.point_at(c.sec, fr), T.head_at_dist(T.dist_at(c.sec, fr))]

@@ -39,6 +39,7 @@ var _cam_zoom := 1.0
 var _s := 1.0
 var _off := Vector2.ZERO
 var _now := 0.0
+var _fin_ms := {}      # car id → 체커 받은 시각(실제 ms), 쿨다운 랩 연출용
 var _smooth := {}      # car id → {p, a, d(트랙 위 거리), lat(옆으로 비킨 정도)}
 # 두 손가락 확대·이동 (PC 는 마우스 휠)
 var user_zoom := 1.0
@@ -102,6 +103,7 @@ func reset() -> void:
 	_deco_key = ""
 	_static_key = ""
 	_smooth.clear()
+	_fin_ms.clear()
 	_pit_seen.clear()
 	_popups.clear()
 	_last_pos.clear()
@@ -192,7 +194,23 @@ func _update_cars(delta: float) -> void:
 			var lat: float = TRACK_W * 0.22 * (1.0 if c.grid % 2 == 0 else -1.0)
 			targets[c.id] = [T.point_at_dist(dv) + Vector2(-sin(ha), cos(ha)) * lat, ha]
 			continue
-		if c.finished or sim.is_pitting(c):
+		if c.finished:
+			# 체커 후: 천천히 한 바퀴(쿨다운) 돌아 피트 입구로 → 피트레인으로 들어가 사라진다
+			if not _fin_ms.has(c.id):
+				_fin_ms[c.id] = Time.get_ticks_msec()
+			var el: float = (Time.get_ticks_msec() - int(_fin_ms[c.id])) / 1000.0
+			var entry_d: float = fposmod(float(T.cum[T.pit_in]), T.L)
+			const COOL_S := 22.0
+			const LANE_S := 3.0
+			if el < COOL_S:
+				var cd: float = entry_d * (el / COOL_S)
+				var ha2: float = T.head_at_dist(cd)
+				targets[c.id] = [T.point_at_dist(cd) + Vector2(-sin(ha2), cos(ha2)) * TRACK_W * 0.25, ha2]
+			elif el < COOL_S + LANE_S:
+				var pl: Array = T.pit_lane_point(sim._lane_u(0.35 * ((el - COOL_S) / LANE_S), sim._stall_u(c.stall_idx)))
+				targets[c.id] = [pl[0], pl[1]]
+			continue
+		if sim.is_pitting(c):
 			var pa: Array = sim.car_pos_angle(c)
 			targets[c.id] = [pa[0], pa[1]]
 			continue
@@ -437,7 +455,10 @@ func _draw() -> void:
 			_draw_car(_X(T.point_at_dist(d)), T.head_at_dist(d), solo["car"], night)
 		# 라이브 예선: 트랙 위 여러 대 [[car, dist], …]
 		for e in solo.get("list", []):
-			_draw_car(_X(T.point_at_dist(float(e[1]))), T.head_at_dist(float(e[1])), e[0], night)
+			if e.size() >= 3:
+				_draw_car(_X(e[1]), float(e[2]), e[0], night) # 피트레인 위 (위치·방향 직접)
+			else:
+				_draw_car(_X(T.point_at_dist(float(e[1]))), T.head_at_dist(float(e[1])), e[0], night)
 		return
 	var wet: float = sim.wet
 	if wet > 0.2:
