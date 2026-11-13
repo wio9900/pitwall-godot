@@ -556,6 +556,8 @@ func _refresh_pit(c) -> void:
 			var un: Dictionary = pr["under"]
 			u = ("\n[color=#22c55e]언더컷 유력: %s보다 약 %.1f초 앞설 전망[/color]" % [un["code"], float(un["net"])]) if float(un["net"]) > 0.0 else ("\n[color=#f59e0b]언더컷 어려움: %s에 %.1f초 부족[/color]" % [un["code"], -float(un["net"])])
 		_pred.text = "[font_size=26][b]P%d[/b][/font_size]  [color=#8b98a5]지금 박스 시 복귀 순위 (손실 약 %d초%s)[/color]\n%s · %s%s" % [int(pr["pos"]), int(round(float(pr["loss"]))), (", " + sim.sc_kind + " 중") if sim.sc else "", a, b, u]
+	if not wec and sim.pit_closed():
+		_pred.text = "[color=#ef4444][b]⛔ 피트레인 폐쇄 중 (L%d 까지)[/b] — 지금 들어가면 스톱 앤 고 10초 페널티[/color]\n" % sim.pit_closed_until + _pred.text
 	# 기상 레이더
 	var cur: int = mini(sim.laps, sim.leader_lap + 1)
 	# 앞으로 5랩 동안 비 걱정이 없으면 칸 대신 한 줄만

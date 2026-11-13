@@ -75,6 +75,8 @@ var fc: Variant = null   # 예보 {lo, hi, p}
 var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
+var pit_closed_until := -1   # 이 선두 랩 전까지 피트레인 폐쇄 (피트 입구 근처 사고로 SC 가 나온 직후 1랩)
+var wet_start := false       # 폭우 속 세이프티카 선도 스타트 (전 차량 풀 웻 의무)
 var sc_dist := -1.0
 var sc_wait := false       # SC가 피트 출구에서 나와 선두를 기다리는 중
 var yellow := {}           # 국지 옐로: 섹터 번호 → 해제 시각(clock)
@@ -375,9 +377,17 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	active_radio = null
 	iradio_done = {}
 	var want_rain: bool = wx_opt == "rain" or (wx_opt == "auto" and rnd() < float(CIRC["rain"]))
+	wet_start = false
+	pit_closed_until = -1
 	if want_rain:
 		var st = maxi(2, int(round(uni(0.2, 0.55) * laps)))
 		rain = {"start": st, "end": mini(laps + 1, st + int(round(uni(0.3, 0.55) * laps))), "level": uni(0.8, 1.0) if rnd() < 0.4 else uni(0.4, 0.6)}
+		# F1: 가끔은 출발부터 폭우 → 세이프티카 선도 스타트, 전 차량 풀 웻 의무 (실제 규정)
+		if not is_wec() and rnd() < 0.18:
+			rain = {"start": 0, "end": mini(laps + 1, int(round(uni(0.25, 0.5) * laps))), "level": uni(0.85, 1.0)}
+			wet = float(rain["level"]) * 0.9
+			ever_wet = true
+			wet_start = true
 	if rain != null:
 		fc = {"lo": maxi(1, rain["start"] - 2), "hi": rain["start"] + 2, "p": int(round(uni(50, 80)))}
 	elif rnd() < 0.3:
@@ -657,7 +667,8 @@ func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true) -> float:
 	var fuel_work: float = WPIT["fuel"] * (1.05 - 0.2 * c.crew) if fuel else 0.0
 	var tyre_work: float = WPIT["tyres"] * (1.15 - 0.35 * c.crew) if tyres else 0.0
 	var drv_work: float = WPIT["driver"] if driver else 0.0
-	var work: float = (fuel_work + tyre_work + drv_work) * maxf(0.32, pit_scale())
+	# 규정: 급유 중엔 타이어를 못 바꾼다(급유 → 타이어 순서로 합산). 드라이버 교대는 급유하는 동안 같이 할 수 있다
+	var work: float = (maxf(fuel_work, drv_work) + tyre_work) * maxf(0.32, pit_scale())
 	var scf := 1.0
 	if sc and not _force_green:
 		scf = 0.62 if sc_kind == "SC" else 0.78
@@ -698,6 +709,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	t += float(sx["dt"]) * sh
 	if is_yellow(c.sec):
 		t += 0.45 * sh * ws # 옐로 구간 감속
+	if c.lamp_out and night:
+		t *= 1.05 # 헤드라이트 없이 밤 주행
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
 	if not is_wec():
@@ -865,6 +878,10 @@ func retire(c, why: String) -> void:
 			p_v *= 0.6
 		if r < p_sc:
 			deploy("SC")
+			# 피트 입구 부근(마지막 섹터) 사고면 SC 직후 1랩 피트레인 폐쇄 (F1)
+			if not is_wec() and c.sec >= NS - 1:
+				pit_closed_until = leader_lap + 1
+				event("⛔ 피트 입구 부근 사고 — 피트레인 폐쇄 (L%d 까지). 들어가면 스톱 앤 고 10초" % (leader_lap + 1), "bad")
 		elif r < p_sc + p_v:
 			deploy("FCY" if is_wec() else "VSC")
 		else:
@@ -873,6 +890,15 @@ func retire(c, why: String) -> void:
 
 ## WEC: 수리 가능한 손상 (60% 개러지 수리, 40% 리타이어)
 func damage(c, why: String) -> void:
+	# 밤에 접촉하면 헤드라이트만 깨지는 경우: 시야가 나빠 느려지고, 레이스 컨트롤이 2랩 안에 수리를 지시
+	if is_wec() and night and not c.lamp_out and why.find("접촉") >= 0 and rnd() < 0.35:
+		c.lamp_out = true
+		c.lamp_lap = c.lap
+		_tally("헤드라이트")
+		event("💡 %s 헤드라이트 파손 — 어둠 속 랩타임 급락, 수리 필요" % name_of(c), "bad")
+		if c.mine:
+			say(c, "헤드라이트가 깨졌어요! 앞이 잘 안 보여요. 2랩 안에 박스해서 고쳐야 해요")
+		return
 	if rnd() < 0.6:
 		var lost: float = uni(1.5, 8.0) * float(CIRC["base"]) * laps / real_laps()
 		c.garage += lost
@@ -1254,6 +1280,8 @@ func pit_decision(c) -> Variant:
 		return null
 	if is_wec():
 		return wec_decision(c, cur, left, want)
+	if pit_closed() and (c.pit_req == "" or not c.mine):
+		return null # 피트레인 폐쇄: AI·자동 피트는 한 랩 기다린다
 	if c.pit_req != "":
 		var comp: String = c.pit_req
 		c.pit_req = ""
@@ -1708,6 +1736,11 @@ func on_cross(c, t: float) -> void:
 			apply_pit(c)
 		else:
 			c.pit_phase = 0
+			# 헤드라이트 파손 2랩 지나도 안 고치면 레이스 컨트롤 수리 지시 (블랙·오렌지 플래그) → 다음 랩 강제 피트
+			if c.lamp_out and c.lap - c.lamp_lap >= 2:
+				c.boxing = {"comp": c.comp, "tyres": false, "driver": false, "fuel": false, "forced": true}
+				c.pit_total = WPIT["lane"] * pit_scale()
+				event("🏴 %s 블랙·오렌지 플래그 — 헤드라이트 수리 지시" % name_of(c), "bad")
 		if rnd() < (1.0 - c.rel) * K["fail"] * (1.3 if c.pace == "attack" else 1.0) * (1.2 if night else 1.0):
 			if is_wec():
 				damage(c, "고장")
@@ -1722,6 +1755,8 @@ func on_cross(c, t: float) -> void:
 		if c.sec == NS - 1 and c.boxing == null:
 			var d: Variant = pit_decision(c)
 			if d != null:
+				if pit_closed():
+					d["closed"] = true
 				c.boxing = d
 				# 피트 크루 숙련도(기본 0.85, 훈련센터 Lv당 +0.025): Lv5면 정차 약 0.8초 단축
 				if is_wec():
@@ -1733,7 +1768,19 @@ func on_cross(c, t: float) -> void:
 	schedule_next(c, t)
 
 
+## 피트레인이 닫혀 있나 (피트 입구 근처 사고 직후 1랩)
+func pit_closed() -> bool:
+	return pit_closed_until >= 0 and leader_lap < pit_closed_until
+
+
 func apply_pit(c) -> void:
+	if c.lamp_out:
+		c.lamp_out = false
+		c.garage += 0.3 * float(CIRC["base"]) * laps / real_laps() # 헤드라이트 교체
+		event("%s 헤드라이트 수리" % name_of(c))
+	if c.boxing != null and c.boxing.get("closed", false):
+		# 폐쇄 중 진입: 스톱 앤 고 10초 (정차 + 피트레인 한 번 더 통과에 해당하는 시간)
+		add_penalty(c, 10.0 + pit_loss(), "피트레인 폐쇄 중 진입 · 스톱 앤 고")
 	if c.boxing != null and not c.boxing.get("forced", false):
 		# 피트레인 과속 · 언세이프 릴리스 (드물게, 크루 실력이 낮을수록)
 		if rnd() < 0.004:
@@ -2476,6 +2523,13 @@ func prepare_start() -> void:
 				c.used_set_pen = 0.0
 			else:
 				c.used_set_pen = 0.45
+	if wet_start:
+		for c in cars:
+			c.comp = "W"
+			c.used["W"] = true
+			c.used_set_pen = 0.0
+		event("🌧 폭우: 세이프티카 선도 스타트 — 규정상 전 차량 풀 웻 타이어로 출발", "wet")
+		deploy("SC")
 	for c in my_cars():
 		make_plans(c)
 
