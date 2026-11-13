@@ -13,6 +13,8 @@ const CS = preload("res://scripts/sim/career.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RaceSaveS = preload("res://scripts/sim/race_save.gd")
+const TrackMapS = preload("res://scripts/ui/track_map.gd")
+const REC = preload("res://scripts/sim/records.gd")
 
 const TABS := [["home", "개요"], ["rnd", "개발"], ["base", "설비"], ["staff", "인력"], ["spon", "스폰서"], ["league", "리그"]]
 const REGION_KO := {"uk": "영국 (공력)", "italy": "이탈리아 (엔진)", "germany": "독일 (섀시·내구)", "japan": "일본 (타이어)"}
@@ -208,7 +210,28 @@ func _tab_home() -> void:
 	# 다음 레이스 + 미션
 	var nk: String = cr.next_circuit()
 	var nc: Dictionary = DB.circuits[nk]
-	var c3 = K.card(_body, "다음 레이스 · R%d %s" % [cr.round_idx() + 1, nc["full"]], K.AMBER)
+	var c3o = K.card(_body, "다음 레이스 · R%d %s" % [cr.round_idx() + 1, nc["full"]], K.AMBER)
+	var c3: Control = c3o
+	# 넓은 화면(폴드 펼친 화면·가로)에선 왼쪽 정보 | 오른쪽 서킷 지도
+	if get_viewport_rect().size.x >= 900.0:
+		var hb = K.hbox(12)
+		c3o.add_child(hb)
+		var lv = K.vbox(6)
+		lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_child(lv)
+		var mp = TrackMapS.new()
+		mp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mp.custom_minimum_size = Vector2(0, 280)
+		mp.set_circuit(nk)
+		hb.add_child(mp)
+		c3 = lv
+		REC.ensure()
+		var rc: Dictionary = REC.data["circuits"].get(nk, {})
+		var rec_t := "[color=#8b98a5]이 서킷 첫 출전[/color]"
+		if not rc.is_empty() and int(rc.get("races", 0)) > 0:
+			var bp: int = int(rc.get("best_pos", 0))
+			rec_t = "내 기록 · %d회 출전 · 최고 %s · 우승 %d · 최고 랩 %s" % [int(rc["races"]), ("P%d" % bp) if bp > 0 else "-", int(rc.get("wins", 0)), REC.fmt_lap(float(rc.get("best_lap", 0.0)))]
+		_txt(lv, rec_t, 14)
 	_txt(c3, "%s · %s · 강우 확률 [color=#3b82f6]%d%%[/color] · %d랩\n[color=#8b98a5]%s[/color]" % [nc["dir"], nc["desc"], int(float(nc["rain"]) * 100), cr.race_laps(), nc["setupHint"]])
 	if cr.is_wec():
 		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "GT": "LMGT3"}[cr.my_class()], _min_drive_txt()], 13)

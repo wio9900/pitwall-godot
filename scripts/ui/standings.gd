@@ -133,8 +133,8 @@ func _draw() -> void:
 		draw_rect(Rect2(0, y, w, ROW_H), MINE_BG if c.mine else (BG_A if pos % 2 == 1 else BG_B))
 		var by: float = y + ROW_H * 0.5 + fs * 0.36
 		var ink: Color = Color("#5d6674") if out else (Color("#ffc53d") if c.mine else Color("#e6edf3"))
-		draw_string(font, Vector2(x_pos, by), str(pos), HORIZONTAL_ALIGNMENT_RIGHT, 30, fs, Color.WHITE if not out else DIM)
-		draw_rect(Rect2(x_team - 12, y + 8, 5, ROW_H - 16), c.color if not out else c.color.darkened(0.6))
+		draw_string(font, Vector2(x_pos, by), str(pos), HORIZONTAL_ALIGNMENT_RIGHT, x_team - 16.0 - x_pos, fs, Color.WHITE if not out else DIM)
+		draw_rect(Rect2(x_team - 10, y + 8, 4, ROW_H - 16), c.color if not out else c.color.darkened(0.6))
 		var team: String = _short_team(c.team)
 		if sim.is_wec():
 			team += " #%d" % (c.slot + 1)

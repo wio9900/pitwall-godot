@@ -168,6 +168,14 @@ func _process(_delta: float) -> bool:
 			step = 112
 		112:
 			_shot("portrait_laps")
+			root.size = Vector2i(1100, 1200) # 폴드 펼친 화면 비율
+			main._on_resize()
+			main.race_panel._on_tab("drive")
+			main._refresh_ui()
+			wait = 5
+			step = 113
+		113:
+			_shot("fold_race")
 			main._autosave() # 메뉴에 '이어하기' 버튼이 보이도록
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
@@ -205,6 +213,16 @@ func _process(_delta: float) -> bool:
 			step = 14
 		14:
 			_shot("hq_home")
+			root.size = Vector2i(1100, 1200)
+			main._on_resize()
+			main._open_hq()
+			wait = 4
+			step = 114
+		114:
+			_shot("fold_hq_home")
+			root.size = Vector2i(1280, 720)
+			main._on_resize()
+			main._open_hq()
 			main.hq_view._on_tab("rnd")
 			wait = 3
 			step = 15
@@ -327,6 +345,15 @@ func _process(_delta: float) -> bool:
 			step = 72
 		72:
 			_shot("wec_laps")
+			root.size = Vector2i(1100, 1200)
+			main._on_resize()
+			main._refresh_ui()
+			wait = 5
+			step = 73
+		73:
+			_shot("fold_wec_race")
+			root.size = Vector2i(1280, 720)
+			main._on_resize()
 			main.race_panel._on_tab("drive")
 			main._set_speed(4)
 			main._set_cam(-1)

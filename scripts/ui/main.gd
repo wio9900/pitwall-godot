@@ -134,7 +134,12 @@ var land_left: VBoxContainer
 var land_right: VBoxContainer
 var ttower                 # 중계식 순위 띠 (timing_tower.gd)
 var port_track: HBoxContainer
-var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로
+var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로, 2 = 정사각형에 가까운 화면 (폴드 펼친 화면)
+var sq_box: VBoxContainer       # 정사각형 배치: 위 = 순위 띠 + 서킷, 아래 = 지시판 | 상세 순위·무전
+var sq_track: HBoxContainer
+var sq_bottom: HBoxContainer
+var sq_right: ScrollContainer
+var sq_rv: VBoxContainer
 var result_panel: PanelContainer
 # 출발 신호
 var starting := false
@@ -194,8 +199,10 @@ func _on_resize() -> void:
 	# 세로 화면(폴드 외부 화면 등)에서는 기준 해상도를 720×1280 으로 바꿔 글씨·버튼이 화면 폭에 맞게 커지도록
 	var win := get_window()
 	var ws: Vector2i = win.size
-	var want := 1 if ws.x > ws.y * 1.05 else 0
-	var base := Vector2i(1280, 720) if want == 1 else Vector2i(720, 1280)
+	var ratio: float = float(ws.x) / maxf(1.0, float(ws.y))
+	# 가로세로 비율이 1에 가까우면(폴드 펼친 화면) 전용 배치. 아주 넓거나 길면 기존 가로/세로
+	var want := 2 if (ratio >= 0.8 and ratio <= 1.25) else (1 if ratio > 1.05 else 0)
+	var base := Vector2i(1280, 720) if want == 1 else (Vector2i(1120, 1120) if want == 2 else Vector2i(720, 1280))
 	var scl: float = 1.0 / clampf(float(ST.get_v("ui_scale")), 0.8, 1.3)
 	base = Vector2i(int(base.x * scl), int(base.y * scl))
 	if win.content_scale_size != base:
@@ -217,7 +224,7 @@ func _menu_layout() -> void:
 	var home: bool = menu_page == "home"
 	menu_cols.vertical = landscape == 0 or home
 	menu_cols.alignment = BoxContainer.ALIGNMENT_CENTER if home else BoxContainer.ALIGNMENT_BEGIN
-	var col_w: float = 720.0 if home else (1200.0 if landscape == 1 else 820.0)
+	var col_w: float = 720.0 if home else (1200.0 if landscape >= 1 else 820.0)
 	var side = maxf(24.0, (vs.x - col_w) / 2.0)
 	menu_box.add_theme_constant_override("margin_left", int(side))
 	menu_box.add_theme_constant_override("margin_right", int(side))
@@ -233,6 +240,26 @@ func _apply_layout() -> void:
 	# 지시판과 순위·무전은 항상 스크롤 영역 안 (화면이 작아도 끌어서 다 볼 수 있게)
 	_move(panels_box, race_lower)
 	_move(tabs, race_lower)
+	sq_box.visible = false
+	if landscape == 2:
+		# 정사각형: 위쪽 = 순위 띠 + 서킷(넓게), 아래 = 왼쪽 지시판 | 오른쪽 상세 순위·무전 (스크롤 거의 없이 한 화면)
+		_move(hud_top, sq_box)
+		sq_box.move_child(hud_top, 0)
+		_move(ttower, sq_track)
+		_move(race_view, sq_track)
+		ttower.custom_minimum_size = Vector2(190, 0)
+		race_view.custom_minimum_size = Vector2(0, 0)
+		race_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_move(race_scroll, sq_bottom)
+		sq_bottom.move_child(race_scroll, 0)
+		_move(tabs, sq_rv)
+		tabs.custom_minimum_size = Vector2(0, 300)
+		tabs.visible = true
+		land_box.visible = false
+		port_box.visible = false
+		sq_box.visible = true
+		return
+	tabs.visible = race_panel.tab == "laps"
 	if landscape == 1:
 		# 왼쪽 끝: 순위 띠 / 가운데: 상단 바 + 트랙 / 오른쪽: 내 차 지시 + 상세 순위·무전
 		_move(ttower, land_box)
@@ -1165,6 +1192,29 @@ func _build_race_ui() -> void:
 	land_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	land_box.add_theme_constant_override("separation", 10)
 	root.add_child(land_box)
+	sq_box = VBoxContainer.new()
+	sq_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sq_box.add_theme_constant_override("separation", 8)
+	sq_box.visible = false
+	root.add_child(sq_box)
+	sq_track = HBoxContainer.new()
+	sq_track.add_theme_constant_override("separation", 6)
+	sq_track.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sq_track.size_flags_stretch_ratio = 1.1
+	sq_box.add_child(sq_track)
+	sq_bottom = HBoxContainer.new()
+	sq_bottom.add_theme_constant_override("separation", 10)
+	sq_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sq_box.add_child(sq_bottom)
+	sq_right = ScrollContainer.new()
+	sq_right.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sq_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sq_right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	KitS.drag_scroll(sq_right)
+	sq_rv = VBoxContainer.new()
+	sq_rv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sq_right.add_child(sq_rv)
+	sq_bottom.add_child(sq_right)
 	# 중계식 순위 띠: 가로 화면에선 맨 왼쪽 기둥, 세로 화면에선 서킷 왼쪽
 	ttower = TowerS.new()
 	ttower.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1567,7 +1617,7 @@ func _refresh_tower(_ord: Array, _leader) -> void:
 ## 지시판 탭이 바뀌면: 랩타임 탭에서만 상세 순위·무전 (다른 탭에선 그 공간을 비워 둔다)
 func _on_panel_tab(t: String) -> void:
 	if tabs != null:
-		tabs.visible = t == "laps"
+		tabs.visible = t == "laps" or landscape == 2 # 정사각형 화면은 오른쪽 칸에 늘 보인다
 		_refresh_ui()
 
 
@@ -1575,8 +1625,9 @@ func _on_panel_tab(t: String) -> void:
 func _fit_tabs() -> void:
 	if race_scroll == null or not tabs.visible:
 		return
-	# 가로·세로 모두: 지시판 아래 남은 높이를 꽉 채운다 (줄이 더 많으면 표 높이만큼 늘어나 스크롤)
-	var h: float = race_scroll.size.y - panels_box.size.y - 12.0
+	# 가로·세로: 지시판 아래 남은 높이를 꽉 채운다 (줄이 더 많으면 표 높이만큼 늘어나 스크롤)
+	# 정사각형: 오른쪽 칸 높이를 꽉 채운다
+	var h: float = (sq_right.size.y - 4.0) if landscape == 2 else (race_scroll.size.y - panels_box.size.y - 12.0)
 	var want: float = maxf(300.0, h)
 	if absf(tabs.custom_minimum_size.y - want) > 2.0:
 		tabs.custom_minimum_size = Vector2(0, want)
