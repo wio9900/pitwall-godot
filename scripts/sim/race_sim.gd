@@ -1832,10 +1832,11 @@ func on_cross(c, t: float) -> void:
 		c.sec += 1
 		c.pit_phase = 0
 		if c.sec == NS - 1 and c.boxing == null:
+			var manual: bool = c.mine and c.pit_req != ""
 			var d: Variant = pit_decision(c)
 			if d != null:
-				if pit_closed():
-					d["closed"] = true
+				if pit_closed() and manual and not is_wec():
+					d["closed"] = true # 플레이어가 폐쇄 중에 직접 넣은 피트만 스톱 앤 고
 				c.boxing = d
 				# 피트 크루 숙련도(기본 0.85, 훈련센터 Lv당 +0.025): Lv5면 정차 약 0.8초 단축
 				if is_wec():
@@ -2597,7 +2598,7 @@ func prepare_start() -> void:
 	for i in cars.size():
 		var c = cars[i]
 		c.grid = i
-		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) - (0.012 if c.traits.has("rocket") else 0.0) + gauss(0.012), 0.01, 0.09)
+		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) - (0.007 if c.traits.has("rocket") else 0.0) + gauss(0.012), 0.01, 0.09)
 		if not is_wec() and react <= 0.011 and rnd() < 0.08:
 			add_penalty(c, 5.0, "부정 출발")
 		c.start_t = i * (0.42 if is_wec() else 0.25) + react
