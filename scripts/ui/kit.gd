@@ -281,6 +281,9 @@ static func scroll_v(parent: Control) -> VBoxContainer:
 	drag_scroll(sc)
 	var v = vbox(10)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 내용이 화면보다 짧으면 위에 몰리지 않고 세로 가운데에 (길면 평소처럼 스크롤)
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	sc.add_child(v)
 	return v
 

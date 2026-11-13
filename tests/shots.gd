@@ -220,6 +220,13 @@ func _process(_delta: float) -> bool:
 			step = 114
 		114:
 			_shot("fold_hq_home")
+			root.size = Vector2i(720, 1140) # 폴드 바깥·세로 폰
+			main._on_resize()
+			main._open_hq()
+			wait = 4
+			step = 115
+		115:
+			_shot("portrait_hq_home")
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
 			main._open_hq()

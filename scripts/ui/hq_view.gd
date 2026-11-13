@@ -219,8 +219,15 @@ func _tab_home() -> void:
 	var nc: Dictionary = DB.circuits[nk]
 	var c3o = K.card(_body, "다음 레이스 · R%d %s" % [cr.round_idx() + 1, nc["full"]], K.AMBER)
 	var c3: Control = c3o
-	# 넓은 화면(폴드 펼친 화면·가로)에선 왼쪽 정보 | 오른쪽 서킷 지도
-	if get_viewport_rect().size.x >= 900.0:
+	# 넓은 화면(폴드 펼친 화면·가로)에선 왼쪽 정보 | 오른쪽 서킷 지도, 세로 화면에선 정보 아래 지도
+	var vs: Vector2 = get_viewport_rect().size
+	if vs.x < 900.0 and vs.y > vs.x * 1.2:
+		var mp2 = TrackMapS.new()
+		mp2.custom_minimum_size = Vector2(0, clampf(vs.y * 0.24, 220.0, 380.0))
+		mp2.set_circuit(nk)
+		c3o.add_child(mp2)
+		c3o.move_child.call_deferred(mp2, -1) # 카드 내용(일정 등) 뒤로
+	if vs.x >= 900.0:
 		var hb = K.hbox(12)
 		c3o.add_child(hb)
 		var lv = K.vbox(6)
