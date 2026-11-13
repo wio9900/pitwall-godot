@@ -50,6 +50,17 @@ func _process(_delta: float) -> bool:
 		if main.sim.leader_lap >= 3 and not resumed.has(rk) and (races == 0 or main.mode == "career"):
 			resumed[rk] = true
 			var lap0: int = main.sim.leader_lap
+			# ⏸ 일시정지 창: 멈췄다가 계속하기
+			main._open_pause()
+			if main.speed_x != 0 or not main.pause_box.visible:
+				print("  ! 일시정지가 멈추지 않음")
+				quit(1)
+				return true
+			main._close_pause()
+			if main.speed_x == 0:
+				print("  ! 계속하기 후에도 멈춰 있음")
+				quit(1)
+				return true
 			main._exit_race()
 			if main.sim != null or not main.RaceSaveS.has_save():
 				print("  ! 나가기 후 저장 없음")

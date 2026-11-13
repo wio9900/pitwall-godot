@@ -707,6 +707,71 @@ func _notification(what: int) -> void:
 
 
 ## 레이스 중 나가기: 저장하고 메뉴(커리어는 본부)로. 메뉴의 "이어하기"로 돌아올 수 있다
+## 일시정지 창: 레이스를 멈추고 '계속하기 / 저장하고 나가기'
+var pause_box: Control
+var _pause_prev := 0
+
+
+func _open_pause() -> void:
+	if sim == null:
+		return
+	if pause_box == null:
+		pause_box = Control.new()
+		pause_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.mouse_filter = Control.MOUSE_FILTER_STOP
+		pause_box.add_to_group("modal")
+		add_child(pause_box)
+		var dim = ColorRect.new()
+		dim.color = Color(0, 0, 0, 0.65)
+		dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.add_child(dim)
+		var cc = CenterContainer.new()
+		cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.add_child(cc)
+		var pc = PanelContainer.new()
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = KitS.PANEL
+		sb.border_color = KitS.RED
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(20)
+		pc.add_theme_stylebox_override("panel", sb)
+		pc.custom_minimum_size = Vector2(420, 0)
+		cc.add_child(pc)
+		var v = KitS.vbox(12)
+		pc.add_child(v)
+		var t = KitS.label("⏸ 일시정지", 26, Color.WHITE)
+		t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(t)
+		var b1 = _btn("▶ 계속하기", 20)
+		b1.custom_minimum_size = Vector2(0, 56)
+		b1.pressed.connect(_close_pause)
+		v.add_child(b1)
+		var b2 = _btn("⚙ 설정", 17)
+		b2.pressed.connect(func(): _open_settings())
+		v.add_child(b2)
+		var b3 = _btn("💾 저장하고 나가기", 17)
+		b3.pressed.connect(func():
+			pause_box.visible = false
+			_exit_race())
+		v.add_child(b3)
+		var note = KitS.label("나가도 이 랩부터 이어서 할 수 있어요 (본부·메뉴의 '레이스 이어하기')", 13, KitS.DIM)
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(note)
+	_pause_prev = speed_x if speed_x > 0 else int(ST.get_v("speed"))
+	_set_speed(0)
+	pause_box.visible = true
+	move_child(pause_box, get_child_count() - 1)
+
+
+func _close_pause() -> void:
+	if pause_box != null:
+		pause_box.visible = false
+	if sim != null:
+		_set_speed(_pause_prev if _pause_prev > 0 else 1)
+
+
 func _exit_race() -> void:
 	_autosave()
 	sim = null
@@ -1281,10 +1346,10 @@ func _build_race_ui() -> void:
 	gear2.custom_minimum_size = Vector2(40, 0)
 	gear2.pressed.connect(_open_settings)
 	sp.add_child(gear2)
-	var exitb = _btn("⏏", 16)
+	var exitb = _btn("⏸", 16)
 	exitb.custom_minimum_size = Vector2(40, 0)
-	exitb.tooltip_text = "저장하고 나가기 (메뉴에서 이어하기)"
-	exitb.pressed.connect(_exit_race)
+	exitb.tooltip_text = "일시정지 (계속하기 / 저장하고 나가기)"
+	exitb.pressed.connect(_open_pause)
 	sp.add_child(exitb)
 	# 트랙
 	sfx = SfxS.new()
