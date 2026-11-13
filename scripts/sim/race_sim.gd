@@ -359,6 +359,14 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.rel = clampf(c.rel + float(em.get("rel", 0.0)), 0.5, 0.99)
 				var gl: Array = em.get("grid_pen", [0, 0])
 				c.grid_pen = int(gl[c.slot]) if c.slot < gl.size() else 0
+	# 파워유닛·기어박스가 낡을수록 신뢰성 하락 (커리어 F1)
+	if opts.has("pu_rel"):
+		var pr: Array = opts["pu_rel"]
+		for c in cars:
+			if c.mine and c.slot < pr.size():
+				c.rel = clampf(c.rel - float(pr[c.slot]), 0.5, 0.99)
+			elif not c.mine and rnd() < 0.04:
+				c.grid_pen = 10 if rnd() < 0.5 else 5 # AI 도 가끔 할당을 넘겨 부품 교체
 	# 그리드: 예선 페이스 순
 	var qp = {}
 	for c in cars:

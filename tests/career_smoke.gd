@@ -147,6 +147,20 @@ func _init() -> void:
 			fails += 1
 		if float(cr.hq["cash"]) != float(cr.hq["cash"]):
 			fails += 1
+	# 파워유닛 마일리지: F1 한 시즌 돌면 부품이 닳고, 할당 초과 교체는 그리드 강등
+	var cp = CareerS.new()
+	cp.new_career("select", 6, {}, 6161)
+	for r in 8:
+		_run_race(cp)
+	var w0: float = float(cp.pu_state(0)["gb"]["wear"])
+	var used: int = int(cp.pu_state(0)["gb"]["n"])
+	for i in 4:
+		cp.pu_replace(1, "ers")
+	var gl: Array = cp.hq.get("next_mods", {}).get("grid_pen", [0, 0])
+	print("파워유닛: 8경기 후 #1 기어박스 %d개째 · 수명 %d%% · #2 ERS 4번 교체 → 그리드 강등 %d" % [used, int(w0 * 100), int(gl[1])])
+	if used < 2 or int(gl[1]) < 10:
+		print("  ! 파워유닛 마일리지 이상")
+		fails += 1
 	# 아시안 르망 챔피언 보상: 르망 초청 경기 (포인트·라운드 그대로, LMP2 로 달리고 끝나면 원래 리그로)
 	var ci = CareerS.new()
 	ci.new_career("create", 0, {"tier": 0, "name": "Invite", "series": "wec"}, 5151)

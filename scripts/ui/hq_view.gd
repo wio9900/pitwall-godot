@@ -316,6 +316,8 @@ func _finance(parent: Control) -> void:
 # ═════════ 개발 ═════════
 func _tab_rnd() -> void:
 	var h := _h()
+	if cr.pu_on():
+		_pu_card()
 	var c0 = K.card(_body, "개발 환경 · 규정 주기 %d/%d년차" % [cr.reg_year(), int(cr.D["econ"]["regCycle"])])
 	if cr.is_wec() and not cr.is_spec_tier():
 		_txt(c0, "하이퍼카는 호몰로게이션으로 차가 고정돼서 성능 개발(공력·파워트레인·섀시)에 [b]EVO 조커[/b]가 필요해요. 남은 조커 [color=#ffc53d][b]%d/%d[/b][/color]. 신뢰성 개선은 조커 없이 가능해요. [b]BoP가 성능 이점의 40%%를 상쇄[/b]하고, 성적에 따라 매 경기 조정돼요 (현재 내 팀 BoP %+.2f%%)." % [int(h.get("jokers", 0)), int(cr.D["econ"]["jokersPerCycle"]), float(h.get("wec_bop", 0.0)) * 100])
@@ -752,3 +754,41 @@ func _tags(d: Dictionary) -> String:
 	for t in tg:
 		parts.append("[color=#ffc53d]◆ %s[/color] [color=#8b98a5](%s)[/color]" % [TraitsS.KO[t], TraitsS.DESC[t]])
 	return "\n" + "  ".join(parts)
+
+
+## 파워유닛·기어박스: 차마다 부품 수명·사용 개수, 교체 버튼, 연습 낡은 부품 사용 여부
+func _pu_card() -> void:
+	var c = K.card(_body, "🔧 파워유닛 · 기어박스 (시즌 할당 엔진 %d · ERS %d · 기어박스 %d, 넘기면 그리드 강등)" % [cr.PU_ALLOC["ice"], cr.PU_ALLOC["ers"], cr.PU_ALLOC["gb"]])
+	for slot in 2:
+		var st: Dictionary = cr.pu_state(slot)
+		var parts: PackedStringArray = []
+		var btns: Array = []
+		for k in ["ice", "ers", "gb"]:
+			var e: Dictionary = st[k]
+			var wv: float = float(e["wear"])
+			var col: String = "#22c55e" if wv < 0.5 else ("#f59e0b" if wv < 0.8 else "#ef4444")
+			var over: bool = int(e["n"]) >= int(cr.PU_ALLOC[k])
+			parts.append("%s [b]%d/%d[/b] · 수명 [color=%s]%d%%[/color]" % [cr.PU_KO[k], int(e["n"]), int(cr.PU_ALLOC[k]), col, int(round(wv * 100))])
+			btns.append(["%s 교체%s" % [cr.PU_KO[k], " (강등)" if over else ""], _on_pu.bind(slot, k)])
+		var pen: float = cr.pu_rel_pen(slot)
+		K.row(c, "[b]#%d %s[/b]\n%s%s" % [slot + 1, cr.my_driver(slot)["name"], "  ·  ".join(parts), ("\n[color=#ef4444]낡은 부품 때문에 신뢰성 -%d%%[/color]" % int(round(pen * 100))) if pen > 0.001 else ""], [], 13)
+		var bh = K.hbox(4)
+		c.add_child(bh)
+		for b in btns:
+			var bb = K.btn(b[0], 13, b[1])
+			bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			bh.add_child(bb)
+	c.add_child(K.label("연습 주행에 쓸 부품", 14, K.DIM))
+	K.seg(c, [["old", "낡은 부품 (레이스 부품 아낌)"], ["new", "레이스 부품 (수명 더 씀)"]], "old" if bool(_h().get("pu_old_practice", true)) else "new", _on_pu_practice, 14)
+	_txt(c, "[color=#8b98a5]부품은 레이스마다 닳고, 수명 70%%를 넘으면 고장 위험이 커져요. 100%%가 되면 자동 교체돼요. 할당을 넘겨 새 부품을 넣으면 첫 번째는 10계단, 그 뒤로는 5계단 그리드 강등이에요 — 강등을 감수하고 미리 바꾸는 것도 전략이에요.[/color]", 12)
+
+
+func _on_pu(slot: int, k: String) -> void:
+	cr.pu_replace(slot, k)
+	refresh()
+
+
+func _on_pu_practice(v) -> void:
+	_h()["pu_old_practice"] = v == "old"
+	cr.save()
+	refresh()

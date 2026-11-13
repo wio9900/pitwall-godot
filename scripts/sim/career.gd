@@ -560,9 +560,73 @@ func _roster_crew(names: Array) -> Array:
 	return out
 
 
+# ═════════ 파워유닛·기어박스 마일리지 (F1) ═════════
+## 시즌 할당량(게임 기준)과 부품 수명(몇 경기). 할당을 넘겨 새 부품을 넣으면 그리드 강등(처음 10, 이후 5)
+const PU_ALLOC := {"ice": 4, "ers": 3, "gb": 4}
+const PU_LIFE := {"ice": 6.0, "ers": 7.0, "gb": 5.0}
+const PU_KO := {"ice": "엔진(ICE)", "ers": "ERS", "gb": "기어박스"}
+
+
+func pu_on() -> bool:
+	return not is_wec() and not is_spec_tier()
+
+
+func pu_state(slot: int) -> Dictionary:
+	if not hq.has("pu") or (hq["pu"] as Array).size() < 2:
+		hq["pu"] = [_pu_fresh(), _pu_fresh()]
+	return hq["pu"][slot]
+
+
+func _pu_fresh() -> Dictionary:
+	return {"ice": {"n": 1, "wear": 0.0, "pen": 0}, "ers": {"n": 1, "wear": 0.0, "pen": 0}, "gb": {"n": 1, "wear": 0.0, "pen": 0}}
+
+
+## 낡은 부품일수록 신뢰성 하락 (수명 70% 넘으면 급격히)
+func pu_rel_pen(slot: int) -> float:
+	if not pu_on():
+		return 0.0
+	var p := 0.0
+	var st := pu_state(slot)
+	for k in PU_ALLOC:
+		p += maxf(0.0, float(st[k]["wear"]) - 0.7) * 0.12
+	return p
+
+
+## 새 부품 투입. 할당 초과면 다음 레이스 그리드 강등. 돌려주는 값 = 강등 칸 수
+func pu_replace(slot: int, k: String, forced: bool = false) -> int:
+	var st := pu_state(slot)
+	var e: Dictionary = st[k]
+	e["n"] = int(e["n"]) + 1
+	e["wear"] = 0.0
+	var pen := 0
+	if int(e["n"]) > int(PU_ALLOC[k]):
+		pen = 10 if int(e.get("pen", 0)) == 0 else 5
+		e["pen"] = int(e.get("pen", 0)) + 1
+		_add_mod("grid_pen", slot, pen)
+	news("🔧 %s %s 새 부품 (%d/%d)%s%s" % [_slot_name(slot), PU_KO[k], int(e["n"]), int(PU_ALLOC[k]), (" — 할당 초과, 그리드 %d계단 강등" % pen) if pen > 0 else "", " (수명 다해 교체)" if forced else ""])
+	save()
+	return pen
+
+
+func _pu_after_race(notes: Array) -> void:
+	if not pu_on():
+		return
+	var old_practice: bool = bool(hq.get("pu_old_practice", true))
+	for slot in 2:
+		var st := pu_state(slot)
+		for k in PU_ALLOC:
+			# 레이스 거리 + (연습에 새 부품을 쓰면) 연습 거리
+			st[k]["wear"] = snappedf(float(st[k]["wear"]) + (1.0 + (0.0 if old_practice else 0.25)) / float(PU_LIFE[k]), 0.001)
+			if float(st[k]["wear"]) >= 1.0:
+				var pen := pu_replace(slot, k, true)
+				notes.append("🔧 %s %s 수명 다해 교체%s" % [_slot_name(slot), PU_KO[k], (" · 그리드 -%d" % pen) if pen > 0 else ""])
+
+
 ## 레이스 시뮬레이션에 넘길 옵션 (팀·엔진·내 차 보정·WEC 엔트리)
 func race_opts(sprint: bool = false) -> Dictionary:
 	var o: Dictionary = _race_opts(sprint)
+	if pu_on():
+		o["pu_rel"] = [pu_rel_pen(0), pu_rel_pen(1)]
 	o["difficulty"] = int(hq.get("difficulty", 1))
 	var em: Dictionary = hq.get("next_mods", {})
 	if not em.is_empty():
@@ -1646,6 +1710,7 @@ func after_race(sim) -> Dictionary:
 	_track_season(classified, mine, POINTS, mult, sim)
 	var ec := _settle(mine, classified, total)
 	hq["race_count"] = int(hq["race_count"]) + 1
+	_pu_after_race(notes)
 	_complete_projects(notes)
 	var cl := cal_len()
 	var ri := round_idx()
@@ -1906,6 +1971,7 @@ func _ai_bop(sim, classified: Array, notes: Array) -> void:
 
 func _season_start(notes: Array) -> void:
 	hq["season_base"] = int(hq["race_count"])
+	hq["pu"] = [_pu_fresh(), _pu_fresh()]
 	hq["team_pts"] = {}
 	hq["drv_pts"] = {}
 	hq["season_stats"] = {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99}
