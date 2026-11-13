@@ -137,9 +137,9 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 		})
 	if entry == "create":
 		hq["my_team"] = hq["teams"].size() - 1
-		var seed_cash := 5.2 if hq["tier"] == 1 else (6.0 if hq["tier"] == 2 else 6.5)
+		var seed_cash := 4.6 if hq["tier"] == 0 else (5.2 if hq["tier"] == 1 else (6.0 if hq["tier"] == 2 else 6.5))
 		hq["cash"] = snappedf(seed_cash * (0.96 if series == "wec" else 1.0), 0.1)
-		hq["pop"] = 0.28 if hq["tier"] == 1 else (0.32 if hq["tier"] == 2 else 0.35)
+		hq["pop"] = 0.25 if hq["tier"] == 0 else (0.28 if hq["tier"] == 1 else (0.32 if hq["tier"] == 2 else 0.35))
 	else:
 		hq["my_team"] = team_idx
 		var t: Dictionary = hq["teams"][team_idx]
@@ -166,8 +166,10 @@ const WEC_PKGS := {
 	"Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "독자 워크스 (GMR V8)",
 }
 # 하위 리그 라인업 등급 · 최소 주행 규정 (LMGT3 브론즈 25%, LMP2 실버 20%)
-const WEC_TIER_GRADES := {"1": ["G", "S", "B"], "2": ["G", "G", "S"], "3": ["P", "P", "G"]}
-const WEC_MIN_DRIVE := {"1": {"grade": "B", "pct": 0.25}, "2": {"grade": "S", "pct": 0.20}}
+const WEC_TIER_GRADES := {"0": ["G", "S", "B"], "1": ["G", "S", "B"], "2": ["G", "G", "S"], "3": ["P", "P", "G"]}
+const WEC_MIN_DRIVE := {"0": {"grade": "B", "pct": 0.25}, "1": {"grade": "B", "pct": 0.25}, "2": {"grade": "S", "pct": 0.20}}
+## 하위 리그 → 클래스 (0 아시안 르망 LMP3 · 1 LMGT3 · 2 LMP2)
+const WEC_TIER_CLS := {0: "P3", 1: "GT", 2: "P2"}
 const GRADE_RANGE := {"P": [0.86, 0.93], "G": [0.80, 0.87], "S": [0.70, 0.78], "B": [0.56, 0.66]}
 
 
@@ -216,6 +218,9 @@ func news(msg: String) -> void:
 
 # ═════════ 기본 정보 ═════════
 func tier() -> int:
+	# 르망 초청 경기 중에는 LMP2(2부) 규정·출전 명단으로 달린다
+	if hq.get("special", "") == "lemans":
+		return 2
 	return int(hq["tier"])
 
 
@@ -229,7 +234,7 @@ func tier_scale() -> float:
 
 
 func calendar() -> Array:
-	return SD()["calendar"]
+	return tier_meta().get("calendar", SD()["calendar"])
 
 
 ## 레이스 형식: f1 / f2(스프린트+피처, 피처는 의무 피트) / f3(피트 없이 한 경기, 드라이버 육성) / wec
@@ -271,8 +276,9 @@ func cal_len() -> int:
 	return calendar().size()
 
 
+## 이번 시즌 몇 번째 라운드인가 (0부터). 리그마다 일정 길이가 달라서(아시안 르망 6경기) 시즌 시작 시점 기준으로 센다
 func round_idx() -> int:
-	return int(hq["race_count"]) % cal_len()
+	return (int(hq["race_count"]) - int(hq.get("season_base", 0))) % cal_len()
 
 
 func is_preseason() -> bool:
@@ -280,6 +286,8 @@ func is_preseason() -> bool:
 
 
 func next_circuit() -> String:
+	if hq.get("special", "") == "lemans":
+		return "lemans"
 	return calendar()[round_idx()]
 
 
@@ -671,7 +679,7 @@ func _race_opts(sprint: bool) -> Dictionary:
 		return {"teams": race_teams(), "engines": hq["engines"], "my_mods": my_mods(), "rules": race_rules(sprint)}
 	if not is_spec_tier():
 		return {"wec_hy": hq["teams"], "wec_field": {"hy": hq["field"], "gt": DB.wec["field"]["gt"]}, "my_mods": my_mods()}
-	var cls := "GT" if tier() == 1 else "P2"
+	var cls: String = WEC_TIER_CLS.get(tier(), "P2")
 	var entries: Array = []
 	var rs: Array = DB.wec["rosters"][str(tier())]
 	for ri in rs.size():
@@ -702,7 +710,7 @@ func my_class() -> String:
 		return "F1"
 	if not is_spec_tier():
 		return "HY"
-	return "GT" if tier() == 1 else "P2"
+	return WEC_TIER_CLS.get(tier(), "P2")
 
 
 func race_my_index() -> int:
@@ -1579,6 +1587,43 @@ func driver_salary(d: Dictionary) -> float:
 
 
 ## 레이스가 끝난 sim 을 받아 포인트·경제·성장·시즌 전환을 처리한다. 화면용 요약을 돌려준다.
+## 르망 초청 경기 시작 (초청장이 있을 때만)
+func start_invite() -> bool:
+	if not hq.get("lemans_invite", false):
+		return false
+	hq["special"] = "lemans"
+	save()
+	return true
+
+
+func in_invite() -> bool:
+	return hq.get("special", "") == "lemans"
+
+
+## 르망 초청 경기 정산: 포인트·라운드는 그대로, 클래스 순위로 상금·평판만
+func after_invite(sim) -> Dictionary:
+	var best := 99
+	var mcls := my_class()
+	var cls_ord: Array = []
+	for c in sim.order():
+		if c.cls == mcls and c.dnf == "":
+			cls_ord.append(c)
+	for c in sim.my_cars():
+		var p := cls_ord.find(c)
+		if p >= 0:
+			best = mini(best, p + 1)
+	var cash := 1.5 if best == 1 else (0.8 if best <= 3 else (0.3 if best < 99 else 0.0))
+	var pop := 0.12 if best == 1 else (0.06 if best <= 3 else (0.02 if best < 99 else -0.02))
+	hq["cash"] = r2(float(hq["cash"]) + cash)
+	hq["pop"] = clampf(r2(float(hq["pop"]) + pop), 0.15, 0.98)
+	hq["lemans_invite"] = false
+	hq.erase("special")
+	var m := "🎟 르망 24시 초청 출전 결과: LMP2 클래스 %s · 상금 +%.1fM · 평판 %+d%%" % [("P%d" % best) if best < 99 else "완주 실패", cash, int(round(pop * 100))]
+	news(m)
+	save()
+	return {"best": best, "cash": cash, "pop": pop, "text": m}
+
+
 func after_race(sim) -> Dictionary:
 	var notes: Array = []
 	hq["next_mods"] = {}
@@ -1603,7 +1648,7 @@ func after_race(sim) -> Dictionary:
 	hq["race_count"] = int(hq["race_count"]) + 1
 	_complete_projects(notes)
 	var cl := cal_len()
-	var ri := int(hq["race_count"]) % cl
+	var ri := round_idx()
 	var step := int(ceil(cl / 3.0))
 	if ri != 0 and ri % step == 0:
 		_ai_develop(1.0 / 3.0)
@@ -1814,6 +1859,12 @@ func _season_end(notes: Array) -> void:
 	for t in hq["teams"]:
 		for d in t.get("drivers", []):
 			d["age"] = int(d.get("age", 25)) + 1
+	# 아시안 르망(LMP3) 챔피언: 르망 24시 초청장 (다음 시즌 동안 본부에서 한 번 출전, 포인트 없음)
+	if is_wec() and int(hq["tier"]) == 0 and rank == 1:
+		hq["lemans_invite"] = true
+		var mi := "🎟 아시안 르망 LMP3 챔피언! 르망 24시 초청장 획득 — 본부에서 LMP2 초청 엔트리로 한 경기 출전할 수 있어요"
+		news(mi)
+		notes.append(mi)
 	_season_lifecycle(rank, notes)
 	hq["season"] = int(hq["season"]) + 1
 	_season_start(notes)
@@ -1823,6 +1874,7 @@ func _season_end(notes: Array) -> void:
 
 
 func _season_start(notes: Array) -> void:
+	hq["season_base"] = int(hq["race_count"])
 	hq["team_pts"] = {}
 	hq["drv_pts"] = {}
 	hq["season_stats"] = {"races": 0, "wins": 0, "podiums": 0, "dnf": 0, "best": 99}

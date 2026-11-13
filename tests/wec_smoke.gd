@@ -73,7 +73,7 @@ func _init() -> void:
 		if gt_bad > 0 or sets_neg > 0 or ai_viol > 2:
 			fails += 1
 	# 하위 리그 최소 주행(브론즈·실버) 규정: AI 가 짧은 커리어 레이스에서도 지키는가
-	for tier in [1, 2]:
+	for tier in [0, 1, 2]:
 		var cr = CareerS.new()
 		cr.new_career("create", 0, {"tier": tier, "name": "MD", "series": "wec"}, 4400 + tier)
 		var fail_n := 0

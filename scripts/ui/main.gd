@@ -37,7 +37,7 @@ const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const SPEEDS := [0, 1, 2, 5, 10, 15]
-const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}
+const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}
 
 var sim: Variant = null
 var speed_x := 4
@@ -169,6 +169,7 @@ func _ready() -> void:
 	hq_view.go_menu.connect(_show_menu)
 	hq_view.go_season.connect(_open_season)
 	hq_view.go_resume.connect(_resume_race)
+	hq_view.go_invite.connect(_start_invite)
 	wk_view = WeekendViewS.new()
 	wk_view.visible = false
 	add_child(wk_view)
@@ -855,7 +856,8 @@ func _render_career_menu() -> void:
 			sw2.add_child(_swatch(col, new_opts["rim"] == col, _on_new_rim.bind(col)))
 		c1.add_child(KitS.label("출발 리그", 14, DIM))
 		if new_series == "wec":
-			KitS.seg(c1, [["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+			KitS.seg(c1, [["0", "아시안 르망 LMP3 (4부)"], ["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+			c1.add_child(KitS.label("아시안 르망(LMP3)에서 우승하면 르망 24시 초청 경기 기회!", 13, DIM))
 			c1.add_child(KitS.label("하이퍼카 패키지 (승격 후 사용)", 14, DIM))
 			var pk_items: Array = []
 			for pk in CareerS.WEC_PKGS:
@@ -936,6 +938,8 @@ func _on_new_team(i: int) -> void:
 
 func _on_new_series(v) -> void:
 	new_series = v
+	if new_series != "wec" and int(new_opts["tier"]) < 1:
+		new_opts["tier"] = 1 # F1 쪽엔 4부(아시안 르망)가 없다
 	new_team = 0 if v == "wec" else 6
 	new_opts["engine"] = "Ferrari F163 3.0L V6 Twin-Turbo Hybrid" if v == "wec" else "Mercedes"
 	_render_career_menu()
@@ -1095,6 +1099,12 @@ func _start_weekend_career() -> void:
 	wk.setup(sim, career.duty_laps(), career.eng_quality())
 	_show_only(wk_view)
 	wk_view.open(sim, wk)
+
+
+## 아시안 르망 챔피언 보상: 르망 24시 초청 경기 (LMP2 초청 엔트리 · 포인트 없음)
+func _start_invite() -> void:
+	if career != null and career.start_invite():
+		_start_weekend_career()
 
 
 func _weekend_back() -> void:
@@ -1786,6 +1796,10 @@ func _show_result() -> void:
 		if sprint_mode:
 			var sp: Dictionary = career.after_sprint(sim)
 			s = "[b][color=#ffc53d]스프린트[/color][/b] 내 팀 [b]%d점[/b] (상위 8위까지 10-8-6-5-4-3-2-1). 상금·스폰서 정산은 피처 레이스 뒤에 해요.\n\n" % sp["total"] + s
+		elif career.in_invite():
+			var iv: Dictionary = career.after_invite(sim)
+			s = "[b][color=#ffc53d]%s[/color][/b]\n[color=#8b98a5]초청 경기라 시즌 포인트·라운드에는 들어가지 않아요.[/color]\n\n" % iv["text"] + s
+			season_pending = false
 		else:
 			var ec: Dictionary = career.after_race(sim)
 			s = _career_summary(ec) + "\n" + s

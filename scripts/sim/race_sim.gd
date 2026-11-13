@@ -35,12 +35,13 @@ const POINTS := [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
 const STINT := 5                 # 스틴트 5랩 (연료 세이브면 6랩)
 const TANK := 5.45 * 1.6         # 연료 탱크 = 5.45랩 분량
 const GT3_PACE := 1.12
-const CLASS_PACE := {"HY": 1.0, "P2": 1.06, "GT": 1.12} # 클래스 기본 페이스 배율 (LMP2는 하이퍼카와 GT3 사이)
+const CLASS_PACE := {"HY": 1.0, "P2": 1.06, "P3": 1.10, "GT": 1.12} # 클래스 기본 페이스 배율 (LMP2는 하이퍼카와 GT3 사이, LMP3 는 GT3 보다 조금 빠름)
+const CLS_TAG := {"HY": "HY", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}
 const GRADE_KO := {"P": "플래티넘", "G": "골드", "S": "실버", "B": "브론즈"}
 const BOP_K := 0.006
 const WEC_WEAR := 1.9            # 미디엄 1스틴트 ≈ 32%, 더블 스틴트 끝 ≈ 63% (2026 세트 제한 → 더블 스틴트가 기본)
 ## WEC 2026 타이어 규정: 레이스용 새 드라이 세트 = 스틴트 수 × 비율 (출발 세트 포함). LMGT3 는 추가 타이어를 받아 조금 더 많다
-const WEC_SET_RATIO := {"HY": 0.6, "P2": 0.6, "GT": 0.75}
+const WEC_SET_RATIO := {"HY": 0.6, "P2": 0.6, "P3": 0.75, "GT": 0.75}
 const WEC_COLD_TT := {"S": 0.30, "M": 0.24, "H": 0.17, "I": 0.30, "W": 0.32} # 워머 금지: 피트 직후 타이어 온도
 const WPIT := {"lane": 30.0, "fuel": 30.0, "tyres": 12.0, "driver": 3.0}
 const WEC_FUEL_KO := {"lean": "세이브", "std": "표준", "rich": "리치"}
@@ -850,7 +851,7 @@ func retire(c, why: String) -> void:
 	c.sec_end = INF
 	var tag := ""
 	if is_wec():
-		tag = "[HY] " if c.cls == "HY" else "[LMGT3] "
+		tag = "[%s] " % CLS_TAG.get(c.cls, c.cls)
 	event("%s%s %s → 리타이어" % [tag, name_of(c), why], "bad")
 	if c.mine:
 		say(c, "%s 발생으로 리타이어합니다." % why)

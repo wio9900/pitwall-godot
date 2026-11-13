@@ -84,7 +84,7 @@ func main_cls() -> String:
 
 
 func _cls_rank(c: String) -> int:
-	return {"HY": 0, "P2": 1, "GT": 2}.get(c, 0)
+	return {"HY": 0, "P2": 1, "P3": 2, "GT": 3}.get(c, 0)
 
 
 ## 셋업 변경은 연습 중에만 (예선부터는 파크 페르메로 윙 고정)

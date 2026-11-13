@@ -6,6 +6,7 @@ signal go_weekend
 signal go_menu
 signal go_season
 signal go_resume
+signal go_invite
 
 const K = preload("res://scripts/ui/kit.gd")
 const DB = preload("res://scripts/data/game_db.gd")
@@ -87,6 +88,11 @@ func refresh() -> void:
 		go.add_theme_color_override("font_color", K.AMBER)
 	else:
 		go = K.btn("R%d %s 레이스 주말 ▶" % [cr.round_idx() + 1, nc["name"]], 18, _on_weekend)
+		if bool(cr.hq.get("lemans_invite", false)):
+			var inv = K.btn("🎟 르망 24시 초청 출전", 16, func(): go_invite.emit())
+			inv.add_theme_color_override("font_color", K.AMBER)
+			inv.size_flags_stretch_ratio = 1.6
+			_foot.add_child(inv)
 	go.size_flags_stretch_ratio = 3.0
 	_foot.add_child(go)
 
@@ -234,7 +240,7 @@ func _tab_home() -> void:
 		_txt(lv, rec_t, 14)
 	_txt(c3, "%s · %s · 강우 확률 [color=#3b82f6]%d%%[/color] · %d랩\n[color=#8b98a5]%s[/color]" % [nc["dir"], nc["desc"], int(float(nc["rain"]) * 100), cr.race_laps(), nc["setupHint"]])
 	if cr.is_wec():
-		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "GT": "LMGT3"}[cr.my_class()], _min_drive_txt()], 13)
+		_txt(c3, "[color=#8b98a5]%d시간 레이스 압축%s · 내 클래스 %s · %s[/color]" % [int(nc.get("hours", 6)), " · [color=#ffc53d]르망 24시: 포인트 2배[/color]" if cr.next_circuit() == "lemans" else "", {"HY": "하이퍼카", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}.get(cr.my_class(), cr.my_class()), _min_drive_txt()], 13)
 	# 스폰서 미션 약속은 메인에서 빼고 '스폰서' 탭에만 둔다 (메인 화면 간결하게)
 	var cal := ""
 	var cal_arr: Array = cr.calendar()

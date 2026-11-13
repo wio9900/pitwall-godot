@@ -1662,6 +1662,96 @@
      "I. Aguilera"
     ]
    }
+  ],
+  "0": [
+   {
+    "name": "CLX Motorsport",
+    "color": "#e5e5e5",
+    "perf": 0.47,
+    "rel": 0.9,
+    "crew_names": [
+     "P. Lanchère",
+     "K. Rabin",
+     "A. Jacoby"
+    ]
+   },
+   {
+    "name": "Team Virage",
+    "color": "#ef4444",
+    "perf": 0.46,
+    "rel": 0.89,
+    "crew_names": [
+     "N. Karthikeyan",
+     "J. Gerbi",
+     "A. Kumar"
+    ]
+   },
+   {
+    "name": "Inter Europol LMP3",
+    "color": "#fde047",
+    "perf": 0.46,
+    "rel": 0.89,
+    "crew_names": [
+     "A. Bukhantsov",
+     "H. Cubides Olarte",
+     "C. Chou"
+    ]
+   },
+   {
+    "name": "23Events Racing",
+    "color": "#a855f7",
+    "perf": 0.45,
+    "rel": 0.88,
+    "crew_names": [
+     "M. Quintarelli",
+     "L. Stern",
+     "I. Barashi"
+    ]
+   },
+   {
+    "name": "High Class Racing",
+    "color": "#38bdf8",
+    "perf": 0.45,
+    "rel": 0.88,
+    "crew_names": [
+     "C. Voisin",
+     "P. Lindberg",
+     "T. Whale"
+    ]
+   },
+   {
+    "name": "Bretton Racing",
+    "color": "#22c55e",
+    "perf": 0.44,
+    "rel": 0.87,
+    "crew_names": [
+     "L. Fluxá",
+     "L. Ried",
+     "J. Zielonka"
+    ]
+   },
+   {
+    "name": "Forestier Racing by VPS",
+    "color": "#f97316",
+    "perf": 0.44,
+    "rel": 0.88,
+    "crew_names": [
+     "L. Fecury",
+     "L. Morano",
+     "N. Adcock"
+    ]
+   },
+   {
+    "name": "R-ace GP",
+    "color": "#2563eb",
+    "perf": 0.45,
+    "rel": 0.87,
+    "crew_names": [
+     "P. Provost",
+     "F. Michal",
+     "H. Schwarze"
+    ]
+   }
   ]
  },
  "calendar": [
@@ -1740,6 +1830,23 @@
    "reqRank": 1,
    "reqPts": 0,
    "prizeM": 1
+  },
+  "0": {
+   "name": "아시안 르망 시리즈 LMP3 (4부 입문)",
+   "short": "ALMS LMP3 (4부)",
+   "cap": 6.5,
+   "fee": 1.5,
+   "reqRank": 3,
+   "reqPts": 18,
+   "prizeM": 0.25,
+   "calendar": [
+    "sepang_wec",
+    "sepang_wec",
+    "dubai_wec",
+    "dubai_wec",
+    "yas_wec",
+    "yas_wec"
+   ]
   }
  },
  "packages": {

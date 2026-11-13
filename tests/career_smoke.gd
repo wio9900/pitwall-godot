@@ -119,7 +119,7 @@ func _drive(sim) -> void:
 
 func _init() -> void:
 	var fails = 0
-	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["create", 0, {"tier": 2, "name": "Test F2"}, "신규 F2"], ["select", 3, {"series": "wec"}, "WEC Peugeot"], ["create", 0, {"tier": 1, "name": "Test WEC", "series": "wec"}, "WEC 신규 LMGT3"]]
+	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["create", 0, {"tier": 2, "name": "Test F2"}, "신규 F2"], ["select", 3, {"series": "wec"}, "WEC Peugeot"], ["create", 0, {"tier": 1, "name": "Test WEC", "series": "wec"}, "WEC 신규 LMGT3"], ["create", 0, {"tier": 0, "name": "Test ALMS", "series": "wec"}, "WEC 신규 ALMS"]]
 	for sc in scenarios:
 		var cr = CareerS.new()
 		cr.new_career(sc[0], sc[1], sc[2], 4242)
@@ -147,6 +147,27 @@ func _init() -> void:
 			fails += 1
 		if float(cr.hq["cash"]) != float(cr.hq["cash"]):
 			fails += 1
+	# 아시안 르망 챔피언 보상: 르망 초청 경기 (포인트·라운드 그대로, LMP2 로 달리고 끝나면 원래 리그로)
+	var ci = CareerS.new()
+	ci.new_career("create", 0, {"tier": 0, "name": "Invite", "series": "wec"}, 5151)
+	if ci.cal_len() != 6 or ci.my_class() != "P3" or ci.next_circuit() != "sepang_wec":
+		print("  ! 아시안 르망 리그 설정 이상: %d경기 %s %s" % [ci.cal_len(), ci.my_class(), ci.next_circuit()])
+		fails += 1
+	ci.hq["lemans_invite"] = true
+	var rc0: int = int(ci.hq["race_count"])
+	ci.start_invite()
+	if ci.next_circuit() != "lemans" or ci.my_class() != "P2":
+		print("  ! 초청 경기 설정 이상")
+		fails += 1
+	var isim = RaceSimS.new()
+	isim.new_race(ci.next_circuit(), ci.race_my_index(), ci.race_laps(), "auto", ["M", "M"], 0, ci.race_opts())
+	isim.prepare_start()
+	_drive(isim)
+	var iv: Dictionary = ci.after_invite(isim)
+	print("르망 초청 경기: %s" % iv["text"])
+	if int(ci.hq["race_count"]) != rc0 or ci.in_invite() or ci.hq["lemans_invite"] or ci.my_class() != "P3":
+		print("  ! 초청 경기 정산 이상")
+		fails += 1
 	CareerS.delete_save()
 	print("F2 스프린트 %d회: 내 팀 %d점, 전체 피트 %.1f회/경기 · F3 %d경기: 전체 피트 %.1f회/경기" % [sprint_n, sprint_pts, sprint_stops / maxf(1.0, sprint_n), f3_n, f3_stops / maxf(1.0, f3_n)])
 	print("커리어 이벤트 발생: %s" % events)

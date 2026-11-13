@@ -38,7 +38,7 @@ func _list() -> Array:
 		return ord
 	if all_classes:
 		var out: Array = []
-		for k in ["HY", "P2", "GT"]:
+		for k in ["HY", "P2", "P3", "GT"]:
 			for c in ord:
 				if c.cls == k:
 					out.append(c)
@@ -98,7 +98,7 @@ func _draw() -> void:
 			pos = 0
 			if wec and all_classes:
 				draw_rect(Rect2(0, y, w, row_h * 0.8), RED.darkened(0.35))
-				draw_string(bold, Vector2(8, y + row_h * 0.6), {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}.get(c.cls, c.cls), HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs * 0.8), Color.WHITE)
+				draw_string(bold, Vector2(8, y + row_h * 0.6), {"HY": "HYPERCAR", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}.get(c.cls, c.cls), HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs * 0.8), Color.WHITE)
 				y += row_h * 0.8
 		pos += 1
 		if lead == null:

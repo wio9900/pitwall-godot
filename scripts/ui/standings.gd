@@ -14,7 +14,7 @@ const MINE_BG := Color("#2a2410")
 const ROW_H := 40.0
 const HEAD_H := 34.0
 const CLS_H := 30.0
-const CLS_NAME := {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}
+const CLS_NAME := {"HY": "HYPERCAR", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}
 
 var sim
 var gap_mode := 0
@@ -48,7 +48,7 @@ func _lines() -> Array:
 		for c in ord:
 			out.append(["car", c])
 		return out
-	for k in ["HY", "P2", "GT"]:
+	for k in ["HY", "P2", "P3", "GT"]:
 		var first := true
 		for c in ord:
 			if c.cls != k:

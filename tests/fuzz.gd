@@ -171,7 +171,7 @@ func _init() -> void:
 	var t0 := Time.get_ticks_msec()
 	# 커리어: F1 3개 리그 + WEC 3개 리그 (LMGT3 · LMP2 · 하이퍼카), 리그마다 3라운드
 	for series in ["f1", "wec"]:
-		for tier in [1, 2, 3]:
+		for tier in ([0, 1, 2, 3] if series == "wec" else [1, 2, 3]):
 			_career(series, tier, 3, 9000 + tier * 31 + (500 if series == "wec" else 0))
 	# 퀵 레이스: 모든 서킷(F1 + WEC) 날씨 무작위 + 무작위 조작
 	var DB = load("res://scripts/data/game_db.gd")

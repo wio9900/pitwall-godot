@@ -845,7 +845,7 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 ## 간단 모델: 클래스별 실루엣 크기만 다른 둥근 사각형 + 앞쪽 표시 (그리기 3번)
 func _draw_car_simple(pos: Vector2, ang: float, c, sc: float, night: bool) -> void:
 	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
-	var sz: Vector2 = {"HY": Vector2(13.0, 8.0), "P2": Vector2(12.0, 7.2), "GT": Vector2(10.2, 6.6)}.get(c.cls, Vector2(11.0, 7.0))
+	var sz: Vector2 = {"HY": Vector2(13.0, 8.0), "P2": Vector2(12.0, 7.2), "P3": Vector2(11.2, 6.8), "GT": Vector2(10.2, 6.6)}.get(c.cls, Vector2(11.0, 7.0))
 	var r := Rect2(-sz.x * 0.5, -sz.y * 0.5, sz.x, sz.y)
 	_ci.draw_rect(r, c.color.darkened(0.15))
 	_ci.draw_rect(Rect2(r.position.x + sz.x * 0.62, -sz.y * 0.3, sz.x * 0.2, sz.y * 0.6), Color(1, 1, 1, 0.55) if night else Color("#0f172a"))
@@ -854,8 +854,19 @@ func _draw_car_simple(pos: Vector2, ang: float, c, sc: float, night: bool) -> vo
 
 
 ## WEC 하이퍼카(풀 카울 + 눈물방울 캐노피 + 샤크핀) / LMP2(좁은 프로토타입 + 센터 핀 + 큰 리어 윙) / LMGT3(박스형 쿠페 + 스포일러)
+## LMP3(작고 짧은 프로토타입 + 높은 롤후프 + 앞바퀴 펜더가 도드라진 모양)
 func _draw_wec_body(c) -> void:
 	var tcol: Color = Color(sim.TYRE_HEX[c.comp])
+	if c.cls == "P3":
+		var body3 := PackedVector2Array([Vector2(6.0, 0), Vector2(4.6, -2.0), Vector2(3.2, -3.4), Vector2(1.6, -3.4), Vector2(0.6, -2.4), Vector2(-4.6, -3.0), Vector2(-5.6, -1.8), Vector2(-5.6, 1.8), Vector2(-4.6, 3.0), Vector2(0.6, 2.4), Vector2(1.6, 3.4), Vector2(3.2, 3.4), Vector2(4.6, 2.0)])
+		_ci.draw_colored_polygon(body3, c.color)
+		_ci.draw_polyline(body3 + PackedVector2Array([body3[0]]), c.rim, 0.5)
+		_fill_ellipse(Vector2(0.2, 0), Vector2(1.9, 1.3), Color("#0f172a")) # 오픈 콕핏
+		_ci.draw_rect(Rect2(-1.6, -0.6, 1.0, 1.2), c.rim) # 롤후프
+		_ci.draw_rect(Rect2(-6.4, -3.4, 1.2, 6.8), Color("#111827")) # 리어 윙
+		_ci.draw_rect(Rect2(2.0, -3.9, 1.4, 0.5), tcol)
+		_ci.draw_rect(Rect2(2.0, 3.4, 1.4, 0.5), tcol)
+		return
 	if c.cls == "P2":
 		# 앞이 뾰족한 프로토타입: 노즈 → 넓은 사이드 → 좁은 꼬리
 		var body := PackedVector2Array([Vector2(7.2, 0), Vector2(5.0, -2.6), Vector2(1.0, -3.9), Vector2(-5.2, -3.6), Vector2(-6.6, -2.2), Vector2(-6.6, 2.2), Vector2(-5.2, 3.6), Vector2(1.0, 3.9), Vector2(5.0, 2.6)])
