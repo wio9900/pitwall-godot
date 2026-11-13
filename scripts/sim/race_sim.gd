@@ -236,6 +236,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		rng.randomize()
 	circ_key = circ_key_
 	T = DB.track(circ_key)
+	_calc_sec_kinds()
 	CIRC = DB.circuits[circ_key]
 	series = CIRC.get("series", "f1")
 	min_drive = opts.get("min_drive", null)
@@ -524,6 +525,60 @@ func wing_opt(w: float, c) -> float:
 	return clampf(float(CIRC["wingOpt"]) + drv_wing_pref(c) + (1.0 if w > 0.25 else 0.0), 1.0, 5.0)
 
 
+## 섹터 성격: 0 = 고속(직선 위주) ~ 1 = 저속(코너 위주). 샘플 속도 평균으로 섹터끼리 상대 비교
+var sec_slow: Array = []
+var _w_slow: Array = []   # 섹터별 '저속 가중치' (랩 전체 합 = 1이 되도록 정규화)
+var _w_fast: Array = []
+
+
+func _calc_sec_kinds() -> void:
+	var avg: Array = []
+	for i in NS:
+		var a: int = int(T.sec_idx[i])
+		var b: int = int(T.sec_idx[i + 1])
+		var sm := 0.0
+		var n := 0
+		var j: int = a
+		while j != b and n < T.m:
+			sm += float(T.spd[j % T.spd.size()])
+			n += 1
+			j = (j + 1) % T.m
+		avg.append(sm / maxf(1.0, n))
+	var lo: float = avg.min()
+	var hi: float = avg.max()
+	sec_slow = []
+	for v in avg:
+		sec_slow.append(clampf((hi - float(v)) / maxf(0.001, hi - lo), 0.0, 1.0))
+	var ss := 0.0
+	var sf := 0.0
+	for i in NS:
+		ss += float(T.share[i]) * (0.25 + float(sec_slow[i]))
+		sf += float(T.share[i]) * (1.25 - float(sec_slow[i]))
+	_w_slow = []
+	_w_fast = []
+	for i in NS:
+		_w_slow.append((0.25 + float(sec_slow[i])) / maxf(0.001, ss))
+		_w_fast.append((1.25 - float(sec_slow[i])) / maxf(0.001, sf))
+
+
+## 섹터 하나에서 셋업이 만드는 시간 (랩 전체 합은 예전과 같음, 어디서 잃는지만 섹터 성격을 따름):
+## 윙이 모자라면 저속 코너에서, 많으면 직선에서 잃는다. 타이어 압력의 직선 효과는 고속 섹터에.
+func setup_sec(c, sec: int, w: float) -> float:
+	var sh: float = T.share[sec]
+	var ws_: float = _w_slow[sec] if c.wing < wing_opt(w, c) else _w_fast[sec]
+	return setup_pen(c, w) * sh * ws_ + float(PRESS[c.press][0]) * sh + press_straight(c.press) * sh * _w_fast[sec]
+
+
+## 연습용 섹터별 예상 시간 (새 미디엄 · 가벼운 연료 · 깨끗한 랩)
+func est_sectors(c) -> Array:
+	var out: Array = []
+	var dt: float = float(setup_extra(c)["dt"])
+	for i in NS:
+		var sh: float = T.share[i]
+		out.append(float(CIRC["base"]) * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"]) + setup_sec(c, i, 0.0) + dt * sh)
+	return out
+
+
 func setup_pen(c, w: float) -> float:
 	var d: float = c.wing - wing_opt(w, c)
 	return 0.15 * d * d * wsc()
@@ -704,7 +759,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var evo_bonus = -0.65 * track_evo * (1.0 - w)
 	var ws := wsc()
 	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh * ws
-	t += (setup_pen(c, w) + float(PRESS[c.press][0]) + press_straight(c.press)) * sh
+	t += setup_sec(c, c.sec, w)
 	var sx: Dictionary = setup_extra(c)
 	t += float(sx["dt"]) * sh
 	if is_yellow(c.sec):

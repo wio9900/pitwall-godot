@@ -10,6 +10,7 @@ const HT = preload("res://scripts/ui/help_text.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const WK = preload("res://scripts/sim/weekend.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
+const HUB = preload("res://scripts/ui/data_hub.gd")
 
 var sim
 var wk
@@ -264,6 +265,25 @@ func _render_practice() -> void:
 		var rr = K.rtl(14)
 		rr.text = t
 		tc.add_child(rr)
+		# 데이터 허브: 지금 셋업 기준 섹터별 예상 시간을 가장 빠를 것 같은 차와 비교
+		var cc = _my(sel)
+		var ref = null
+		var ref_sum := INF
+		for o in sim.cars:
+			if o.mine or o.cls != cc.cls:
+				continue
+			var es: Array = sim.est_sectors(o)
+			var sm := 0.0
+			for x in es:
+				sm += float(x)
+			if sm < ref_sum:
+				ref_sum = sm
+				ref = o
+		if ref != null:
+			var hc = K.card(_side, "📊 데이터 허브 · %s vs %s (텔레메트리 예상 섹터)" % [cc.code, ref.code], K.AMBER)
+			var hr = K.rtl(14)
+			hr.text = HUB.report(sim, sim.est_sectors(cc), sim.est_sectors(ref), ref.code)
+			hc.add_child(hr)
 	var b2 = K.hbox(6)
 	_side.add_child(b2)
 	b2.add_child(K.btn("⚡ 엔지니어에게 맡기기 (자동)", 15, _on_auto_practice))

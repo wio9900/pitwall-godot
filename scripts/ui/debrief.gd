@@ -5,6 +5,7 @@ extends Control
 signal closed
 
 const K = preload("res://scripts/ui/kit.gd")
+const HUB = preload("res://scripts/ui/data_hub.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 
 var sim
@@ -200,6 +201,24 @@ func _render() -> void:
 	# 차별 스틴트·피트 평가
 	for c in mine:
 		_car_report(c, ord)
+	# 데이터 허브: 내 차 베스트 섹터 vs 클래스 우승 차(내가 우승이면 2위)
+	for c in sim.my_cars():
+		var cls_ord: Array = ord.filter(func(o): return o.cls == c.cls and o.dnf == "")
+		var ref = null
+		for o in cls_ord:
+			if o != c and not o.mine:
+				ref = o
+				break
+		if ref == null:
+			continue
+		var ms: Array = HUB.best_sectors(sim, c)
+		var rs: Array = HUB.best_sectors(sim, ref)
+		if ms.min() == INF or rs.min() == INF:
+			continue
+		var hc = K.card(_body, "📊 데이터 허브 · %s vs %s (베스트 섹터, 피트·SC 랩 제외)" % [c.code, ref.code], K.AMBER)
+		var hr = K.rtl(15)
+		hr.text = HUB.report(sim, ms, rs, ref.code)
+		hc.add_child(hr)
 
 
 func _car_report(c, ord: Array) -> void:
