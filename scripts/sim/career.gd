@@ -1590,7 +1590,7 @@ func _own_min_speed() -> float:
 
 ## 신규 팀 기본 리저브는 정규 드라이버보다 살짝 느리게 (데이터 기본값 0.82는 F1 기존 팀 기준)
 func _fit_reserve() -> void:
-	if hq.get("entry", "") != "create" or not hq.has("reserve"):
+	if is_wec() or hq.get("entry", "") != "create" or not hq.has("reserve"):
 		return
 	var rv: Dictionary = hq["reserve"]
 	if String(rv.get("name", "")) != String(D["hq_default"]["reserveDriver"]["name"]):
@@ -2478,7 +2478,7 @@ func load_save(s: int = -1) -> bool:
 	_fit_reserve()
 	# 예전 저장: 우리 드라이버보다 빠른 페이 드라이버 후보가 남아 있으면 다시 뽑는다
 	for p in hq.get("pay_pool", []):
-		if float(p["speed"]) >= _own_min_speed():
+		if not is_wec() and float(p["speed"]) >= _own_min_speed():
 			_refresh_pay_pool()
 			break
 	return true
