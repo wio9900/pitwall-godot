@@ -165,6 +165,16 @@ func drive_limits() -> Dictionary:
 	return {"win": win, "max_win": max_win, "max_total": max_total, "min_each": min_each}
 
 
+## 르망 드라이버별 최소 주행(24시간 중 6시간)을 차의 클래스 기준 랩으로.
+## 규정은 '시간'이라 느린 클래스는 그만큼 적은 랩이면 된다 (예전엔 전체 랩 기준이라 GT3 가 거의 다 위반).
+## 압축된 레이스는 랩 단위가 거칠어서 반올림 대신 내림.
+func min_each(c) -> int:
+	if wec_hours() < 24.0:
+		return 0
+	var est: float = float(laps) / float(CLASS_PACE.get(c.cls, 1.0))
+	return maxi(1, int(floor(est * 6.0 / 24.0)))
+
+
 ## 최근 6시간 구간(랩)에 드라이버 d 가 달린 랩 수
 func drive_in_window(c, d: int) -> int:
 	var w: int = int(drive_limits()["win"])
@@ -1841,10 +1851,10 @@ func on_cross(c, t: float) -> void:
 				c.finish_t += c.time_pen
 			if need_two() and c.used_slicks() < 2:
 				_end_pen(c, 30.0, "드라이 2종 의무 미사용")
-			if is_wec() and int(drive_limits()["min_each"]) > 0 and c.drivers.size() >= 2:
+			if is_wec() and min_each(c) > 0 and c.drivers.size() >= 2:
 				for di in c.drivers.size():
-					if di < c.drv_laps.size() and int(c.drv_laps[di]) < int(drive_limits()["min_each"]):
-						_end_pen(c, 60.0, "%s 최소 주행 미달 (%d/%d랩)" % [c.drivers[di]["name"], int(c.drv_laps[di]), int(drive_limits()["min_each"])])
+					if di < c.drv_laps.size() and int(c.drv_laps[di]) < min_each(c):
+						_end_pen(c, 60.0, "%s 최소 주행 미달 (%d/%d랩)" % [c.drivers[di]["name"], int(c.drv_laps[di]), min_each(c)])
 						event("%s %s 최소 주행 시간(르망 6시간) 미달 → 60초 페널티" % [name_of(c), c.drivers[di]["name"]], "bad")
 			if min_drive != null and min_drive_short(c) > 0:
 				c.min_drive_fail = true
@@ -2361,7 +2371,13 @@ func _cmp(a, b) -> int:
 	if a.finished != b.finished:
 		var f = a if a.finished else b
 		var o = b if a.finished else a
-		var r = -1 if f.lap >= o.lap else 1
+		# 아직 달리는 차가 같은 랩 수로 들어올 차면(한 랩 덜 돈 상태) 결승선 도착 예상 시각으로 비교한다.
+		# 완주 순간 페널티(예: 최소 주행 60초)가 붙은 차가 도로 순위로 잠깐 위에 떴다가 뒤로 밀리던 것 방지
+		var r := 1
+		if f.lap > o.lap + 1:
+			r = -1
+		elif f.lap == o.lap + 1:
+			r = -1 if f.finish_t <= _line_eta(o) else 1
 		return r if a.finished else -r
 	if b.cross.size() != a.cross.size():
 		return b.cross.size() - a.cross.size()
@@ -2370,6 +2386,14 @@ func _cmp(a, b) -> int:
 	if na != nb:
 		return -1 if na < nb else 1
 	return a.grid - b.grid
+
+
+## 달리는 차가 결승선(랩 끝)에 닿을 예상 시각
+func _line_eta(o) -> float:
+	if not o.started or o.dnf != "":
+		return INF
+	var per: float = (o.last_lap_t if o.last_lap_t > 0.0 else 120.0) / float(NS)
+	return o.sec_end + float(NS - 1 - o.sec) * per
 
 
 ## 현재 순위 (실제 시뮬레이션 기준: 더 많은 경계를 지났고, 같다면 다음 경계에 먼저 도착할 차가 앞)
@@ -2592,7 +2616,7 @@ func drv_short(c, di: int) -> int:
 	var done: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
 	var need := 0
 	if is_wec():
-		need = int(drive_limits()["min_each"])
+		need = min_each(c)
 	if min_drive != null and di == min_drive_idx(c):
 		need = maxi(need, int(ceil(float(laps) * float(min_drive["pct"]))))
 	return maxi(0, need - done)

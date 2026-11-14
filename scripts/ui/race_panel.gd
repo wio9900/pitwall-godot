@@ -691,7 +691,7 @@ func _refresh_power(c) -> void:
 		var wcol: String = "#ef4444" if sim.must_swap(c) else "#8b98a5"
 		t += "\n[color=%s]주행 시간: 최근 6시간 구간 %d/%d랩[/color]" % [wcol, inw, int(lim["max_win"])]
 		if int(lim["max_total"]) < sim.laps:
-			t += "[color=#8b98a5] · 누적 %d/%d랩 · 최소 %d랩[/color]" % [int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0, int(lim["max_total"]), int(lim["min_each"])]
+			t += "[color=#8b98a5] · 누적 %d/%d랩 · 최소 %d랩[/color]" % [int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0, int(lim["max_total"]), sim.min_each(c)]
 		if sim.must_swap(c):
 			t += "\n[color=#f59e0b]⚠ 한 스틴트 더 달리면 주행 시간 초과 → 다음 피트에서 교대 필요[/color]"
 		var others: PackedStringArray = []
