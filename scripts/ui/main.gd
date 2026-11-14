@@ -923,15 +923,18 @@ func _render_career_menu() -> void:
 		if new_series == "wec":
 			KitS.seg(c1, [["0", "아시안 르망 LMP3 (4부)"], ["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
 			c1.add_child(KitS.label("아시안 르망(LMP3)에서 우승하면 르망 24시 초청 경기 기회!", 13, DIM))
-			c1.add_child(KitS.label("하이퍼카 패키지 (승격 후 사용)", 14, DIM))
+			c1.add_child(KitS.label("하이퍼카 패키지 (하위 클래스는 공통 엔진 · 하이퍼카 승격 후 사용)", 14, DIM))
 			var pk_items: Array = []
-			for pk in CareerS.WEC_PKGS:
-				pk_items.append([pk, String(CareerS.WEC_PKGS[pk]).split(" ")[0]])
-			KitS.seg(c1, pk_items, new_opts["engine"], _on_new_engine, 14)
+			var pk_all: Dictionary = CareerS.wec_pkgs()
+			for pk in pk_all:
+				pk_items.append([pk, String(pk_all[pk]).split(" ")[0].replace("Aston", "Aston M.")])
+			# 8개라 두 줄로
+			KitS.seg(c1, pk_items.slice(0, 4), new_opts["engine"], _on_new_engine, 14)
+			KitS.seg(c1, pk_items.slice(4), new_opts["engine"], _on_new_engine, 14)
 		else:
 			KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
 			c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
-			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
+			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"], ["Audi", "Audi"]], new_opts["engine"], _on_new_engine, 14)
 		c1.add_child(KitS.label("본부 지역", 14, DIM))
 		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
 	var info = KitS.rtl(15)

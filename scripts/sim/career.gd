@@ -10,7 +10,7 @@ const SAVE_PATH := "user://career_f1.json"
 const SAVE_VER := 1
 const DEV_AREAS := ["aero", "engine", "chassis", "rel"]
 const FAC_KEYS := ["wind", "bench", "rig", "sim", "factory", "pit"]
-const ENGINE_CHOICES := ["Mercedes", "Ferrari", "Red Bull Ford", "Honda"]
+const ENGINE_CHOICES := ["Mercedes", "Ferrari", "Red Bull Ford", "Honda", "Audi"]
 const POINTS := [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
 const SPRINT_POINTS := [10, 8, 6, 5, 4, 3, 2, 1]
 const CE0 := {"aero": 0.006, "eng": 0.006, "tyre": 0.007, "rel": 0.006}
@@ -160,12 +160,9 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	news("시즌 1 개막! %s 본부에 오신 걸 환영합니다." % hq["team_name"])
 
 
-const WEC_PKGS := {
-	"Ferrari F163 3.0L V6 Twin-Turbo Hybrid": "Ferrari 499P 커스터머",
-	"Cadillac LMC55R 5.5L V8 NA Hybrid": "Cadillac V-Series.R",
-	"BMW P66/3 4.0L V8 Twin-Turbo Hybrid": "BMW M Hybrid V8",
-	"Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "독자 워크스 (GMR V8)",
-}
+## 하이퍼카 패키지 = data/wec.json packages (엔진 키 → 이름). 하이퍼카(1부)에서는 전부 고를 수 있다
+static func wec_pkgs() -> Dictionary:
+	return DB.wec.get("packages", {})
 # 하위 리그 라인업 등급 · 최소 주행 규정 (LMGT3 브론즈 25%, LMP2 실버 20%)
 const WEC_TIER_GRADES := {"0": ["G", "S", "B"], "1": ["G", "S", "B"], "2": ["G", "G", "S"], "3": ["P", "P", "G"]}
 const WEC_MIN_DRIVE := {"0": {"grade": "B", "pct": 0.25}, "1": {"grade": "B", "pct": 0.25}, "2": {"grade": "S", "pct": 0.20}}
@@ -176,7 +173,7 @@ const GRADE_RANGE := {"P": [0.86, 0.93], "G": [0.80, 0.87], "S": [0.70, 0.78], "
 
 func _create_wec_team(opts: Dictionary) -> void:
 	var pkg: String = opts.get("engine", "Ferrari F163 3.0L V6 Twin-Turbo Hybrid")
-	if not WEC_PKGS.has(pkg):
+	if not wec_pkgs().has(pkg):
 		pkg = "Ferrari F163 3.0L V6 Twin-Turbo Hybrid"
 	hq["engine_supplier"] = pkg
 	hq["teams"].append({"name": hq["team_name"], "color": hq["team_color"], "cars": 2, "perf": 0.48, "rel": 0.84, "crew": 0.78, "strategy": 0.76, "rim": hq["team_rim"], "engine": pkg})
@@ -1254,11 +1251,11 @@ func evaluate_engine_politics() -> void:
 
 ## WEC 신규 팀: 시즌 전에 하이퍼카 패키지 교체
 func change_package(pkg: String) -> bool:
-	if not is_wec() or hq["entry"] != "create" or not is_preseason() or not WEC_PKGS.has(pkg):
+	if not is_wec() or hq["entry"] != "create" or not is_preseason() or tier() < 3 or not wec_pkgs().has(pkg):
 		return false
 	hq["engine_supplier"] = pkg
 	my_team_dict()["engine"] = pkg
-	news("🔧 하이퍼카 패키지 계약: %s" % WEC_PKGS[pkg])
+	news("🔧 하이퍼카 패키지 계약: %s" % wec_pkgs()[pkg])
 	return true
 
 
@@ -1268,6 +1265,7 @@ func _evaluate_engine_politics_f1() -> void:
 		"Ferrari": {"blocked": false, "reason": "공급 가능 (1.5M)", "fee": 1.5},
 		"Red Bull Ford": {"blocked": false, "reason": "공급 가능 (1.1M)", "fee": 1.1},
 		"Honda": {"blocked": false, "reason": "공급 가능 (1.0M)", "fee": 1.0},
+		"Audi": {"blocked": false, "reason": "공급 가능 (0.9M)", "fee": 0.9},
 	}
 	hq["politics"] = pol
 	if is_works():

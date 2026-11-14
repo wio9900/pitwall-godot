@@ -1811,7 +1811,8 @@
    "fee": 2.2,
    "reqRank": 3,
    "reqPts": 22,
-   "prizeM": 0.4
+   "prizeM": 0.4,
+   "engine_txt": "제조사별 GT3 엔진 — BoP(성능 조정)로 클래스 공통 성능"
   },
   "2": {
    "name": "유러피언 LMP2 시리즈 (2부 중위)",
@@ -1820,7 +1821,8 @@
    "fee": 3.5,
    "reqRank": 3,
    "reqPts": 30,
-   "prizeM": 0.6
+   "prizeM": 0.6,
+   "engine_txt": "Gibson GK428 4.2L V8 — LMP2 클래스 공통 엔진"
   },
   "3": {
    "name": "WEC Hypercar 월드 챔피언십 (1부 최상위)",
@@ -1846,13 +1848,18 @@
     "dubai_wec",
     "yas_wec",
     "yas_wec"
-   ]
+   ],
+   "engine_txt": "Toyota V35A 3.5L V6 — LMP3 클래스 공통 엔진"
   }
  },
  "packages": {
-  "Ferrari F163 3.0L V6 Twin-Turbo Hybrid": "Ferrari 499P 커스터머 패키지",
-  "Cadillac LMC55R 5.5L V8 NA Hybrid": "Cadillac V-Series.R LMDh 패키지",
-  "BMW P66/3 4.0L V8 Twin-Turbo Hybrid": "BMW M Hybrid V8 LMDh 패키지",
-  "Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "독자 하이퍼카 워크스 (GMR V8)"
+  "Toyota H8909 3.5L V6 Twin-Turbo Hybrid": "Toyota TR010 패키지",
+  "Ferrari F163 3.0L V6 Twin-Turbo Hybrid": "Ferrari 499P 패키지",
+  "Cadillac LMC55R 5.5L V8 NA Hybrid": "Cadillac V-Series.R 패키지",
+  "Peugeot X6 2.6L V6 Twin-Turbo Hybrid": "Peugeot 9X8 패키지",
+  "BMW P66/3 4.0L V8 Twin-Turbo Hybrid": "BMW M Hybrid V8 패키지",
+  "Aston Martin RA 6.5L V12 NA": "Aston Martin Valkyrie 패키지",
+  "Alpine V634 3.4L V6 Turbo Hybrid": "Alpine A424 패키지",
+  "Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "Genesis GMR-001 패키지 (현대)"
  }
 }

@@ -468,18 +468,30 @@ func _engine_card() -> void:
 	var h := _h()
 	var c = K.card(_body, "파워유닛 공급")
 	if cr.is_wec():
+		if cr.is_spec_tier():
+			# LMP3·LMGT3·LMP2 = 클래스 공통 엔진 → 고를 게 없다
+			_txt(c, "[b]%s[/b]" % DB.wec["tiers"][str(cr.tier())].get("engine_txt", "클래스 공통 엔진"))
+			_txt(c, "[color=#8b98a5]이 클래스는 모든 팀이 같은 엔진(성능)을 써요. 하이퍼카(1부)로 승격하면 제조사 패키지를 고를 수 있어요. 지금 예약된 패키지: %s[/color]" % CS.wec_pkgs().get(h["engine_supplier"], h["engine_supplier"]), 13)
+			return
 		var eng: Dictionary = DB.wec["engines"].get(h["engine_supplier"], {"pwr": 0.88, "eff": 1.0})
-		_txt(c, "현재 [b]%s[/b] · 출력 %d · 연비 %d%%" % [h["engine_supplier"], int(float(eng["pwr"]) * 100), int(float(eng["eff"]) * 100)])
+		_txt(c, "현재 [b]%s[/b] · %s · 출력 %d · 연비 %d%%" % [CS.wec_pkgs().get(h["engine_supplier"], ""), h["engine_supplier"], int(float(eng["pwr"]) * 100), int(float(eng["eff"]) * 100)])
 		if h["entry"] == "create":
-			var hb2 = K.hbox(4)
-			c.add_child(hb2)
-			for pk in CS.WEC_PKGS:
-				var b2 = K.btn(CS.WEC_PKGS[pk], 13)
+			var g2 = GridContainer.new()
+			g2.columns = 4 if get_viewport_rect().size.x >= 900.0 else 2
+			g2.add_theme_constant_override("h_separation", 4)
+			g2.add_theme_constant_override("v_separation", 4)
+			c.add_child(g2)
+			var pk_all: Dictionary = CS.wec_pkgs()
+			for pk in pk_all:
+				var ev: Dictionary = DB.wec["engines"].get(pk, {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+				var b2 = K.btn("%s\n출력 %d · 연비 %d%% · 내구 %+d" % [String(pk_all[pk]).trim_suffix(" 패키지"), int(float(ev["pwr"]) * 100), int(float(ev["eff"]) * 100), int(round(float(ev.get("relMod", 0.0)) * 100))], 13)
 				b2.toggle_mode = true
 				b2.button_pressed = pk == h["engine_supplier"]
 				b2.disabled = not cr.is_preseason()
+				b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				b2.custom_minimum_size = Vector2(0, 52)
 				b2.pressed.connect(_on_pkg.bind(pk))
-				hb2.add_child(b2)
+				g2.add_child(b2)
 			_txt(c, "[color=#8b98a5]하이퍼카 패키지는 시즌 개막 전에만 바꿀 수 있어요.[/color]", 13)
 		else:
 			_txt(c, "[color=#8b98a5]제조사 워크스 팀은 자사 파워유닛으로 호몰로게이션이 고정돼요.[/color]", 13)
@@ -490,6 +502,8 @@ func _engine_card() -> void:
 	if cr.is_works():
 		_txt(c, "[b]%s[/b]는 자체 파워유닛을 만드는 워크스 팀이라 다른 엔진을 쓸 수 없어요." % h["team_name"])
 		return
+	if not h["politics"].has("Audi"):
+		cr.evaluate_engine_politics() # 예전 저장: 공급사 목록에 Audi 추가
 	var pre: bool = cr.is_preseason()
 	_txt(c, "현재 [b]%s[/b] · %s" % [h["engine_supplier"], "🟢 시즌 개막 전: 교체 가능 (비용 50%는 코스트캡 반영)" if pre else "🔒 시즌 중에는 교체 불가"])
 	var hb = K.hbox(4)
