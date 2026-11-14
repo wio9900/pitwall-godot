@@ -2608,6 +2608,26 @@ func next_driver(c) -> int:
 			best = di
 	if best >= 0:
 		return best
+	# 모자란 드라이버가 없으면: 최대 주행 한도에 안 걸리는 드라이버 중 가장 덜 달린(같으면 덜 지친) 드라이버.
+	# 예전엔 명단 다음 사람이라 [골드·실버·브론즈] 에서 브론즈 다음이 늘 골드 → 실버가 한 번도 못 탔음
+	var lim: Dictionary = drive_limits()
+	var more: int = STINT + 1
+	var pick := -1
+	for pass_i in 2:
+		for di in n:
+			if di == c.drv:
+				continue
+			var tot: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
+			if pass_i == 0 and (drive_in_window(c, di) + more > int(lim["max_win"]) or tot + more > int(lim["max_total"])):
+				continue
+			if pick < 0:
+				pick = di
+				continue
+			var pt: int = int(c.drv_laps[pick]) if pick < c.drv_laps.size() else 0
+			if tot < pt or (tot == pt and fatigue(c, di) < fatigue(c, pick)):
+				pick = di
+		if pick >= 0:
+			return pick
 	return (c.drv + 1) % n
 
 
