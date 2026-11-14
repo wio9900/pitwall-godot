@@ -644,6 +644,8 @@ func _refresh_pit(c) -> void:
 		if wec:
 			est = " · 예상 정차 약 %d초" % int(round(sim.wec_stop_time(c, bool(d["tyres"]), bool(d["driver"]), bool(d["fuel"]))))
 		st = "[color=#ffc53d]선택: %s(%s)%s%s[/color]" % [RS.TYRE_KO[d["comp"]], d["comp"], sets_txt, est]
+	if sim.rules.get("no_pits", false) and not wec:
+		st = "[color=#8b98a5]이 레이스는 의무 피트가 없어요 — 손상·비가 아니면 들어갈수록 손해예요.[/color]\n" + st
 	_pit_status.text = st
 	_confirm.text = ("🔄 %s로 예약 변경" if booked else "✅ %s 핏스탑 확정") % RS.TYRE_KO[d["comp"]]
 	_confirm.disabled = not c.is_running() or in_lane or c.crew_cooldown > 0

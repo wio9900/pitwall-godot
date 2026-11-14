@@ -1199,6 +1199,8 @@ func _begin_race() -> void:
 		_launch_race()
 		return
 	sprint_mode = false
+	if sim.rules.get("no_pits", false):
+		sim.event("의무 피트 없음 · 타이어 마모가 적어 한 세트로 완주 (비가 올 때만 피트)")
 	sim.prepare_start()
 	_launch_race()
 
