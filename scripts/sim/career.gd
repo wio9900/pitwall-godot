@@ -155,6 +155,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	evaluate_engine_politics()
 	_starting_sponsors()
 	_refresh_offers()
+	_fit_reserve()
 	_refresh_pay_pool()
 	_staff_migrate()
 	news("시즌 1 개막! %s 본부에 오신 걸 환영합니다." % hq["team_name"])
@@ -1567,14 +1568,39 @@ func _refresh_pay_pool() -> void:
 		return
 	var n := 2 if (tier() < 3 or pre_rank() >= 8) else 1
 	var sn: Array = D["surnames"]
+	# 페이 드라이버는 돈을 가져오는 대신 우리 두 드라이버보다 느려야 의미가 있다 (신규 팀의 F3 신인 0.73~0.76 보다 빠르던 문제)
+	var hi: float = minf(0.80, _own_min_speed() - 0.01)
 	for i in n:
-		var spd := snappedf(uni(0.73, 0.80), 0.01)
+		var spd := snappedf(uni(hi - 0.06, hi), 0.01)
 		pool.append({
 			"name": "%s. %s" % [char(65 + rng.randi_range(0, 25)), sn[rng.randi_range(0, sn.size() - 1)]],
 			"age": rng.randi_range(19, 24), "speed": spd, "cons": snappedf(spd - uni(0.0, 0.03), 0.01), "tyre": snappedf(uni(0.72, 0.80), 0.01),
 			"wet": snappedf(uni(0.70, 0.80), 0.01), "money": snappedf(uni(1.2, 2.6) * (0.82 - spd) * 10.0 * 0.5 + uni(0.6, 1.0), 0.01),
 		})
 	hq["pay_pool"] = pool
+
+
+## 우리 레이스 드라이버 둘 중 느린 쪽 속도
+func _own_min_speed() -> float:
+	var lo := 1.0
+	for i in 2:
+		lo = minf(lo, float(my_driver(i).get("speed", 0.8)))
+	return lo
+
+
+## 신규 팀 기본 리저브는 정규 드라이버보다 살짝 느리게 (데이터 기본값 0.82는 F1 기존 팀 기준)
+func _fit_reserve() -> void:
+	if hq.get("entry", "") != "create" or not hq.has("reserve"):
+		return
+	var rv: Dictionary = hq["reserve"]
+	if String(rv.get("name", "")) != String(D["hq_default"]["reserveDriver"]["name"]):
+		return
+	var lo: float = _own_min_speed()
+	if float(rv["speed"]) < lo:
+		return
+	var d: float = float(rv["speed"]) - (lo - 0.02)
+	for k in ["speed", "cons", "tyre", "wet"]:
+		rv[k] = snappedf(maxf(0.6, float(rv[k]) - d), 0.01)
 
 
 func pay_driver_money(p: Dictionary) -> float:
@@ -2449,6 +2475,12 @@ func load_save(s: int = -1) -> bool:
 	hq = data
 	rng.randomize()
 	_staff_migrate()
+	_fit_reserve()
+	# 예전 저장: 우리 드라이버보다 빠른 페이 드라이버 후보가 남아 있으면 다시 뽑는다
+	for p in hq.get("pay_pool", []):
+		if float(p["speed"]) >= _own_min_speed():
+			_refresh_pay_pool()
+			break
 	return true
 
 
