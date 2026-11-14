@@ -2618,15 +2618,23 @@ func drv_short(c, di: int) -> int:
 	if is_wec():
 		need = min_each(c)
 	if min_drive != null and di == min_drive_idx(c):
-		need = maxi(need, int(ceil(float(laps) * float(min_drive["pct"]))))
+		need = maxi(need, min_drive_need(c))
 	return maxi(0, need - done)
 
 
 ## 최소 주행 규정: 해당 등급 드라이버가 더 달려야 하는 랩 수 (0이면 충족)
-func min_drive_short(c) -> int:
+## 등급 최소 주행(브론즈 25% · 실버 20%)에 필요한 랩: 규정은 '주행 시간' 비율이라 차의 클래스 기준 랩으로
+## (예전엔 전체(하이퍼카) 랩 기준이라 느린 클래스가 실제보다 12% 안팎 더 달려야 했음)
+func min_drive_need(c) -> int:
 	if min_drive == null:
 		return 0
-	var need := int(ceil(float(min_drive["pct"]) * laps))
+	return int(ceil(float(min_drive["pct"]) * float(laps) / float(CLASS_PACE.get(c.cls, 1.0))))
+
+
+## 그 등급 드라이버들이 지금까지 달린 랩 (-1 = 그 등급 드라이버가 없음)
+func min_drive_done(c) -> int:
+	if min_drive == null:
+		return -1
 	var done_l := 0
 	var has := false
 	for i in c.drivers.size():
@@ -2634,9 +2642,14 @@ func min_drive_short(c) -> int:
 			has = true
 			if i < c.drv_laps.size():
 				done_l += int(c.drv_laps[i])
-	if not has:
+	return done_l if has else -1
+
+
+func min_drive_short(c) -> int:
+	var d := min_drive_done(c)
+	if d < 0:
 		return 0
-	return maxi(0, need - done_l)
+	return maxi(0, min_drive_need(c) - d)
 
 
 ## 클래스 안에서의 순위 (1부터)
