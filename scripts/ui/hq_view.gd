@@ -642,7 +642,7 @@ func _tab_staff() -> void:
 		var ok: bool = cr.can_hire_driver(i)
 		var need: float = cr.drv_req_pop(m)
 		var lab2 := "평판 %d%%" % int(need * 100) if float(h["pop"]) < need else ("시즌 전" if not pre else "")
-		K.row(c3, "[b]%s[/b] (%d세)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 연봉 %.1fM · 바이아웃 %.1fM[/color]" % [m["name"], int(m.get("age", 24)), int(float(m["speed"]) * 100), int(float(m["cons"]) * 100), int(float(m["tyre"]) * 100), float(m["salary"]), float(m["buyout"])],
+		K.row(c3, "[b]%s[/b] (%d세%s)\n[color=#8b98a5]속도 %d · 일관 %d · 타이어 %d · 연봉 %.1fM · 바이아웃 %.1fM[/color]" % [m["name"], int(m.get("age", 24)), (" · " + String(DB.names.get("nat", {}).get(m.get("nat", ""), {}).get("ko", ""))) if m.get("nat", "") != "" else "", int(float(m["speed"]) * 100), int(float(m["cons"]) * 100), int(float(m["tyre"]) * 100), float(m["salary"]), float(m["buyout"])],
 			[K.sbtn(lab2 if lab2 != "" else "#1 영입", _on_hire_drv.bind(0, i), ok), K.sbtn(lab2 if lab2 != "" else "#2 영입", _on_hire_drv.bind(1, i), ok)], 13)
 	# 페이 드라이버
 	if not h["pay_pool"].is_empty():

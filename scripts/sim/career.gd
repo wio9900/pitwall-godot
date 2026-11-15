@@ -157,6 +157,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	_refresh_offers()
 	_fix_region()
 	_fit_reserve()
+	_refresh_market()
 	_refresh_pay_pool()
 	_staff_migrate()
 	news("시즌 1 개막! %s 본부에 오신 걸 환영합니다." % hq["team_name"])
@@ -1281,6 +1282,7 @@ func _on_tier_change() -> void:
 	hq["cost_cap_limit"] = cap_limit_now()
 	hq["team_pts"] = {}
 	_refresh_pay_pool()
+	_refresh_market()
 
 
 func _cost_cap_audit(notes: Array) -> void:
@@ -1950,6 +1952,74 @@ func _wec_taken_names() -> Dictionary:
 	return out
 
 
+# ═════════ 가상 인물 이름 (FA·스태프 공용) ═════════
+## 국적 하나 골라 "J. Kang" 식 이름. taken 에 있는 이름은 피한다. 돌려주는 값 [이름, 국적코드]
+func gen_person(taken: Dictionary, nat: String = "") -> Array:
+	var nd: Dictionary = DB.names.get("nat", {})
+	var keys: Array = nd.keys()
+	if keys.is_empty():
+		return ["X. Driver", ""]
+	var nm := ""
+	var nk := nat
+	for _t in 30:
+		if nat == "" or not nd.has(nat):
+			nk = keys[rng.randi_range(0, keys.size() - 1)]
+		var d: Dictionary = nd[nk]
+		var init: String = d["init"]
+		var lasts: Array = d["last"]
+		nm = "%s. %s" % [init[rng.randi_range(0, init.length() - 1)], lasts[rng.randi_range(0, lasts.size() - 1)]]
+		if not taken.has(nm):
+			break
+	taken[nm] = true
+	return [nm, nk]
+
+
+## 지금 F1 커리어 그리드·시장에 있는 이름 (중복 방지)
+func _f1_taken_names() -> Dictionary:
+	var out := {}
+	for t in hq.get("teams", []):
+		for d in t.get("drivers", []):
+			out[d["name"]] = true
+	for t in SD().get("rosters", {}):
+		for r in SD()["rosters"][t]:
+			for d in r.get("drivers", []):
+				out[String(d.get("name", d)) if d is Dictionary else String(d)] = true
+	return out
+
+
+## F1 커리어 FA 시장: 리그에 맞는 사람만, 시즌마다 새로.
+## F3 = 17~20세 신인(가상) · F2 = F3 졸업생·F2 경험자(가상) · F1 = 실제 스타 시장(그리드에 없는 사람) + F2 상위 졸업생(가상)
+func _refresh_market() -> void:
+	if is_wec():
+		_refresh_wec_market()
+	else:
+		_refresh_f1_market()
+
+
+func _refresh_f1_market() -> void:
+	var taken := _f1_taken_names()
+	var out: Array = []
+	var kept: Array = []
+	# 내가 내보낸 드라이버(released)는 남겨 둔다
+	for m in hq.get("market", []):
+		if m.get("released", false) and not taken.has(m["name"]):
+			kept.append(m)
+	var t := tier()
+	if t >= 3:
+		for m in D["hq_default"]["marketPool"]:
+			if not taken.has(String(m["name"]).get_slice(" (", 0)):
+				out.append(m.duplicate(true))
+	var spec: Array = {1: [7, 17, 20, 0.70, 0.80], 2: [6, 18, 23, 0.74, 0.84], 3: [3, 20, 23, 0.79, 0.86]}.get(t, [5, 18, 22, 0.74, 0.82])
+	for i in int(spec[0]):
+		var pn: Array = gen_person(taken)
+		var spd: float = snappedf(uni(float(spec[3]), float(spec[4])), 0.01)
+		var lvl: float = clampf((spd - 0.70) / 0.2, 0.0, 1.0)
+		out.append({"name": pn[0], "nat": pn[1], "age": rng.randi_range(int(spec[1]), int(spec[2])), "speed": spd,
+			"cons": snappedf(uni(0.66, 0.84), 0.01), "tyre": snappedf(uni(0.66, 0.84), 0.01), "wet": snappedf(uni(0.62, 0.86), 0.01),
+			"salary": r2((0.4 + lvl * 1.6) * (1.0 if t >= 3 else 0.8)), "buyout": r2((0.2 + lvl * 1.2) * tier_scale())})
+	hq["market"] = out + kept
+
+
 ## 자유 계약(FA) 드라이버 목록. 없으면 만든다 (시즌마다 새로 고침).
 func wec_market() -> Array:
 	if not hq.has("wec_market"):
@@ -1957,17 +2027,25 @@ func wec_market() -> Array:
 	return hq["wec_market"]
 
 
+## 클래스별 FA 등급 구성: 하위 클래스는 실버·브론즈 위주, 하이퍼카는 플래티넘·골드 위주 (하이퍼카만 실명 FA 명단)
+const WEC_FA_MIX := {0: ["G", "S", "S", "S", "B", "B", "B"], 1: ["G", "S", "S", "B", "B", "B", "B"], 2: ["G", "G", "S", "S", "S", "B", "B"], 3: ["P", "P", "G", "G", "G", "S", "S"]}
+
+
 func _refresh_wec_market() -> void:
 	var taken := _wec_taken_names()
 	var pool: Array = []
-	for nm in WEC_FA_NAMES:
-		if not taken.has(nm):
-			pool.append(nm)
+	var real: bool = tier() >= 3
+	if real:
+		for nm in WEC_FA_NAMES:
+			if not taken.has(nm):
+				pool.append(nm)
 	var out: Array = []
-	for g in ["P", "G", "G", "S", "S", "B", "B"]:
-		if pool.is_empty():
-			break
-		var nm: String = pool.pop_at(int(rnd() * pool.size()) % pool.size())
+	for g in WEC_FA_MIX.get(tier(), WEC_FA_MIX[3]):
+		var nm := ""
+		if real and not pool.is_empty():
+			nm = pool.pop_at(int(rnd() * pool.size()) % pool.size())
+		else:
+			nm = String(gen_person(taken)[0])
 		var rg: Array = GRADE_RANGE[g]
 		out.append({"name": nm, "grade": g, "speed": uni(rg[0], rg[1]), "cons": uni(0.66, 0.9), "tyreMgmt": uni(0.68, 0.9), "aggr": uni(0.3, 0.8), "def": uni(0.6, 0.85), "wet": uni(0.55, 0.92),
 			"cost": r2(WEC_FA_COST[g] * (0.85 + 0.3 * rnd())), "salary": WEC_FA_SAL[g], "age": 21 + int(rnd() * 16)})
@@ -2388,6 +2466,7 @@ func _season_start(notes: Array) -> void:
 	hq["round_res"] = []
 	_staff_migrate()
 	staff_refresh_pool()
+	_refresh_market()
 	hq["last_ledger"] = hq["ledger"]
 	hq["ledger"] = _new_ledger()
 	var carry := 0.0
@@ -2543,6 +2622,15 @@ func load_save(s: int = -1) -> bool:
 	rng.randomize()
 	_staff_migrate()
 	_fix_region()
+	# 예전 저장: 하위 리그인데 F1 스타 FA 가 남아 있으면 리그에 맞는 시장으로
+	if not is_wec() and tier() < 3:
+		var stars := {}
+		for m in D["hq_default"]["marketPool"]:
+			stars[m["name"]] = true
+		for m in hq.get("market", []):
+			if stars.has(m["name"]):
+				_refresh_f1_market()
+				break
 	_fit_reserve()
 	# 예전 저장: 우리 드라이버보다 빠른 페이 드라이버 후보가 남아 있으면 다시 뽑는다
 	for p in hq.get("pay_pool", []):
