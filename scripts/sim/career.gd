@@ -217,6 +217,39 @@ func news(msg: String) -> void:
 		hq["news"].pop_back()
 
 
+## 평판이 이 선을 넘거나 내려가면 뉴스로 알린다 (무엇이 열리고 닫히는지)
+const POP_MARKS := [
+	[0.38, "혼다 엔진 공급 조건(영국 본부)", "f1"],
+	[0.42, "페라리 엔진 공급 조건", "f1"],
+	[0.52, "A급 인력 영입 기준", ""],
+	[0.55, "글로벌 브랜드 스폰서 협상", ""],
+	[0.68, "S급 인력 영입 기준", ""],
+	[0.72, "프리미엄 파트너 스폰서 협상", ""],
+]
+
+
+## 평판 바꾸기 — 모든 평판 변화는 여기로. 이유와 결과를 커리어 뉴스에 남기고(silent 면 이미 다른 뉴스에 적힌 경우),
+## 중요한 선(POP_MARKS)을 넘으면 따로 알린다. 돌려주는 값 = 실제 바뀐 양
+func pop_add(delta: float, why: String, lo: float = 0.15, silent: bool = false) -> float:
+	var before: float = float(hq["pop"])
+	var after: float = clampf(r2(before + delta), lo, 0.98)
+	hq["pop"] = after
+	var d: float = after - before
+	if absf(d) < 0.005:
+		return d
+	if not silent:
+		news("%s 평판 %+d%% (%s) → %d%%" % ["⭐" if d > 0.0 else "🔻", int(round(d * 100.0)), why, int(round(after * 100.0))])
+	for mk in POP_MARKS:
+		if String(mk[2]) == "f1" and (is_wec() or tier() != 3):
+			continue
+		var line: float = float(mk[0])
+		if before < line and after >= line:
+			news("🔓 평판 %d%% 달성 — %s 충족" % [int(round(line * 100.0)), mk[1]])
+		elif before >= line and after < line:
+			news("🔒 평판 %d%% 아래로 — %s 미달" % [int(round(line * 100.0)), mk[1]])
+	return d
+
+
 # ═════════ 기본 정보 ═════════
 func tier() -> int:
 	# 르망 초청 경기 중에는 LMP2(2부) 규정·출전 명단으로 달린다
@@ -910,7 +943,7 @@ func resolve_event(i: int) -> String:
 		else:
 			book("spon", cv)
 	if fx.has("pop"):
-		hq["pop"] = clampf(r2(float(hq["pop"]) + float(fx["pop"])), 0.15, 0.98)
+		pop_add(float(fx["pop"]), "%s: %s" % [String(ev.get("title", "이벤트")), String(opts[i]["label"]).get_slice(" (", 0)])
 	if fx.has("focus"):
 		_add_mod("focus", int(fx["focus"][0]), float(fx["focus"][1]))
 	if fx.has("grid_pen"):
@@ -1303,7 +1336,7 @@ func _cost_cap_audit(notes: Array) -> void:
 			hq["cash"] = r2(hq["cash"] - fine2)
 			hq["cap_adj"] = -over
 			hq["atr_pen"] = 0.10
-			hq["pop"] = maxf(0.15, r2(hq["pop"] - 0.05))
+			pop_add(-0.05, "코스트캡 위반", 0.15, true)
 			var msg2 := "🚨 코스트캡 중대한 위반 (%.2fM · %.1f%% 초과): 벌금 %.2fM, 다음 시즌 캡 -%.2fM, 풍동 시간 10%% 삭감, 평판 -5%%" % [over, pct * 100.0, fine2, over]
 			news(msg2)
 			notes.append(msg2)
@@ -1808,7 +1841,7 @@ func terminate_contract(cat: String) -> bool:
 		return false
 	hq["cash"] = r2(hq["cash"] - 1.0)
 	hq["contracts"].erase(c)
-	hq["pop"] = maxf(0.15, r2(hq["pop"] - 0.02))
+	pop_add(-0.02, "계약 해지", 0.15, true)
 	news("📝 %s 계약 해지 (위약금 1.0M, 평판 -2%%)" % c["name"])
 	if is_preseason() and spon_eligible(cat):
 		for kind in ["stable", "perf", "short"]:
@@ -2155,7 +2188,7 @@ func after_invite(sim) -> Dictionary:
 	var cash := 1.5 if best == 1 else (0.8 if best <= 3 else (0.3 if best < 99 else 0.0))
 	var pop := 0.12 if best == 1 else (0.06 if best <= 3 else (0.02 if best < 99 else -0.02))
 	hq["cash"] = r2(float(hq["cash"]) + cash)
-	hq["pop"] = clampf(r2(float(hq["pop"]) + pop), 0.15, 0.98)
+	pop_add(pop, "르망 초청", 0.15, true)
 	hq["lemans_invite"] = false
 	hq.erase("special")
 	var m := "🎟 르망 24시 초청 출전 결과: LMP2 클래스 %s · 상금 +%.1fM · 평판 %+d%%" % [("P%d" % best) if best < 99 else "완주 실패", cash, int(round(pop * 100))]
@@ -2217,7 +2250,7 @@ func after_race(sim) -> Dictionary:
 		elif age >= 33:
 			d["speed"] = maxf(0.72, snappedf(float(d["speed"]) - 0.003, 0.001))
 	var rep := 0.08 if total >= 25 else (0.04 if total >= 10 else (0.02 if total > 0 else -0.02))
-	hq["pop"] = clampf(r2(hq["pop"] + rep), 0.15, 0.98)
+	pop_add(rep, ("%s %d점" % [sim.CIRC.get("name", "레이스"), total]) if total > 0 else ("%s 무득점" % sim.CIRC.get("name", "레이스")))
 	if ri == 0:
 		_season_end(notes)
 		hq["last_season"]["notes"] = notes.duplicate()
@@ -2329,7 +2362,7 @@ func after_sprint(sim) -> Dictionary:
 			total += pv
 	_track_season(classified, sim.my_cars(), SPRINT_POINTS, 1, sim)
 	if total > 0:
-		hq["pop"] = clampf(r2(hq["pop"] + (0.02 if total >= 10 else 0.01)), 0.15, 0.98)
+		pop_add(0.02 if total >= 10 else 0.01, "스프린트 %d점" % total)
 	save()
 	return {"total": total}
 
@@ -2359,7 +2392,7 @@ func _settle(mine: Array, classified: Array, total: int) -> Dictionary:
 				c["sat"] = minf(1.0, float(c["sat"]) + 0.04)
 		else:
 			m_pen = MISSION_PEN.get(mk, 0.02)
-			hq["pop"] = maxf(0.15, r2(hq["pop"] - m_pen))
+			pop_add(-m_pen, "약속한 목표 실패")
 			for c in hq["contracts"]:
 				c["sat"] = maxf(0.0, float(c["sat"]) - 0.06)
 	var salary := 0.0
@@ -2523,7 +2556,7 @@ func _season_lifecycle(rank: int, notes: Array) -> void:
 				news(m2)
 				notes.append(m2)
 	elif tier() == 3 and rank == standings().size() and my_pts < 4:
-		hq["pop"] = maxf(0.18, r2(hq["pop"] - 0.06))
+		pop_add(-0.06, "최하위 부진", 0.18, true)
 		var m3 := "⚠ 최하위(P%d) 부진으로 보드진 경고, 평판 -6%%" % rank
 		news(m3)
 		notes.append(m3)

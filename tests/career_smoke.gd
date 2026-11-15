@@ -140,6 +140,15 @@ func _init() -> void:
 				sc[3], int(lg["season"]), int(lg["tier"]), int(lg["rank"]), float(lg["cash"]), float(lg["spent"]), float(lg["cap"]), int(cr.hq["pop"] * 100),
 				ld["spon"], ld["pay"], ld["prize"], ld["mission"], ld["ops"], ld["salary"], ld["repair"], ld["rnd"], ld["fac"], ld["staff"], cr.hq["contracts"].size(), cr.hq["dev"], cr.hq["base"]])
 		print("  %d시즌 %dms · 뉴스: %s" % [seasons, Time.get_ticks_msec() - t0, cr.hq["news"].slice(0, 3)])
+		# 평판 변화는 커리어 뉴스에 이유와 함께 남는다
+		var pop_news := 0
+		for nw in cr.hq["news"]:
+			if String(nw).find("평판") >= 0:
+				pop_news += 1
+		print("  평판 뉴스 %d줄 (최근 30줄 중) 예: %s" % [pop_news, str(cr.hq["news"].filter(func(x): return String(x).find("평판") >= 0).slice(0, 3))])
+		if pop_news == 0:
+			fails += 1
+			print("  !! 평판 변화가 뉴스에 없음")
 		# 저장·불러오기
 		var cr2 = CareerS.new()
 		if not cr2.load_save() or int(cr2.hq["race_count"]) != int(cr.hq["race_count"]):
