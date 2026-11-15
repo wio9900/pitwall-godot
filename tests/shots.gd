@@ -338,6 +338,8 @@ func _process(_delta: float) -> bool:
 			step = 171
 		171:
 			_shot("wec_lmp2_drv")
+			main.sim.night = true # 피트 탭 교대 버튼: 밤·비일 때 안정·웻 수치와 추천 이유 표시 확인
+			main.sim.wet = 0.4
 			main.race_panel._on_tab("pit")
 			main._refresh_ui()
 			wait = 4

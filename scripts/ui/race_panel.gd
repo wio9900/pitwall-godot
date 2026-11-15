@@ -632,6 +632,14 @@ func _refresh_pit(c) -> void:
 			d["driver"] = true
 			d["drv"] = -1
 		var rec_d: int = sim.next_driver(c) if c.drivers.size() >= 2 else c.drv
+		var rec_why := ""
+		if rec_d != c.drv:
+			if sim.drv_short(c, rec_d) > 0:
+				rec_why = "(의무)"
+			elif sim.night:
+				rec_why = "(야간)"
+			elif sim.wet > 0.2:
+				rec_why = "(우천)"
 		if bool(d["driver"]) and (int(d["drv"]) < 0 or int(d["drv"]) == c.drv or sim.drv_block(c, int(d["drv"])) != ""):
 			d["drv"] = rec_d
 		var target: int = int(d["drv"]) if bool(d["driver"]) else c.drv
@@ -652,8 +660,16 @@ func _refresh_pit(c) -> void:
 				line2 += " · 의무 %d랩 남음" % short_i
 			elif md_g != "" and gr == md_g:
 				line2 += " · 의무 충족"
+			# 밤·비일 때만 그 조건에 맞는 능력치를 같이 보여준다 (자동 교대·추천이 따지는 값)
+			var cond: PackedStringArray = []
+			if sim.night:
+				cond.append("안정 %d" % int(round(float(dd.get("cons", 0.8)) * 100)))
+			if sim.wet > 0.2:
+				cond.append("웻 %d" % int(round(float(dd.get("wet", 0.8)) * 100)))
+			if not cond.is_empty():
+				line2 += "\n" + " · ".join(cond)
 			var blk: String = sim.drv_block(c, i) if i != c.drv else ""
-			var head: String = ("유지 · " if i == c.drv else ("추천 · " if i == rec_d else "")) + "%s %s" % [short_n, RS.GRADE_KO.get(gr, gr)]
+			var head: String = ("유지 · " if i == c.drv else (("추천%s · " % rec_why) if i == rec_d else "")) + "%s %s" % [short_n, RS.GRADE_KO.get(gr, gr)]
 			db.text = "%s\n%s" % [head, ("🔒 " + blk) if blk != "" else line2]
 			db.disabled = blk != ""
 			db.set_pressed_no_signal(i == target)
