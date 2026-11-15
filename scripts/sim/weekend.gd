@@ -907,6 +907,7 @@ func finish_quali() -> void:
 func commit_start_tyres() -> void:
 	if sim.is_wec():
 		return
+	sim.start_tyres_taken = true
 	for c in my_cars():
 		if c.q3_locked or not RS.SLICK.has(c.comp):
 			continue
@@ -917,6 +918,8 @@ func commit_start_tyres() -> void:
 		if got != "new":
 			c.used_set_pen = 0.45
 			c.wear = 0.10
+		else:
+			c.used_set_pen = 0.0
 
 
 ## Q3 진출 못 한 내 차는 출발 타이어를 고를 수 있다

@@ -76,6 +76,8 @@ var fc: Variant = null   # 예보 {lo, hi, p}
 var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
+var start_tyres_taken := false # 주말 모드: 출발 타이어 세트를 이미 꺼냄 (weekend.commit_start_tyres)
+var first_cross := -1        # 체커기를 처음 받은 차 id (페널티로 우승이 바뀌면 알림)
 var wave_clear_lap := -1     # WEC 웨이브 바이 후 리스타트 랩: 빠른 클래스 앞에 느린 클래스가 없음
 var pit_closed_until := -1   # 이 선두 랩 전까지 피트레인 폐쇄 (피트 입구 근처 사고로 SC 가 나온 직후 1랩)
 var wet_start := false       # 폭우 속 세이프티카 선도 스타트 (전 차량 풀 웻 의무)
@@ -106,7 +108,6 @@ var tally := {}            # 레이스 중 AI 전술·실수 횟수 (테스트·
 var iradio_done := {}      # "차id:종류" → true (같은 제안은 한 번만)
 var prompts_enabled := true  # 설정에서 끄면 엔지니어 제안 창을 띄우지 않음
 
-var _cuts_cache: Dictionary = {}
 var _oc: Array = []          # order_ui 캐시
 var _oc_clock := -1.0
 
@@ -264,7 +265,6 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		true_mult = opts["true_mult"]
 	cars.clear()
 	radio_log.clear()
-	_cuts_cache.clear()
 	# 레이스 상태 초기화 (AI 전략 계산 전에 맑음·그린 상태로)
 	clock = 0.0
 	wet = 0.0
@@ -1153,30 +1153,6 @@ func ai_stint_cost(k: String, n: int, w0: float, r: float) -> float:
 	return t
 
 
-func _cuts(ns: int, l: int) -> Array:
-	var key = "%d:%d" % [ns, l]
-	if _cuts_cache.has(key):
-		return _cuts_cache[key]
-	var out = []
-	if ns == 0:
-		out.append([])
-	else:
-		_rec_cuts(2, ns, l, [], out)
-	_cuts_cache[key] = out
-	return out
-
-
-func _rec_cuts(from: int, ns: int, l: int, arr: Array, out: Array) -> void:
-	if arr.size() == ns:
-		out.append(arr.duplicate())
-		return
-	for x in range(from, l - 1):
-		arr.append(x)
-		_rec_cuts(x + 2, ns, l, arr, out)
-		arr.pop_back()
-
-
-## 남은 L랩에 대한 모든 전략(스톱 0~max_stops, 컴파운드 순서, 피트 랩)의 예상 손실 시간을 계산해 정렬.
 func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionary, pit_cost: float, used: Dictionary, sets: Dictionary, max_stops: int) -> Array:
 	var C: Array = rules.get("dry", ["S", "M", "H"])
 	# 스틴트 비용표 (길이 0~l) — 계산량을 줄이기 위해 미리 만들어 둔다
@@ -1209,9 +1185,8 @@ func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionar
 					s2.append(k)
 					nxt.append(s2)
 			seqs = nxt
-		var cuts = _cuts(ns, l)
-		if cuts.is_empty():
-			continue
+		if ns > 0 and l < 2 * (ns + 1):
+			continue # 스틴트마다 최소 2랩이 안 나온다
 		for seq in seqs:
 			var all = used.duplicate()
 			for k in seq:
@@ -1227,23 +1202,75 @@ func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionar
 				cnt[seq[i]] += 1
 			if cnt["S"] > sets["S"] or cnt["M"] > sets["M"] or cnt["H"] > sets["H"]:
 				continue
-			var best_cost = INF
-			var best_cut: Variant = null
-			for cu in cuts:
-				var t = ns * pit_cost
-				var prev = 0
-				for i in ns + 1:
-					var nxt_b: int = cu[i] if i < ns else l
-					var n_laps = nxt_b - prev
-					t += (first_table[seq[0]][n_laps] if i == 0 else table[seq[i]][n_laps])
-					prev = nxt_b
-				if t < best_cost:
-					best_cost = t
-					best_cut = cu
+			var best: Array = _best_cuts(seq, ns, l, ns * pit_cost, first_table[seq[0]], table)
+			var best_cost: float = best[0]
+			var best_cut: Variant = best[1]
 			if best_cut != null:
 				out.append({"cost": best_cost, "seq": seq, "cuts": best_cut})
 	out.sort_custom(func(a, b): return a["cost"] < b["cost"])
 	return out
+
+
+## 컴파운드 순서(seq)가 정해졌을 때 가장 싼 피트 랩 조합 — 동적계획법 (예전 전수조사와 같은 답).
+## 스틴트마다 최소 2랩, 앞에서부터 더해 가며(예전과 같은 덧셈 순서) 같은 비용이면 피트 랩이 이른 쪽.
+## 돌려주는 값: [비용, 피트 랩 배열 또는 null]
+func _best_cuts(seq: Array, ns: int, l: int, base: float, first_row: Array, table: Dictionary) -> Array:
+	if ns == 0:
+		return [base + float(first_row[l]), []]
+	# val[x] = 첫 i+1 스틴트를 x랩에서 끝냈을 때 최소 비용, pre[x] = 그때의 피트 랩들
+	var val: Array = []
+	var pre: Array = []
+	val.resize(l + 1)
+	pre.resize(l + 1)
+	val.fill(INF)
+	for x in range(2, l - 1):
+		val[x] = base + float(first_row[x])
+		pre[x] = [x]
+	for i in range(1, ns):
+		var row: Array = table[seq[i]]
+		var nv: Array = []
+		var np: Array = []
+		nv.resize(l + 1)
+		np.resize(l + 1)
+		nv.fill(INF)
+		var lo: int = 2 * (i + 1)
+		for y in range(lo, l - 1):
+			var bv: float = INF
+			var bp: Variant = null
+			for x in range(lo - 2, y - 1):
+				var v0: float = val[x]
+				if v0 == INF:
+					continue
+				var v: float = v0 + float(row[y - x])
+				if v < bv or (v == bv and bp != null and _lex_less(pre[x], bp)):
+					bv = v
+					bp = pre[x]
+			if bp != null:
+				nv[y] = bv
+				var arr: Array = bp.duplicate()
+				arr.append(y)
+				np[y] = arr
+		val = nv
+		pre = np
+	var last_row: Array = table[seq[ns]]
+	var best_cost: float = INF
+	var best_cut: Variant = null
+	for x in range(2 * ns, l - 1):
+		var v0: float = val[x]
+		if v0 == INF:
+			continue
+		var v: float = v0 + float(last_row[l - x])
+		if v < best_cost or (v == best_cost and best_cut != null and _lex_less(pre[x], best_cut)):
+			best_cost = v
+			best_cut = pre[x]
+	return [best_cost, best_cut]
+
+
+func _lex_less(a: Array, b: Array) -> bool:
+	for i in mini(a.size(), b.size()):
+		if a[i] != b[i]:
+			return a[i] < b[i]
+	return a.size() < b.size()
 
 
 func ai_choose(c, cands: Array, is_start: bool) -> Variant:
@@ -1868,7 +1895,11 @@ func on_cross(c, t: float) -> void:
 				event("%s %s 최소 주행 시간 미달 → 60초 페널티" % [name_of(c), GRADE_KO.get(min_drive["grade"], "")], "bad")
 			if not finishing:
 				finishing = true
-				event("체커기! %s 우승" % (c.label if is_wec() else c.code))
+				first_cross = c.id
+				if c.penalty > 0.0:
+					event("체커기! %s 1위로 통과 — 페널티 +%.0f초 반영 후 최종 순위 확정" % [c.label if is_wec() else c.code, c.penalty])
+				else:
+					event("체커기! %s 우승" % (c.label if is_wec() else c.code))
 			return
 		c.sec = 0
 		if c.boxing != null:
@@ -2372,6 +2403,9 @@ func advance(dt: float) -> void:
 			sc_dist += dt * v_sc
 	if finishing and alive().is_empty():
 		done = true
+		var ord_f: Array = order()
+		if not ord_f.is_empty() and ord_f[0].id != first_cross:
+			event("최종 결과: 페널티 반영으로 %s 우승" % (ord_f[0].label if is_wec() else ord_f[0].code))
 
 
 func _cmp(a, b) -> int:
@@ -2757,11 +2791,18 @@ func fuel_laps(c) -> float:
 func prepare_start() -> void:
 	cars.sort_custom(func(a, b): return a.grid < b.grid)
 	# 그리드 강등 페널티 (파워유닛 교체 등)
-	for c in cars.duplicate():
-		if c.grid_pen > 0:
-			var i: int = cars.find(c)
-			cars.remove_at(i)
-			var ni: int = mini(cars.size(), i + c.grid_pen)
+	# 강등 차를 모두 빼고, 목표 칸(원래 칸 + 강등) 앞쪽부터 다시 넣는다 → 여러 대가 동시에 강등돼도 서로 밀어주지 않는다
+	var pen_cars: Array = []
+	for i in cars.size():
+		if cars[i].grid_pen > 0:
+			pen_cars.append([i + int(cars[i].grid_pen), i, cars[i]])
+	if not pen_cars.is_empty():
+		pen_cars.sort_custom(func(a, b): return a[0] < b[0] or (a[0] == b[0] and a[1] < b[1]))
+		for pc in pen_cars:
+			cars.erase(pc[2])
+		for pc in pen_cars:
+			var c = pc[2]
+			var ni: int = mini(cars.size(), int(pc[0]))
 			cars.insert(ni, c)
 			event("%s 그리드 %d계단 강등 (파워유닛 교체)%s" % [name_of(c), c.grid_pen, " → 맨 뒤 출발" if ni >= cars.size() - 1 else ""], "bad")
 			c.grid_pen = 0
@@ -2770,10 +2811,14 @@ func prepare_start() -> void:
 		c.grid = i
 		var react = clampf(0.06 - (c.speed * 0.025 + c.aggr * 0.02) - (0.007 if c.traits.has("rocket") else 0.0) + gauss(0.012), 0.01, 0.09)
 		if not is_wec() and react <= 0.011 and rnd() < 0.08:
-			add_penalty(c, 5.0, "부정 출발")
+			add_penalty(c, 5.0, "부정 출발 (신호 전에 움직임)")
+			event("%s 부정 출발 — 불이 꺼지기 전에 움직여 5초 페널티" % name_of(c), "bad")
+			if c.mine:
+				say(c, "죄송해요, 출발 반응이 너무 빨랐어요. 신호 전에 움직여서 5초 페널티예요")
 		c.start_t = i * (0.42 if is_wec() else 0.25) + react
 		c.used[c.comp] = true
-		if c.mine and c.tyre_sets != null and not c.q3_locked and SLICK.has(c.comp):
+		# 주말 모드면 weekend.commit_start_tyres 가 이미 세트를 꺼냈다 (두 번 빼지 않는다)
+		if c.mine and c.tyre_sets != null and not c.q3_locked and SLICK.has(c.comp) and not start_tyres_taken:
 			if c.tyre_sets[c.comp] > 0:
 				c.tyre_sets[c.comp] -= 1
 				c.used_set_pen = 0.0

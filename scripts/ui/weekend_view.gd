@@ -237,7 +237,7 @@ func _render_practice() -> void:
 	if not wk.has_any(sel, p_comp) and not pitems.is_empty():
 		p_comp = pitems[0][0]
 	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
-	K.seg(card, _set_items(sel, p_comp, "쓴 것 먼저"), p_set, _on_pset, 13, anim == null)
+	p_set = _set_seg(card, sel, p_comp, "쓴 것 먼저", p_set, _on_pset, anim == null)
 	var h = K.hbox(6)
 	card.add_child(h)
 	h.add_child(K.btn("셋업 테스트 (3랩)", 15, func(): _run_practice("short")))
@@ -311,6 +311,19 @@ func _set_items(slot: int, comp: String, auto_txt: String) -> Array:
 	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 세트 %d (+0.45초)" % uu if uu > 0 else "쓴 세트 없음"]]
 
 
+## 세트 버튼 줄: 없는 쪽은 눌리지 않게 막고, 고른 쪽이 바닥났으면 "자동"으로 되돌린다. 돌려주는 값 = 실제 선택
+func _set_seg(card: Control, slot: int, comp: String, auto_txt: String, cur: String, cb: Callable, enabled := true) -> String:
+	var nn: int = int(wk.sets[slot].get(comp, 0))
+	var uu: int = int(wk.used_sets[slot].get(comp, 0))
+	if (cur == "new" and nn <= 0) or (cur == "used" and uu <= 0):
+		cur = "auto"
+	var bs: Array = K.seg(card, _set_items(slot, comp, auto_txt), cur, cb, 13, enabled)
+	if bs.size() == 3:
+		bs[1].disabled = bs[1].disabled or nn <= 0
+		bs[2].disabled = bs[2].disabled or uu <= 0
+	return cur
+
+
 func _run_practice(kind: String) -> void:
 	if anim != null:
 		return
@@ -378,7 +391,7 @@ func _render_quali() -> void:
 			if not have:
 				q_comps[slot] = items[0][0]
 			K.seg(card, items, q_comps[slot], _on_q_comp.bind(slot), 14)
-			K.seg(card, _set_items(slot, q_comps[slot], "새 것 먼저"), q_sets[slot], _on_q_set.bind(slot), 13)
+			q_sets[slot] = _set_seg(card, slot, q_comps[slot], "새 것 먼저", String(q_sets[slot]), _on_q_set.bind(slot))
 			K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_pushes[slot], _on_q_push.bind(slot), 14)
 			var go = K.btn("피트 출발 ▶", 18, _on_q_go.bind(slot))
 			go.disabled = float(wk.Q["red_left"]) > 0.0 or float(wk.Q["t"]) > wk.q_last_dep()
@@ -581,7 +594,7 @@ func _render_grid() -> void:
 				sitems.append([k, "%s (새 세트)" % RS.TYRE_KO[k]])
 		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
 		if not sim.is_wec() and not c.q3_locked and RS.SLICK.has(c.comp):
-			K.seg(card, _set_items(slot, c.comp, "새 것 먼저"), wk.start_pref[slot], _on_start_set.bind(slot), 13)
+			wk.start_pref[slot] = _set_seg(card, slot, c.comp, "새 것 먼저", String(wk.start_pref[slot]), _on_start_set.bind(slot))
 		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):
