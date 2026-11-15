@@ -526,11 +526,17 @@ func q_phase(c) -> String:
 
 func _ai_comp(c, st: int, run_i: int, plan_left: int) -> Array:
 	if sim.is_wec():
-		var wc: String = "M" if st >= 2 else sim.wec_fit_comp(c.cls, "S")
-		var used_n: int = _q_soft_used.get(c.id, 0)
-		var wu: bool = wc == "S" and used_n >= 1
-		if wc == "S" and not wu:
-			_q_soft_used[c.id] = used_n + 1
+		# 2026 실제: 하이퍼폴도 대회 허용 컴파운드 안에서 자유 — 대부분 가장 무른 것, 일부 팀(약 15%)은 미디엄으로 (르망: 페라리)
+		var wc: String = sim.wec_fit_comp(c.cls, "S")
+		var key: Variant = c.id
+		if st >= 2:
+			key = "hp%d" % c.id
+			if not _q_soft_used.has("pick%d" % c.id):
+				_q_soft_used["pick%d" % c.id] = sim.wec_fit_comp(c.cls, "M") if sim.rnd() < 0.15 else wc
+			wc = _q_soft_used["pick%d" % c.id]
+		var used_n: int = _q_soft_used.get(key, 0)
+		var wu: bool = used_n >= 1
+		_q_soft_used[key] = used_n + 1
 		return [wc, wu]
 	# F1·F2·F3: 내 차와 같은 주말 할당에서 꺼낸다. 가장 무른 컴파운드로 어택, 새 세트가 없으면 쓴 세트
 	var a: Dictionary = _ai_sets.get(c.id, {"new": {"S": 9, "M": 9, "H": 9}, "used": {"S": 0, "M": 0, "H": 0}})

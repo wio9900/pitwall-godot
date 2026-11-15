@@ -377,7 +377,7 @@ func _render_quali() -> void:
 			var items: Array = []
 			var al: Array = wk.dry_comps(c)
 			if sim.is_wec():
-				al = ["M"] if st >= 2 else sim.wec_comps(c.cls)
+				al = sim.wec_comps(c.cls) # 하이퍼폴도 대회 허용 컴파운드 안에서 자유 (2026 르망: 대부분 소프트, 페라리 미디엄)
 			for k in al:
 				if wk.has_any(slot, k):
 					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])

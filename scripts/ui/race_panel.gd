@@ -307,6 +307,10 @@ func _build_pit(pg: VBoxContainer) -> void:
 		db.toggle_mode = true
 		db.custom_minimum_size = Vector2(0, 54)
 		db.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		db.size_flags_stretch_ratio = 1.0
+		# 긴 줄("0랩 · 피로 0% · 의무 6랩 남음")이 버튼을 넓혀 패널이 화면 밖으로 밀리지 않게 줄바꿈
+		db.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		db.clip_text = false
 		db.pressed.connect(_on_w_drv.bind(i))
 		wr3.add_child(db)
 		_w_drv_btns.append(db)
@@ -654,23 +658,31 @@ func _refresh_pit(c) -> void:
 			var dn: String = String(dd["name"])
 			var short_n: String = dn.substr(dn.find(" ") + 1) if dn.find(". ") == 1 else dn
 			var laps_i: int = int(c.drv_laps[i]) if i < c.drv_laps.size() else 0
-			var line2 := "%d랩 · 피로 %d%%" % [laps_i, int(round(sim.fatigue(c, i) * 100))]
-			var short_i: int = sim.drv_short(c, i)
-			if short_i > 0:
-				line2 += " · 의무 %d랩 남음" % short_i
-			elif md_g != "" and gr == md_g:
-				line2 += " · 의무 충족"
-			# 밤·비일 때만 그 조건에 맞는 능력치를 같이 보여준다 (자동 교대·추천이 따지는 값)
-			var cond: PackedStringArray = []
-			if sim.night:
-				cond.append("안정 %d" % int(round(float(dd.get("cons", 0.8)) * 100)))
-			if sim.wet > 0.2:
-				cond.append("웻 %d" % int(round(float(dd.get("wet", 0.8)) * 100)))
-			if not cond.is_empty():
-				line2 += "\n" + " · ".join(cond)
+			# 버튼이 좁아서 짧은 줄로 나눈다: 표시 / 이름 등급 / 랩·피로 / 의무 / (밤·비) 능력치
+			var lines: PackedStringArray = []
+			var tag: String = "유지" if i == c.drv else (("추천" + rec_why) if i == rec_d else "")
+			if tag != "":
+				lines.append(tag)
+			lines.append("%s %s" % [short_n, RS.GRADE_KO.get(gr, gr)])
 			var blk: String = sim.drv_block(c, i) if i != c.drv else ""
-			var head: String = ("유지 · " if i == c.drv else (("추천%s · " % rec_why) if i == rec_d else "")) + "%s %s" % [short_n, RS.GRADE_KO.get(gr, gr)]
-			db.text = "%s\n%s" % [head, ("🔒 " + blk) if blk != "" else line2]
+			if blk != "":
+				lines.append("🔒 " + blk)
+			else:
+				lines.append("%d랩·피로%d%%" % [laps_i, int(round(sim.fatigue(c, i) * 100))])
+				var short_i: int = sim.drv_short(c, i)
+				if short_i > 0:
+					lines.append("의무 %d랩 남음" % short_i)
+				elif md_g != "" and gr == md_g:
+					lines.append("의무 충족")
+				# 밤·비일 때만 그 조건에 맞는 능력치 (자동 교대·추천이 따지는 값)
+				var cond: PackedStringArray = []
+				if sim.night:
+					cond.append("안정%d" % int(round(float(dd.get("cons", 0.8)) * 100)))
+				if sim.wet > 0.2:
+					cond.append("웻%d" % int(round(float(dd.get("wet", 0.8)) * 100)))
+				if not cond.is_empty():
+					lines.append("·".join(cond))
+			db.text = "\n".join(lines)
 			db.disabled = blk != ""
 			db.set_pressed_no_signal(i == target)
 		c.auto_swap = bool(d["driver"])
