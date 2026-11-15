@@ -755,7 +755,7 @@ func _open_pause() -> void:
 			pause_box.visible = false
 			_exit_race())
 		v.add_child(b3)
-		var note = KitS.label("나가도 이 랩부터 이어서 할 수 있어요 (본부·메뉴의 '레이스 이어하기')", 13, KitS.DIM)
+		var note = KitS.label("메인 메뉴로 나가요. 다시 들어오면 이 랩부터 바로 이어져요 (커리어는 레이스를 끝내야 본부로 갈 수 있어요)", 13, KitS.DIM)
 		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		v.add_child(note)
@@ -772,13 +772,12 @@ func _close_pause() -> void:
 		_set_speed(_pause_prev if _pause_prev > 0 else 1)
 
 
+## 저장하고 나가기: 커리어도 본부가 아니라 메인 메뉴로. 다시 들어오면 '레이스 이어하기'로 경기 화면에 바로
+## (본부를 거치면 레이스를 새로 하거나 결과를 바꾸는 우회로가 생김)
 func _exit_race() -> void:
 	_autosave()
 	sim = null
-	if mode == "career" and career != null:
-		_open_hq()
-	else:
-		_show_menu()
+	_show_menu()
 
 
 func _resume_race() -> void:
@@ -935,8 +934,9 @@ func _render_career_menu() -> void:
 			KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
 			c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
 			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"], ["Audi", "Audi"]], new_opts["engine"], _on_new_engine, 14)
-		c1.add_child(KitS.label("본부 지역", 14, DIM))
-		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
+		c1.add_child(KitS.label("본부 지역 (한 번 정하면 바꿀 수 없어요)", 14, DIM))
+		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"]], new_opts["region"], _on_new_region, 14)
+		KitS.seg(c1, [["japan", "일본(섀시)"], ["usa", "미국(엔진)"], ["france", "프랑스(섀시)"]], new_opts["region"], _on_new_region, 14)
 	var info = KitS.rtl(15)
 	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n• [b]코스트캡[/b] 안에서 R&D와 설비에 투자하세요. 넘기면 벌금과 제재.\n• [b]스폰서[/b]는 시즌 전 제안 중 카테고리마다 하나를 골라요. 안정형·성과연동형·단기 고액은 성과 조항과 홍보 의무가 달라요.\n• 레이스 전에 [b]미션을 약속[/b]하면 보너스, 실패하면 평판 하락.\n• 신규 팀은 F3부터 시작해 승격을 노려요 (오너가 5시즌 동안 자본 지원).[/color]"
 	career_right.add_child(info)
@@ -1124,6 +1124,13 @@ func _open_season() -> void:
 
 
 func _open_hq() -> void:
+	# 이 커리어의 레이스가 중간 저장돼 있으면 본부 대신 그 레이스로 (끝내기 전엔 본부에 못 들어감)
+	var rs: Dictionary = RaceSaveS.peek()
+	if career != null and not rs.is_empty() and rs.get("mode", "") == "career" and int(rs.get("slot", 0)) == career.save_slot:
+		_resume_race()
+		if sim != null and race_box.visible:
+			return
+		# 저장이 깨져서 못 이어가면 본부로 (화면이 비지 않게)
 	_show_only(hq_view)
 	hq_view.open(career)
 

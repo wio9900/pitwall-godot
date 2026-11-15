@@ -66,13 +66,18 @@ func _process(_delta: float) -> bool:
 				print("  ! 나가기 후 저장 없음")
 				quit(1)
 				return true
+			# 나가면 커리어도 메인 메뉴로
+			if not main.menu_box.visible:
+				print("  ! 레이스 나가기 후 메인 메뉴가 안 보임")
+				quit(1)
+				return true
 			if main.mode == "career":
-				# 커리어: 나가면 본부(HQ)로 → '레이스 주말' 버튼을 눌러도 주말을 새로 시작하지 않고 그 랩부터 이어야 한다
-				if not main.hq_view.visible:
-					print("  ! 커리어 레이스 나가기 후 본부가 안 보임")
+				# 커리어: 본부를 열려고 해도 본부 대신 그 랩부터 레이스가 이어져야 한다 (다시 하기로 결과 바꾸기 방지)
+				main._open_hq()
+				if main.hq_view.visible:
+					print("  ! 저장된 커리어 레이스가 있는데 본부가 열림")
 					quit(1)
 					return true
-				main._start_weekend_career()
 			else:
 				main._resume_race()
 			if main.sim == null or main.sim.leader_lap != lap0:

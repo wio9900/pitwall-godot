@@ -470,7 +470,7 @@ func refresh() -> void:
 			var fv := int(round(c.focus))
 			badge = ("[color=#ef4444]집중 %d%%[/color]" % fv) if fv <= 55 else ""
 		var temp_col := "#38bdf8" if c.tt < 0.42 else ("#ef4444" if c.tt > 0.8 else "#22c55e")
-		var extra: String = ("연료 %.1f랩" % sim.fuel_laps(c)) if wec else ("ERS " + _pct(c.ers))
+		var extra: String = ("연료 %.1f랩" % sim.fuel_laps(c)) if wec else (("ERS " + _pct(c.ers)) if sim.has_ers() else ("연료 %+.1f랩" % (c.fuel / maxf(0.01, RS.FPL * c.fuel_burn_rate * float(RS.FUEL[c.fuel_mode][1])) - float(maxi(0, sim.laps - c.lap)))))
 
 		var line2: String = c.dnf if c.dnf != "" else "[color=%s][b]%s[/b][/color] %s [color=%s]●[/color] %s" % [RS.TYRE_HEX[c.comp], c.comp, _pct(c.wear), temp_col, extra]
 		if c.mech_trouble != "":
@@ -501,7 +501,7 @@ func refresh() -> void:
 	var c = car()
 	if c == null:
 		return
-	_tab_btns[2].text = "드라이버/연료" if wec else "ERS·연료"
+	_tab_btns[2].text = "드라이버/연료" if wec else ("ERS·연료" if sim.has_ers() else "연료")
 	# 탭이 좁으면(가로 화면) 글자를 줄여서 다 보이게
 	for b in _tab_btns:
 		var bw: float = b.size.x - 12.0
@@ -680,8 +680,8 @@ const GRADE_COL := {"P": "#a855f7", "G": "#ffc53d", "S": "#cbd5e1", "B": "#d9770
 
 func _refresh_power(c) -> void:
 	var wec: bool = sim.is_wec()
-	_ers_box.visible = not wec
-	if not wec:
+	_ers_box.visible = sim.has_ers()
+	if sim.has_ers():
 		_ers_head.text = "[color=#8b98a5]ERS 배치[/color]   배터리 [b]%s[/b]" % _pct(c.ers)
 		_press(_ers_btns, ERS_ITEMS, c.ers_mode)
 		_ers_fill.anchor_right = clampf(c.ers, 0.0, 1.0)

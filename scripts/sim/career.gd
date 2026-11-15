@@ -155,6 +155,7 @@ func new_career(entry: String, team_idx: int, opts: Dictionary = {}, seed_value:
 	evaluate_engine_politics()
 	_starting_sponsors()
 	_refresh_offers()
+	_fix_region()
 	_fit_reserve()
 	_refresh_pay_pool()
 	_staff_migrate()
@@ -253,9 +254,9 @@ func has_sprint() -> bool:
 func race_rules(sprint: bool = false) -> Dictionary:
 	match race_format():
 		"f3":
-			return {"two_compounds": false, "wear_mult": 0.3, "no_pits": true}
+			return {"two_compounds": false, "wear_mult": 0.3, "no_pits": true, "no_ers": true}
 		"f2":
-			return {"two_compounds": false, "wear_mult": 0.5, "no_pits": true, "points": SPRINT_POINTS} if sprint else {"two_compounds": true, "wear_mult": 1.0}
+			return {"two_compounds": false, "wear_mult": 0.5, "no_pits": true, "no_ers": true, "points": SPRINT_POINTS} if sprint else {"two_compounds": true, "wear_mult": 1.0, "no_ers": true}
 	return {}
 
 
@@ -488,7 +489,73 @@ func hq_bonus(stat: String) -> float:
 func hq_extra() -> Dictionary:
 	var r: Array = D["region_fx"].get(hq["region"], [0, 0, 0, 0])
 	var b: Array = D["branch_fx"].get(hq["rnd_branch"], [0, 0, 0])
-	return {"aero": float(r[0]) + float(b[0]), "engine": float(r[1]) + float(b[1]), "chassis": float(r[2]) + float(b[2]), "rel": float(r[3])}
+	# 연구 철학을 바꾼 직후 2경기는 설계 전환 중이라 보너스 절반
+	var bk: float = 0.5 if int(hq["race_count"]) < int(hq.get("branch_half_until", 0)) else 1.0
+	return {"aero": float(r[0]) + float(b[0]) * bk, "engine": float(r[1]) + float(b[1]) * bk, "chassis": float(r[2]) + float(b[2]) * bk, "rel": float(r[3])}
+
+
+# ═════════ 본부 지역 · 연구 철학 · 규정 주기 (시즌 전 결정) ═════════
+## 본부 지역은 팀별 고정: 기존 팀은 실제 본부(data team_region), 신규 팀은 만들 때 고른 곳
+func _fix_region() -> void:
+	if hq.get("entry", "") == "create":
+		return
+	var tr: Dictionary = SD().get("team_region", {})
+	if tr.has(hq.get("team_name", "")):
+		hq["region"] = tr[hq["team_name"]]
+
+
+## 연구 철학 변경: 시즌 전에만. 커리어 첫 시즌 개막 전 첫 선택은 무료, 그 뒤로는 비용 + 첫 2경기 보너스 절반
+func branch_block() -> String:
+	if not is_preseason():
+		return "시즌 전에만 바꿀 수 있어요"
+	return ""
+
+
+func branch_cost() -> float:
+	if int(hq["season"]) == 1 and not hq.get("branch_set", false):
+		return 0.0
+	return r2(0.4 * tier_scale())
+
+
+func set_branch(v: String) -> bool:
+	if branch_block() != "" or v == hq["rnd_branch"] or not D["branch_fx"].has(v):
+		return false
+	var cost := branch_cost()
+	if cost > 0.0:
+		if float(hq["cash"]) < cost:
+			return false
+		hq["cash"] = r2(float(hq["cash"]) - cost)
+		hq["spent_cap"] = r2(float(hq["spent_cap"]) + cost)
+		book("rnd", cost)
+		hq["branch_half_until"] = int(hq["race_count"]) + 2
+		news("🧭 연구 철학 전환 (%.2fM) — 설계 전환 중이라 첫 2경기는 효과 절반" % cost)
+	hq["rnd_branch"] = v
+	hq["branch_set"] = true
+	save()
+	return true
+
+
+## 규정 주기(현행 / 차세대 선행 개발)도 시즌 전에 정하고 시즌 내내 고정
+func set_dev_target(v: String) -> bool:
+	if not is_preseason() or not (v in ["cur", "next"]):
+		return false
+	hq["dev_target"] = v
+	save()
+	return true
+
+
+## 이번 시즌 캘린더 서킷 성격 분포 (윙 최적값 기준): {fast, mid, slow}
+func calendar_profile() -> Dictionary:
+	var out := {"fast": 0, "mid": 0, "slow": 0}
+	for ck in calendar():
+		var w: float = float(DB.circuits.get(ck, {}).get("wingOpt", 3.0))
+		if w <= 2.5:
+			out["fast"] += 1
+		elif w >= 3.8:
+			out["slow"] += 1
+		else:
+			out["mid"] += 1
+	return out
 
 
 ## 레이스 시뮬레이션에 넘길 내 차 보정치
@@ -2475,6 +2542,7 @@ func load_save(s: int = -1) -> bool:
 	hq = data
 	rng.randomize()
 	_staff_migrate()
+	_fix_region()
 	_fit_reserve()
 	# 예전 저장: 우리 드라이버보다 빠른 페이 드라이버 후보가 남아 있으면 다시 뽑는다
 	for p in hq.get("pay_pool", []):

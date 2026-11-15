@@ -1861,5 +1861,16 @@
   "Aston Martin RA 6.5L V12 NA": "Aston Martin Valkyrie 패키지",
   "Alpine V634 3.4L V6 Turbo Hybrid": "Alpine A424 패키지",
   "Genesis GMR 3.2L V8 Twin-Turbo Hybrid": "Genesis GMR-001 패키지 (현대)"
+ },
+ "team_region": {
+  "Toyota Gazoo Racing": "germany",
+  "Ferrari": "italy",
+  "AF Corse": "italy",
+  "Cadillac Hertz Team JOTA": "uk",
+  "Peugeot TotalEnergies": "france",
+  "BMW Team WRT": "germany",
+  "Alpine Endurance Team": "france",
+  "Aston Martin THOR Team": "uk",
+  "Genesis Magma Racing": "france"
  }
 }

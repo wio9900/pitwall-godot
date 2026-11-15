@@ -810,11 +810,12 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	if not is_wec():
 		if gap_ahead != null and gap_ahead < K["dirty"] and c.instr != "hold":
 			t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
-		var em: String = c.ers_mode
-		if em == "deploy" and c.ers <= 0.02:
-			em = "balance"
-		t += float(ERS[em][0]) * sh
-		c.ers = clampf(c.ers + float(ERS[em][1]) * sh, 0.0, 1.0)
+		if has_ers():
+			var em: String = c.ers_mode
+			if em == "deploy" and c.ers <= 0.02:
+				em = "balance"
+			t += float(ERS[em][0]) * sh
+			c.ers = clampf(c.ers + float(ERS[em][1]) * sh, 0.0, 1.0)
 	var fm: Array = FUEL[c.fuel_mode]
 	t += float(fm[0]) * sh * ws
 	if c.fuel <= 0.0:
@@ -847,7 +848,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		for i in poisson(lam_fast * sh):
 			t += uni(0.15, 0.6)
 	# 타이어 온도
-	var target = tt_target + (0.05 if c.instr == "attack" else 0.0) + (0.02 if (c.ers_mode == "deploy" and not is_wec()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
+	var target = tt_target + (0.05 if c.instr == "attack" else 0.0) + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
@@ -1739,7 +1740,9 @@ func ai_control(c, gap_ahead, gap_behind) -> void:
 		_ai_tactics(c, gap_ahead, gap_behind)
 		return
 	_ai_tactics(c, gap_ahead, gap_behind)
-	if c.ers < 0.2:
+	if not has_ers():
+		c.ers_mode = "balance"
+	elif c.ers < 0.2:
 		c.ers_mode = "harvest"
 	elif gap_ahead != null and gap_ahead < 1.0 and c.ers > 0.35:
 		c.ers_mode = "deploy"
@@ -2120,8 +2123,8 @@ func schedule_next(c, t: float) -> void:
 				dur = maxf(dur, (ahead.sec_end - t) + (0.5 if hold_mate else 1.0))
 			elif gap - diff < K["ot_gap"] and diff > 0:
 				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
-					+ (0.15 if c.drs else 0.0) + (0.06 if (not is_wec() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
-					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (not is_wec() and ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
+					+ ((0.15 if has_ers() else 0.19) if c.drs else 0.0) + (0.06 if (has_ers() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
+					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (has_ers() and ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
 				p += (0.06 if c.traits.has("dive") else 0.0) - (0.06 if ahead.traits.has("wall") else 0.0)
 				p = clampf(p, 0.02, 0.9) * K["overtake_scale"]
 				if rnd() < p:
@@ -2263,10 +2266,16 @@ func on_leader_lap() -> void:
 			continue
 		var left: int = laps - c.lap
 		var it = ideal_tyre(wet)
-		if kind_of(c.comp) != (it if it != "slick" else "slick"):
-			say(c, "라인이 말랐어요. 슬릭으로 바꿔야 해요" if it == "slick" else "노면이 젖었어요. %s 필요해요" % TYRE_KO[it])
-			if not c.auto_plan:
-				trigger_radio(c, "WET")
+		# 이미 박스 지시(예약)가 있거나 피트에 들어가는 중이면 피트 요청 무전은 하지 않는다
+		var booked: bool = c.pit_req != "" or c.boxing != null or is_pitting(c)
+		var want_k: String = it if it != "slick" else "slick"
+		if kind_of(c.comp) != want_k:
+			if booked and c.pit_req != "" and kind_of(c.pit_req) != want_k:
+				say(c, "예약한 %s는 지금 노면에 안 맞아요. 타이어를 다시 골라주세요" % TYRE_KO.get(c.pit_req, c.pit_req))
+			elif not booked:
+				say(c, "라인이 말랐어요. 슬릭으로 바꿔야 해요" if it == "slick" else "노면이 젖었어요. %s 필요해요" % TYRE_KO[it])
+				if not c.auto_plan and left >= 2:
+					trigger_radio(c, "WET")
 		elif not is_wec() and left > 0 and c.lap >= 2 and c.fuel < left * FPL * float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate - FPL * 0.3:
 			# 드라이버 연비까지 반영해 계산. 연비 모드로도 못 버티면 강하게, 아니면 얼마나 모자란지 알려준다
 			var short_std: float = (left * FPL * float(FUEL[c.fuel_mode][1]) * c.fuel_burn_rate - c.fuel) / (FPL * c.fuel_burn_rate)
@@ -2275,17 +2284,21 @@ func on_leader_lap() -> void:
 				say(c, "연료가 %.1f랩분 모자라요! 연비 모드에 리프트 앤 코스트까지 써야 해요" % short_std)
 			elif c.fuel_mode != "lean":
 				say(c, "지금 페이스면 연료가 %.1f랩분 모자라요. 'ERS·연료' 탭에서 세이브로 바꿔주세요" % short_std)
-		elif c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF):
-			say(c, "타이어가 다 됐어요 (%d%%)" % int(round(c.wear * 100)))
-			if not c.auto_plan and c.pit_req == "" and c.boxing == null:
-				trigger_radio(c, "WORN")
+		elif (c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF)) and not booked:
+			# 막판(3랩 이하)엔 피트 손실이 남은 랩에서 잃는 시간보다 커서 버티는 게 정답
+			if left <= 3:
+				say(c, "타이어가 다 됐지만 %d랩 남았어요. 끝까지 버틸게요" % left)
+			else:
+				say(c, "타이어가 다 됐어요 (%d%%)" % int(round(c.wear * 100)))
+				if not c.auto_plan:
+					trigger_radio(c, "WORN")
 		elif c.tt > 0.82:
 			say(c, "타이어가 과열됐어요. 페이스 좀 낮출게요?")
 		elif is_wec() and c.stint_drv >= 2:
 			say(c, "%s: 세 번째 스틴트라 집중력이 떨어져요" % c.name)
-		elif not is_wec() and c.ers < 0.1 and c.ers_mode == "deploy":
+		elif has_ers() and c.ers < 0.1 and c.ers_mode == "deploy":
 			say(c, "배터리가 바닥이에요")
-		elif need_two() and left <= 4 and c.used_slicks() < 2:
+		elif need_two() and left <= 4 and c.used_slicks() < 2 and not (booked and SLICK.has(c.pit_req) and c.pit_req != c.comp):
 			say(c, "아직 두 번째 컴파운드를 안 썼어요! 안 바꾸면 30초 페널티예요")
 
 
@@ -2454,7 +2467,12 @@ func set_pace(c, p: String) -> void:
 
 
 func set_ers(c, m: String) -> void:
-	c.ers_mode = m
+	c.ers_mode = m if has_ers() else "balance"
+
+
+## ERS(하이브리드)가 있는 레이스인지: F1 만. WEC 는 별도 하이브리드 모델, F2·F3 는 실제로 ERS 없음
+func has_ers() -> bool:
+	return not is_wec() and not bool(rules.get("no_ers", false))
 
 
 func my_cars() -> Array:

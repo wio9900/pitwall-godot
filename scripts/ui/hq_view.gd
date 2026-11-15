@@ -19,7 +19,7 @@ const TraitsS = preload("res://scripts/sim/traits.gd")
 const REC = preload("res://scripts/sim/records.gd")
 
 const TABS := [["home", "개요"], ["rnd", "개발"], ["base", "설비"], ["staff", "인력"], ["spon", "스폰서"], ["league", "리그"]]
-const REGION_KO := {"uk": "영국 (공력)", "italy": "이탈리아 (엔진)", "germany": "독일 (섀시·내구)", "japan": "일본 (타이어)"}
+const REGION_KO := {"uk": "영국 (공력)", "italy": "이탈리아 (엔진)", "germany": "독일 (섀시·내구)", "japan": "일본 (섀시)", "usa": "미국 (엔진·내구)", "france": "프랑스 (섀시·공력)"}
 const BRANCH_KO := {"downforce": "고다운포스", "balanced": "올라운더", "lowdrag": "저항 저감"}
 const MISSION_KO := {"none": "약속 안 함", "both_finish": "두 대 모두 완주", "double_p8": "두 대 모두 P8 이내", "podium_one": "한 대 이상 포디움"}
 
@@ -433,9 +433,25 @@ func _tab_rnd() -> void:
 			"워크스 팀이라 파워유닛을 직접 개발해요." if cr.is_works() else "커스터머 팀은 파워유닛 개발 효율이 40%예요."])
 	if cr.reg_year() == int(cr.D["econ"]["regCycle"]) and not cr.is_spec_tier():
 		_txt(c0, "[color=#a855f7]📜 다음 시즌 신규 기술 규정.[/color] 현행 차량 개발은 30%만 이어지고, 차세대 선행 개발은 100% 이어져요.")
-		K.seg(c0, [["cur", "현행 차량 개발"], ["next", "차세대 차량 선행 개발"]], h["dev_target"], _on_dev_target, 14)
-	_txt(c0, "연구 철학 (서킷 상성 보너스)", 14)
-	K.seg(c0, [["downforce", "고다운포스 특화"], ["balanced", "올라운더"], ["lowdrag", "저항 저감 (직선)"]], h["rnd_branch"], _on_branch, 14)
+		if cr.is_preseason():
+			K.seg(c0, [["cur", "현행 차량 개발"], ["next", "차세대 차량 선행 개발"]], h["dev_target"], _on_dev_target, 14)
+			_txt(c0, "[color=#8b98a5]시즌 개막 전에 정하면 시즌 내내 고정돼요.[/color]", 12)
+		else:
+			_txt(c0, "🔒 이번 시즌: [b]%s[/b] (시즌 전에만 변경)" % ("차세대 차량 선행 개발" if h["dev_target"] == "next" else "현행 차량 개발"), 14)
+	var prof: Dictionary = cr.calendar_profile()
+	_txt(c0, "연구 철학 (서킷 상성 보너스) · 이번 시즌 캘린더: [color=#3b82f6]고속 %d[/color] · 균형 %d · [color=#ffc53d]코너 %d[/color]" % [int(prof["fast"]), int(prof["mid"]), int(prof["slow"])], 14)
+	var br_items := [["downforce", "고다운포스 특화"], ["balanced", "올라운더"], ["lowdrag", "저항 저감 (직선)"]]
+	if cr.branch_block() == "":
+		K.seg(c0, br_items, h["rnd_branch"], _on_branch, 14)
+		var bc: float = cr.branch_cost()
+		_txt(c0, ("[color=#8b98a5]시즌 전에만 바꿀 수 있어요. 지금 고르는 건 무료(첫 선택).[/color]" if bc <= 0.0 else "[color=#f59e0b]바꾸면 %.2fM (코스트캡 포함) · 설계 전환으로 첫 2경기는 효과 절반.[/color] [color=#8b98a5]시즌 전에만 변경[/color]" % bc), 12)
+	else:
+		var bname := ""
+		for it in br_items:
+			if it[0] == h["rnd_branch"]:
+				bname = it[1]
+		var half: bool = int(h["race_count"]) < int(h.get("branch_half_until", 0))
+		_txt(c0, "🔒 [b]%s[/b]%s  [color=#8b98a5](시즌 전에만 변경)[/color]" % [bname, "  [color=#f59e0b]설계 전환 중 — 효과 절반[/color]" if half else ""], 14)
 	_engine_card()
 	var proj: float = cr.projected_spend()
 	var c1 = K.card(_body, "개발 프로젝트 (착수 즉시 비용이 코스트캡에 반영, 정해진 경기 후 투입)")
@@ -526,13 +542,11 @@ func _on_pkg(pk) -> void:
 
 
 func _on_dev_target(v) -> void:
-	_h()["dev_target"] = v
-	_act(true)
+	_act(cr.set_dev_target(v))
 
 
 func _on_branch(v) -> void:
-	_h()["rnd_branch"] = v
-	_act(true)
+	_act(cr.set_branch(v))
 
 
 func _on_engine(e) -> void:
@@ -546,12 +560,9 @@ func _on_dev(sz, k) -> void:
 # ═════════ 설비 ═════════
 func _tab_base() -> void:
 	var h := _h()
-	var c0 = K.card(_body, "본부 지역 (연구 특화는 맞바꿈)")
-	var items: Array = []
-	for k in REGION_KO:
-		items.append([k, REGION_KO[k]])
-	K.seg(c0, items, h["region"], _on_region, 14)
-	_txt(c0, "[color=#8b98a5]영국 공력 +1.0%/엔진·섀시 -0.4% · 이탈리아 엔진 +1.0%/공력·섀시 -0.4% · 독일 섀시·내구 +0.6%/공력·엔진 -0.4% · 일본 섀시 +0.6%·엔진 +0.3%/공력 -0.3%·내구 -0.4%[/color]", 13)
+	var c0 = K.card(_body, "본부 지역")
+	_txt(c0, "🏭 [b]%s[/b]  ·  %s" % [REGION_KO.get(h["region"], h["region"]), _region_fx_txt(h["region"])], 15)
+	_txt(c0, "[color=#8b98a5]본부는 팀마다 고정이에요%s. 지역에 따라 연구 특화가 맞바꿈돼요.[/color]" % (" (팀을 만들 때 고른 곳)" if h["entry"] == "create" else " (실제 팀 본부)"), 13)
 	var depr_next := 0.0
 	for d in h["depr"]:
 		if int(d["left"]) > 0:
@@ -583,9 +594,15 @@ func _tab_base() -> void:
 		K.row(c1, "[b]%s[/b] Lv.%d/%d  %s\n[color=#8b98a5]%s[/color]" % [desc[k][0], lv, cr.FAC_MAX, bar, desc[k][1]], [K.sbtn(lab, _on_fac.bind(k), ok, K.BAD if over else K.GOOD)], 14)
 
 
-func _on_region(v) -> void:
-	_h()["region"] = v
-	_act(true)
+func _region_fx_txt(k: String) -> String:
+	var r: Array = cr.D["region_fx"].get(k, [0, 0, 0, 0])
+	var names := ["공력", "엔진", "섀시", "내구"]
+	var parts: PackedStringArray = []
+	for i in 4:
+		var v: float = float(r[i]) * 100.0
+		if absf(v) > 0.01:
+			parts.append("[color=%s]%s %+.1f%%[/color]" % ["#22c55e" if v > 0 else "#ef4444", names[i], v])
+	return " · ".join(parts)
 
 
 func _on_fac(k) -> void:

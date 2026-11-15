@@ -706,6 +706,18 @@
    0.003,
    0.006,
    -0.004
+  ],
+  "usa": [
+   -0.004,
+   0.006,
+   -0.002,
+   0.002
+  ],
+  "france": [
+   0.004,
+   -0.004,
+   0.006,
+   -0.004
   ]
  },
  "branch_fx": {
@@ -1283,5 +1295,18 @@
     "crewMod": 0.0
    }
   }
+ },
+ "team_region": {
+  "Red Bull Racing": "uk",
+  "Ferrari": "italy",
+  "McLaren": "uk",
+  "Mercedes": "uk",
+  "Aston Martin": "uk",
+  "Alpine": "uk",
+  "Williams": "uk",
+  "Racing Bulls": "italy",
+  "Haas": "usa",
+  "Audi Sauber": "germany",
+  "Cadillac F1": "usa"
  }
 }
