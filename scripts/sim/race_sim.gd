@@ -1180,14 +1180,15 @@ func _rec_cuts(from: int, ns: int, l: int, arr: Array, out: Array) -> void:
 func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionary, pit_cost: float, used: Dictionary, sets: Dictionary, max_stops: int) -> Array:
 	var C: Array = rules.get("dry", ["S", "M", "H"])
 	# 스틴트 비용표 (길이 0~l) — 계산량을 줄이기 위해 미리 만들어 둔다
+	# (지금 끼운 타이어가 이번 대회 허용 목록 밖이어도 첫 스틴트는 계산되게 비용표는 세 종류 모두)
 	var table = {}
-	for k in C:
+	for k in ["S", "M", "H"]:
 		var row = []
 		for n in l + 1:
 			row.append(ai_stint_cost(k, n, 0.0, rates[k]))
 		table[k] = row
 	var first_table = {}
-	for k in C:
+	for k in ["S", "M", "H"]:
 		if start_comp != "" and k != start_comp:
 			continue
 		var row = []
