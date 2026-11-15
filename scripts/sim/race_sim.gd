@@ -45,6 +45,9 @@ const WEC_WEAR := 1.9            # 미디엄 1스틴트 ≈ 32%, 더블 스틴�
 const WEC_SET_RATIO := {"HY": 0.6, "P2": 0.6, "P3": 0.75, "GT": 0.75}
 const WEC_COLD_TT := {"S": 0.30, "M": 0.24, "H": 0.17, "I": 0.30, "W": 0.32} # 워머 금지: 피트 직후 타이어 온도
 const WPIT := {"lane": 30.0, "fuel": 30.0, "tyres": 12.0, "driver": 3.0}
+# 급유 시간 = 고정(호스 연결) 20% + 넣는 양에 비례 80%. FUEL_REF = 예전 '항상 가득' 시절 평균 주유량(탱크 대비, 5서킷 3105회 측정 0.90) → 평균 정차 시간이 예전과 같게
+const FUEL_FIX := 0.2
+const FUEL_REF := 0.90
 const WEC_FUEL_KO := {"lean": "세이브", "std": "표준", "rich": "리치"}
 const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
 const STRAT_KO := {"aggressive": "공격형", "balanced": "균형형", "conservative": "보수형", "reactive": "반응형"}
@@ -64,7 +67,8 @@ const TIME_K := 1.025       # 선두 한 바퀴 평균(피트 포함) ≈ 기본
 var timed := false
 var time_limit := 0.0       # 시간 한도 (시뮬 초)
 var laps_nom := 0           # 처음 정한 랩 수 (시간 한도 계산 기준)
-var time_up := false        # 시간 종료 — 선두가 다음에 결승선을 지나면 체커기
+var time_up := false
+var _fuel_stat := [0.0, 0]  # 넣은 연료 합(탱크 대비) · 횟수 — 밸런스 측정용        # 시간 종료 — 선두가 다음에 결승선을 지나면 체커기
 var my_team := -1
 var cars: Array = []
 ## 난이도: 0 쉬움 · 1 보통(원작 밸런스) · 2 어려움 · 3 전설. AI 차 랩타임 배율.
@@ -164,22 +168,31 @@ func wec_hours() -> float:
 
 func drive_limits() -> Dictionary:
 	var h: float = wec_hours()
-	var win: int = maxi(1, int(round(laps * minf(1.0, 6.0 / h))))
+	# 시간제에선 예상 총 랩이 레이스 중에 바뀐다 → 한도(최대)는 처음 기준으로 고정(중간에 바뀌면 AI·플레이어 계획이 뒤늦게 위반이 됨),
+	# 의무(최소)는 늘지 않게 (SC 로 랩이 줄면 그만큼 덜 타도 됨)
+	var laps_hi: int = laps_nom if timed else laps
+	var laps_lo: int = mini(laps, laps_nom) if timed else laps
+	var win: int = maxi(1, int(round(laps_hi * minf(1.0, 6.0 / h))))
 	# 압축된 레이스에서도 연비 주행 한 스틴트(최대 약 STINT+2랩)는 한 명이 탈 수 있게
 	# 랩 단위로 바꿀 때 2랩 여유 (압축된 르망 60랩에선 4시간 ≈ 10랩 = 더블 스틴트라, 연료가 조금 남아 한 랩 더 돌면 억울한 위반이 됐다)
-	var max_win: int = maxi(STINT + 2, int(round(laps * minf(1.0, 4.0 / h))) + 2)
-	var max_total: int = maxi(STINT + 2, int(floor(laps * 14.0 / 24.0))) if h >= 24.0 else laps
-	var min_each: int = int(ceil(laps * 6.0 / 24.0)) if h >= 24.0 else 0
+	var max_win: int = maxi(STINT + 2, int(round(laps_hi * minf(1.0, 4.0 / h))) + 2)
+	var max_total: int = maxi(STINT + 2, int(floor(laps_hi * 14.0 / 24.0))) if h >= 24.0 else laps_hi
+	var min_each: int = int(ceil(laps_lo * 6.0 / 24.0)) if h >= 24.0 else 0
 	return {"win": win, "max_win": max_win, "max_total": max_total, "min_each": min_each}
 
 
 ## 르망 드라이버별 최소 주행(24시간 중 6시간)을 차의 클래스 기준 랩으로.
 ## 규정은 '시간'이라 느린 클래스는 그만큼 적은 랩이면 된다 (예전엔 전체 랩 기준이라 GT3 가 거의 다 위반).
 ## 압축된 레이스는 랩 단위가 거칠어서 반올림 대신 내림.
-func min_each(c) -> int:
+## 시간제: 계획(AI 교대·화면)은 처음 기준 랩으로 — 예상 랩이 오르내려도 목표가 흔들리지 않게(조금 엄격),
+## 체커 판정(for_check)은 실제 랩과 처음 기준 중 작은 쪽으로 (SC 로 랩이 줄면 덜 타도 됨)
+func min_each(c, for_check: bool = false) -> int:
 	if wec_hours() < 24.0:
 		return 0
-	var est: float = float(laps) / float(CLASS_PACE.get(c.cls, 1.0))
+	var base_l: int = laps
+	if timed:
+		base_l = mini(laps, laps_nom) if for_check else laps_nom
+	var est: float = float(base_l) / float(CLASS_PACE.get(c.cls, 1.0))
 	return maxi(1, int(floor(est * 6.0 / 24.0)))
 
 
@@ -759,9 +772,10 @@ func pit_scale() -> float:
 
 
 ## WEC 정차 시간: 피트레인 + 급유·타이어·드라이버 교대 작업 (실제 초를 레이스 압축률로 줄임)
-func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true) -> float:
+func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true, fill: float = 1.0) -> float:
 	var lane_loss: float = float(CIRC.get("wecLaneLoss", WPIT["lane"])) * maxf(0.52, pit_scale())
-	var fuel_work: float = WPIT["fuel"] * (1.05 - 0.2 * c.crew) if fuel else 0.0
+	var add: float = fuel_add(c, fill) if fuel else 0.0
+	var fuel_work: float = WPIT["fuel"] * (1.05 - 0.2 * c.crew) * (FUEL_FIX + (1.0 - FUEL_FIX) * minf(1.25, add / (TANK * FUEL_REF))) if add > 0.0 else 0.0
 	var tyre_work: float = WPIT["tyres"] * (1.15 - 0.35 * c.crew) if tyres else 0.0
 	var drv_work: float = WPIT["driver"] if driver else 0.0
 	# 규정: 급유 중엔 타이어를 못 바꾼다(급유 → 타이어 순서로 합산). 드라이버 교대는 급유하는 동안 같이 할 수 있다
@@ -770,6 +784,24 @@ func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true) -> float:
 	if sc and not _force_green:
 		scf = 0.62 if sc_kind == "SC" else 0.78
 	return (lane_loss + work) * scf
+
+
+## 이번 피트에서 넣을 연료 (목표 = 탱크 × fill, 이미 그보다 많으면 0)
+func fuel_add(c, fill: float) -> float:
+	return maxf(0.0, TANK * clampf(fill, 0.0, 1.0) - maxf(0.0, c.fuel))
+
+
+## 이 차가 체커까지 더 돌 랩 (피트 아웃 랩 포함). 시간제는 남은 시간 ÷ 내 랩타임 + 체커 랩 1
+func laps_to_go(c) -> float:
+	if timed and not time_up:
+		var lt: float = lap_base(c) * TIME_K
+		return maxf(1.0, (time_limit - clock) / maxf(1.0, lt) + 1.0)
+	return maxf(1.0, float(laps - c.lap))
+
+
+## 완주에 필요한 만큼만 넣는 목표(탱크 대비). margin = 여유 랩
+func fill_to_finish(c, margin: float = 0.4) -> float:
+	return clampf((laps_to_go(c) + margin) * _wec_burn(c, c.fuel_mode) / TANK, 0.05, 1.0)
 
 
 func real_laps() -> float:
@@ -1677,14 +1709,14 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 				var comp0: String = (wec_fit_comp(c.cls, "M") if want == "slick" else "W") if d_t else c.comp
 				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
 				var d_d: bool = c.auto_swap or must_swap(c)
-				return {"comp": comp0, "tyres": d_t, "driver": d_d, "fuel": true}
+				return {"comp": comp0, "tyres": d_t, "driver": d_d, "fuel": true, "fill": _auto_fill(c)}
 			return null
 		var req: Dictionary = c.wec_req if c.wec_req != null else {"tyres": true, "fuel": true, "driver": c.auto_swap}
 		var comp1: String = wec_fit_comp(c.cls, c.pit_req)
 		c.pit_req = ""
 		c.wec_req = null
 		c.crew_out = true
-		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true)), "drv": int(req.get("drv", -1))}
+		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true)), "drv": int(req.get("drv", -1)), "fill": float(req.get("fill", 1.0))}
 	var fm: float = wec_fuel_mult(c)
 	var fuel_at_line: float = c.fuel - FPL * T.share[NS - 1] * fm
 	var need_fuel: bool = fuel_at_line < FPL * fm * 0.92 and left >= 1
@@ -1717,7 +1749,13 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	for di in c.drivers.size():
 		if di != c.drv:
 			oth_short += drv_short(c, di)
-	if oth_short > 0 and left <= oth_short + STINT * 2 + 2:
+	# 남은 거리는 내 차 기준 (느린 클래스는 선두보다 랩을 덜 돈다 — 전체 남은 랩으로 보면 교대가 늦어짐)
+	# 모자란 랩이 6시간 구간 한도(max_win)를 넘으면 한 번에 못 채우고 쉬었다 다시 타야 하니 그만큼 일찍 시작한다
+	var span: float = float(oth_short + STINT * 2 + 2)
+	var lim_d: Dictionary = drive_limits()
+	if oth_short >= int(lim_d["max_win"]):
+		span += float(int(lim_d["win"]) - int(lim_d["max_win"]) + STINT)
+	if oth_short > 0 and laps_to_go(c) <= span:
 		driver = true
 	elif cur_short > 0:
 		driver = must_swap(c)
@@ -1735,7 +1773,15 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		comp = c.comp
 	comp = wec_fit_comp(c.cls, comp)
 	c.crew_out = true
-	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true}
+	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true, "fill": _auto_fill(c)}
+
+
+## AI·자동 박스 급유량: 남은 거리가 한 탱크 안이면 완주에 필요한 만큼만(스플래시) → 정차가 짧다. 아니면 가득
+func _auto_fill(c) -> float:
+	var f: float = fill_to_finish(c, 0.6)
+	if f < 0.97:
+		_tally("스플래시 급유")
+	return f
 
 
 ## 랩마다: 드라이버 기록 · 피로 · 주행 시간 규정 확인 (내 차는 경고 후 위반 시 60초)
@@ -1905,10 +1951,10 @@ func on_cross(c, t: float) -> void:
 				_end_pen(c, 30.0, "드라이 2종 의무 미사용")
 			if is_wec() and min_each(c) > 0 and c.drivers.size() >= 2:
 				for di in c.drivers.size():
-					if di < c.drv_laps.size() and int(c.drv_laps[di]) < min_each(c):
-						_end_pen(c, 60.0, "%s 최소 주행 미달 (%d/%d랩)" % [c.drivers[di]["name"], int(c.drv_laps[di]), min_each(c)])
+					if di < c.drv_laps.size() and int(c.drv_laps[di]) < min_each(c, true):
+						_end_pen(c, 60.0, "%s 최소 주행 미달 (%d/%d랩)" % [c.drivers[di]["name"], int(c.drv_laps[di]), min_each(c, true)])
 						event("%s %s 최소 주행 시간(르망 6시간) 미달 → 60초 페널티" % [name_of(c), c.drivers[di]["name"]], "bad")
-			if min_drive != null and min_drive_short(c) > 0:
+			if min_drive != null and min_drive_short(c, true) > 0:
 				c.min_drive_fail = true
 				_end_pen(c, 60.0, "%s 드라이버 최소 주행 미달" % GRADE_KO.get(min_drive["grade"], ""))
 				event("%s %s 최소 주행 시간 미달 → 60초 페널티" % [name_of(c), GRADE_KO.get(min_drive["grade"], "")], "bad")
@@ -1950,7 +1996,7 @@ func on_cross(c, t: float) -> void:
 				c.boxing = d
 				# 피트 크루 숙련도(기본 0.85, 훈련센터 Lv당 +0.025): Lv5면 정차 약 0.8초 단축
 				if is_wec():
-					c.pit_total = wec_stop_time(c, d["tyres"], d.get("driver", false), d.get("fuel", true))
+					c.pit_total = wec_stop_time(c, d["tyres"], d.get("driver", false), d.get("fuel", true), float(d.get("fill", 1.0)))
 				else:
 					c.pit_total = pit_loss() + gauss(0.6) - (c.crew - 0.85) * 8.0
 					c.pit_total += _crew_error(c)
@@ -2036,8 +2082,13 @@ func apply_pit(c) -> void:
 		acts.append(TYRE_KO[c.comp] + " 장착")
 	if is_wec() and not d.get("forced", false):
 		if d.get("fuel", true):
-			c.fuel = TANK
-			acts.append("연료 급유")
+			var fill: float = float(d.get("fill", 1.0))
+			var add: float = fuel_add(c, fill)
+			if add > 0.0:
+				c.fuel += add
+				_fuel_stat[0] += add / TANK
+				_fuel_stat[1] += 1
+				acts.append(("급유 +%.1f랩" % (add / maxf(0.01, _wec_burn(c, c.fuel_mode)))) if fill < 0.98 else "연료 급유")
 		if d.get("driver", false):
 			var pick_d: int = int(d.get("drv", -1))
 			c.drv = pick_d if (pick_d >= 0 and pick_d < c.drivers.size() and pick_d != c.drv) else next_driver(c)
@@ -2684,7 +2735,7 @@ func results() -> Array:
 
 
 ## WEC 내 차 박스 지시: 타이어(comp) · 급유 · 드라이버 교대를 고른다
-func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool, drv_idx: int = -1) -> void:
+func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool, drv_idx: int = -1, fill: float = 1.0) -> void:
 	if not c.is_running() or c.boxing != null:
 		return
 	if not tyres and not fuel and not driver:
@@ -2694,10 +2745,13 @@ func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool, drv
 	c.pit_req = comp if tyres else c.comp
 	if driver and drv_idx >= 0 and (drv_idx == c.drv or drv_idx >= c.drivers.size() or drv_block(c, drv_idx) != ""):
 		drv_idx = -1
-	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver, "drv": drv_idx if driver else -1}
+	fill = clampf(fill, 0.0, 1.0)
+	if fuel and fuel_add(c, fill) <= 0.0:
+		fuel = false # 목표가 지금 연료보다 적으면 급유하지 않는다
+	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver, "drv": drv_idx if driver else -1, "fill": fill}
 	var parts: Array = []
 	parts.append(TYRE_KO[comp] + " 교체" if tyres else "타이어 유지")
-	parts.append("급유" if fuel else "급유 생략")
+	parts.append(("급유 (%.1f랩까지)" % (TANK * fill / maxf(0.01, _wec_burn(c, c.fuel_mode)))) if (fuel and fill < 0.98) else ("급유" if fuel else "급유 생략"))
 	if driver:
 		parts.append("%s로 교대" % c.drivers[drv_idx]["name"] if drv_idx >= 0 else "드라이버 교대")
 	say(c, "박스 지시 확인: " + " + ".join(parts))
@@ -2790,10 +2844,13 @@ func drv_short(c, di: int) -> int:
 ## 최소 주행 규정: 해당 등급 드라이버가 더 달려야 하는 랩 수 (0이면 충족)
 ## 등급 최소 주행(브론즈 25% · 실버 20%)에 필요한 랩: 규정은 '주행 시간' 비율이라 차의 클래스 기준 랩으로
 ## (예전엔 전체(하이퍼카) 랩 기준이라 느린 클래스가 실제보다 12% 안팎 더 달려야 했음)
-func min_drive_need(c) -> int:
+func min_drive_need(c, for_check: bool = false) -> int:
 	if min_drive == null:
 		return 0
-	return int(ceil(float(min_drive["pct"]) * float(laps) / float(CLASS_PACE.get(c.cls, 1.0))))
+	var base_l: int = laps
+	if timed:
+		base_l = mini(laps, laps_nom) if for_check else laps_nom # min_each 와 같은 원칙
+	return int(ceil(float(min_drive["pct"]) * float(base_l) / float(CLASS_PACE.get(c.cls, 1.0))))
 
 
 ## 그 등급 드라이버들이 지금까지 달린 랩 (-1 = 그 등급 드라이버가 없음)
@@ -2810,11 +2867,11 @@ func min_drive_done(c) -> int:
 	return done_l if has else -1
 
 
-func min_drive_short(c) -> int:
+func min_drive_short(c, for_check: bool = false) -> int:
 	var d := min_drive_done(c)
 	if d < 0:
 		return 0
-	return maxi(0, min_drive_need(c) - d)
+	return maxi(0, min_drive_need(c, for_check) - d)
 
 
 ## 클래스 안에서의 순위 (1부터)
@@ -3276,11 +3333,13 @@ func predict_pit(c) -> Variant:
 		var tyres := true
 		var drv := false
 		var fuel := true
+		var fill := 1.0
 		if rq != null:
 			tyres = bool(rq.get("tyres", true))
 			drv = bool(rq.get("driver", false))
 			fuel = bool(rq.get("fuel", true))
-		loss = wec_stop_time(c, tyres, drv, fuel) + 1.0
+			fill = float(rq.get("fill", 1.0))
+		loss = wec_stop_time(c, tyres, drv, fuel, fill) + 1.0
 	var ord: Array = []
 	for o in order():
 		if o.dnf == "" and o.cls == c.cls:

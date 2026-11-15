@@ -1493,10 +1493,11 @@ func _on_wec_box(comp: String, slot: int) -> void:
 	if c == null:
 		return
 	var drv: bool = bool(race_panel.draft[slot]["driver"]) if slot < race_panel.draft.size() else true
+	var fill: float = float(race_panel.draft[slot].get("fill", 1.0)) if slot < race_panel.draft.size() else 1.0
 	if comp == "keep":
-		sim.request_pit_wec(c, c.comp, false, true, drv)
+		sim.request_pit_wec(c, c.comp, false, fill > 0.0, drv, -1, fill)
 	else:
-		sim.request_pit_wec(c, comp, true, true, drv)
+		sim.request_pit_wec(c, comp, true, fill > 0.0, drv, -1, fill)
 	_refresh_ui()
 
 

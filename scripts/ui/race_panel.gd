@@ -21,7 +21,7 @@ var sim = null
 var sel := 0
 var tab := "drive"
 ## 피트 설정 초안 (WEC 드라이버는 기본 '교대' — 주행 시간 규정 때문에 보통 교대가 맞다)
-var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1}]
+var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "full", "fill": 1.0}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "full", "fill": 1.0}]
 var _pits_seen: Array = [0, 0]
 var _seen_seq := -1
 
@@ -54,6 +54,8 @@ var _w_tyre_btns: Array = []
 var _w_fuel_btns: Array = []
 var _w_drv_btns: Array = []
 var _w_fuel_fill: ColorRect
+var _w_fuel_sl: HSlider       # WEC 급유 목표 (탱크 대비 0~1)
+var _w_fuel_txt: RichTextLabel
 var _tyre_btns: Array = []
 var _tyre_keys: Array = []
 var _pit_status: RichTextLabel
@@ -297,7 +299,18 @@ func _build_pit(pg: VBoxContainer) -> void:
 	_w_tyre_btns = _seg(wr, [["yes", "타이어 교체"], ["no", "타이어 유지"]], _on_w_tyres, 13)
 	var wr2 = K.hbox(4)
 	_w_opts.add_child(wr2)
-	_w_fuel_btns = _seg(wr2, [["yes", "급유"], ["no", "급유 안 함"]], _on_w_fuel, 13)
+	_w_fuel_btns = _seg(wr2, [["full", "가득"], ["finish", "완주까지"], ["none", "급유 안 함"]], _on_w_fuel, 13)
+	# 급유량 직접 조절: 급유 후 연료(탱크 대비). 적게 넣으면 정차가 짧고 차가 가벼워 빠르지만 일찍 다시 들어와야 한다
+	_w_fuel_sl = HSlider.new()
+	_w_fuel_sl.min_value = 0.0
+	_w_fuel_sl.max_value = 1.0
+	_w_fuel_sl.step = 0.01
+	_w_fuel_sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_w_fuel_sl.custom_minimum_size = Vector2(0, 28)
+	_w_fuel_sl.value_changed.connect(_on_w_fuel_sl)
+	_w_opts.add_child(_w_fuel_sl)
+	_w_fuel_txt = K.rtl(12)
+	_w_opts.add_child(_w_fuel_txt)
 	# 다음 스틴트 드라이버: 크루 3명 중 직접 고른다 (지금 운전 중인 사람 = 유지)
 	var wr3 = K.hbox(4)
 	_w_opts.add_child(wr3)
@@ -402,6 +415,8 @@ func reset_for(sim_) -> void:
 		d["comp"] = ""
 		d["tyres"] = true
 		d["fuel"] = true
+		d["fuel_pick"] = "full"
+		d["fill"] = 1.0
 		d["driver"] = true
 	_pits_seen = [0, 0]
 	_press(_order_btns, [["free"], ["hold"]], "free")
@@ -629,12 +644,30 @@ func _refresh_pit(c) -> void:
 	if wec:
 		_w_fuel_fill.anchor_right = clampf(c.fuel / RS.TANK, 0.0, 1.0)
 		_press(_w_tyre_btns, [["yes"], ["no"]], "yes" if d["tyres"] else "no")
-		_press(_w_fuel_btns, [["yes"], ["no"]], "yes" if d["fuel"] else "no")
+		# 급유: 가득 / 완주까지(남은 거리에 맞춰 계속 다시 계산) / 안 함 / 슬라이더로 직접
+		var pick: String = String(d.get("fuel_pick", "full"))
+		var fill: float = float(d.get("fill", 1.0))
+		if pick == "full":
+			fill = 1.0
+		elif pick == "finish":
+			fill = sim.fill_to_finish(c)
+		elif pick == "none":
+			fill = 0.0
+		d["fill"] = fill
+		d["fuel"] = pick != "none" and sim.fuel_add(c, fill) > 0.0
+		_press(_w_fuel_btns, [["full"], ["finish"], ["none"]], pick)
+		_w_fuel_sl.set_value_no_signal(fill)
+		var burn: float = maxf(0.01, sim._wec_burn(c, c.fuel_mode))
+		var need_l: float = sim.laps_to_go(c)
+		var after: float = maxf(c.fuel, RS.TANK * fill) / burn
+		var col: String = "#ef4444" if after < minf(need_l, 1.5) else ("#22c55e" if pick == "finish" else "#e6edf3")
+		_w_fuel_txt.text = "급유 후 [b][color=%s]%.1f랩[/color][/b] 주행 · 지금 %.1f랩 · 가득 %.1f랩 · 체커까지 약 %.1f랩" % [col, after, c.fuel / burn, RS.TANK / burn, need_l]
 		# 피트를 한 번 마치면 다음 피트는 다시 기본값(추천 드라이버로 교대)으로
 		if c.pits != int(_pits_seen[sel]):
 			_pits_seen[sel] = c.pits
 			d["driver"] = true
 			d["drv"] = -1
+			d["fuel_pick"] = "full"
 		var rec_d: int = sim.next_driver(c) if c.drivers.size() >= 2 else c.drv
 		var rec_why := ""
 		if rec_d != c.drv:
@@ -699,7 +732,7 @@ func _refresh_pit(c) -> void:
 		if c.wec_req != null:
 			var wq: Dictionary = c.wec_req
 			var to_d: int = int(wq.get("drv", -1))
-			what = ("%s 교체" % what if wq["tyres"] else "타이어 유지") + (" + 급유" if wq["fuel"] else "") + ((" + %s 교대" % c.drivers[to_d]["name"]) if (wq["driver"] and to_d >= 0 and to_d < c.drivers.size()) else (" + 교대" if wq["driver"] else ""))
+			what = ("%s 교체" % what if wq["tyres"] else "타이어 유지") + ((" + 급유 %.0f%%" % (float(wq.get("fill", 1.0)) * 100.0) if float(wq.get("fill", 1.0)) < 0.98 else " + 급유") if wq["fuel"] else "") + ((" + %s 교대" % c.drivers[to_d]["name"]) if (wq["driver"] and to_d >= 0 and to_d < c.drivers.size()) else (" + 교대" if wq["driver"] else ""))
 		st = "[color=#22c55e]✅ 크루 대기 (CREW OUT) · 이번 랩 %s[/color]" % what
 	else:
 		var sets_txt := ""
@@ -709,7 +742,7 @@ func _refresh_pit(c) -> void:
 			sets_txt = " · 새 타이어 S:%d M:%d H:%d" % [int(c.tyre_sets["S"]), int(c.tyre_sets["M"]), int(c.tyre_sets["H"])]
 		var est := ""
 		if wec:
-			est = " · 예상 정차 약 %d초" % int(round(sim.wec_stop_time(c, bool(d["tyres"]), bool(d["driver"]), bool(d["fuel"]))))
+			est = " · 예상 정차 약 %d초" % int(round(sim.wec_stop_time(c, bool(d["tyres"]), bool(d["driver"]), bool(d["fuel"]), float(d.get("fill", 1.0)))))
 		st = "[color=#ffc53d]선택: %s(%s)%s%s[/color]" % [RS.TYRE_KO[d["comp"]], d["comp"], sets_txt, est]
 	if sim.rules.get("no_pits", false) and not wec:
 		st = "[color=#8b98a5]이 레이스는 의무 피트가 없어요 — 손상·비가 아니면 들어갈수록 손해예요.[/color]\n" + st
@@ -881,7 +914,13 @@ func _on_w_tyres(v: String) -> void:
 
 
 func _on_w_fuel(v: String) -> void:
-	draft[sel]["fuel"] = v == "yes"
+	draft[sel]["fuel_pick"] = v
+	refresh()
+
+
+func _on_w_fuel_sl(v: float) -> void:
+	draft[sel]["fuel_pick"] = "custom" if v > 0.001 else "none"
+	draft[sel]["fill"] = v
 	refresh()
 
 
@@ -900,7 +939,7 @@ func _on_confirm() -> void:
 		return
 	var d: Dictionary = draft[sel]
 	if sim.is_wec():
-		sim.request_pit_wec(c, String(d["comp"]), bool(d["tyres"]), bool(d["fuel"]), bool(d["driver"]), int(d.get("drv", -1)))
+		sim.request_pit_wec(c, String(d["comp"]), bool(d["tyres"]), bool(d["fuel"]), bool(d["driver"]), int(d.get("drv", -1)), float(d.get("fill", 1.0)))
 	else:
 		sim.request_pit(c, String(d["comp"]))
 	refresh()
