@@ -619,8 +619,9 @@ func _fill_laps() -> void:
 	opt_laps.clear()
 	if qseries == "wec":
 		var lo: Dictionary = DB.circuits[quick_keys[maxi(0, opt_circuit.selected)]]["lapsOpt"]
-		opt_laps.add_item("짧게 %d랩" % int(lo["short"]))
-		opt_laps.add_item("표준 %d랩" % int(lo["std"]))
+		# 시간제: 정해진 시간이 지나면 체커 (세이프티카·비가 많으면 랩 수가 줄어요)
+		opt_laps.add_item("짧게 · 시간제 약 %d랩" % int(lo["short"]))
+		opt_laps.add_item("표준 · 시간제 약 %d랩" % int(lo["std"]))
 		opt_laps.select(0 if prev < 0 or prev > 1 else prev)
 	else:
 		for n in [10, 15, 20]:
@@ -1658,7 +1659,11 @@ func _refresh_ui() -> void:
 	elif mode == "career" and career != null and career.race_format() == "f3":
 		fmt_tag = _chip("F3", "#a855f7", "#ffffff") + " "
 	if not starting:
-		top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
+		if sim.timed and not sim.finishing:
+			# 시간제: 남은 시간이 주인공, 총 랩은 예상치(~)
+			top_label.text = "[font_size=28][b]⏱ %s[/b][/font_size][color=#8b98a5] 남음 · L%d/~%d[/color]   %s%s" % [sim.time_left_txt(), lap_now, sim.laps, fmt_tag, chips]
+		else:
+			top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
 	# 날씨 줄: 서킷 · 노면 · 강수 확률 · 수막 · 그립 · 예보
 	# 짧게: 서킷 · 노면(젖었을 때만 수막) · 그립 · 비 예보 (자세한 건 피트 탭 기상 레이더)
 	var fc_txt := ""

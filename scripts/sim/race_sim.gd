@@ -58,6 +58,13 @@ var min_drive: Variant = null
 ## 시리즈 규칙: two_compounds(드라이 레이스 두 컴파운드 의무) · wear_mult(타이어 마모 배율, F3·스프린트는 작게)
 var rules := {"two_compounds": true, "wear_mult": 1.0} # 하위 클래스 최소 주행 규정 {grade, pct} (예: 브론즈 25%)
 var laps := 15
+# WEC 시간제: 정해진 시간이 지나면 선두가 결승선을 지날 때 체커기. laps 는 '예상 총 랩'으로 선두 랩마다 다시 계산한다
+# (나머지 계산 — 피트 판단·연료·주행 시간 규정 — 은 그대로 laps 를 쓴다)
+const TIME_K := 1.025       # 선두 한 바퀴 평균(피트 포함) ≈ 기본 랩타임 × 1.025 (6개 서킷·짧게/표준·4시드 측정, SC 없는 레이스 1.00~1.03)
+var timed := false
+var time_limit := 0.0       # 시간 한도 (시뮬 초)
+var laps_nom := 0           # 처음 정한 랩 수 (시간 한도 계산 기준)
+var time_up := false        # 시간 종료 — 선두가 다음에 결승선을 지나면 체커기
 var my_team := -1
 var cars: Array = []
 ## 난이도: 0 쉬움 · 1 보통(원작 밸런스) · 2 어려움 · 3 전설. AI 차 랩타임 배율.
@@ -259,6 +266,10 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 		for k in opts["rules"]:
 			rules[k] = opts["rules"][k]
 	laps = laps_
+	laps_nom = laps_
+	timed = series == "wec" and bool(opts.get("timed", true))
+	time_limit = float(laps_) * float(CIRC["base"]) * TIME_K if timed else 0.0
+	time_up = false
 	my_team = my_team_
 	true_mult = {"S": uni(0.88, 1.14), "M": uni(0.88, 1.14), "H": uni(0.88, 1.14)}
 	if opts.has("true_mult"):
@@ -1877,7 +1888,12 @@ func on_cross(c, t: float) -> void:
 		if c.lap > leader_lap:
 			leader_lap = c.lap
 			on_leader_lap()
-		if c.lap >= laps or finishing:
+		if timed and not time_up and t >= time_limit:
+			time_up = true
+			event("⏱ 시간 종료! 선두가 결승선을 지나면 체커기")
+		if timed and time_up and not finishing and c == _overall_leader():
+			laps = c.lap # 선두의 최종 랩
+		if (not timed and c.lap >= laps) or finishing or (timed and time_up and c.lap >= laps):
 			c.finished = true
 			c.finish_t = t
 			c.boxing = null
@@ -2214,6 +2230,42 @@ func schedule_next(c, t: float) -> void:
 	c.sec_end = t + dur
 
 
+## 시간제: 지금까지 선두 평균 랩 페이스로 남은 시간에 몇 랩 더 돌지 → 예상 총 랩.
+## 체커는 시간이 끝난 뒤 선두가 결승선을 지날 때라서 남은 시간을 올림한다
+func _update_timed_laps() -> void:
+	if not timed or time_up or leader_lap <= 0:
+		return
+	var avg: float = clock / float(leader_lap)
+	var rest: float = maxf(0.0, time_limit - clock)
+	laps = maxi(leader_lap + 1, leader_lap + int(ceil(rest / maxf(1.0, avg))))
+
+
+## 시간제 체커 대상: 가장 많은 랩을 돈 차 (같은 랩이면 먼저 지난 차). 피트에 있어도 선두는 선두
+func _overall_leader() -> Variant:
+	var best: Variant = null
+	for o in cars:
+		if o.dnf != "" or o.finished:
+			continue
+		if best == null or o.cross.size() > best.cross.size() or (o.cross.size() == best.cross.size() and o.cross.size() > 0 and o.cross[-1] < best.cross[-1]):
+			best = o
+	return best
+
+
+## 시간제 남은 시간을 실제 레이스 시간(시간 단위)으로: 화면 표시용
+func time_left_real() -> float:
+	if not timed or time_limit <= 0.0:
+		return 0.0
+	return maxf(0.0, time_limit - clock) / time_limit * wec_hours()
+
+
+## "5:42" (시:분) — 시간제 남은 시간. 시간 종료 후엔 "마지막 랩"
+func time_left_txt() -> String:
+	if time_up:
+		return "마지막 랩"
+	var m: int = int(round(time_left_real() * 60.0))
+	return "%d:%02d" % [m / 60, m % 60]
+
+
 func leader_car() -> Variant:
 	for c in order():
 		if c.is_running() and c.started and c.pit_phase == 0 and not (c.boxing != null and c.sec == NS - 1):
@@ -2231,6 +2283,7 @@ func car_dist(c) -> float:
 
 func on_leader_lap() -> void:
 	var l = leader_lap
+	_update_timed_laps()
 	if sc:
 		sc_laps.append(l)
 	var tgt = 0.0
@@ -2346,6 +2399,7 @@ func advance(dt: float) -> void:
 	if done:
 		return
 	var target = clock + dt
+	var caught_up := false
 	for _guard in 2000:
 		var next: Variant = null
 		var nt = INF
@@ -2357,6 +2411,7 @@ func advance(dt: float) -> void:
 				nt = tt
 				next = c
 		if next == null or nt > target:
+			caught_up = true
 			break
 		clock = maxf(clock, nt)
 		if next.pending_crash != "":
@@ -2369,7 +2424,10 @@ func advance(dt: float) -> void:
 			retire(next, "충돌")
 			continue
 		on_cross(next, clock)
-	clock = target
+	# 한 프레임에 사건이 너무 많으면(아주 높은 배속·앱 복귀) 처리한 곳에서 멈추고 다음 프레임에 이어서 —
+	# 예전엔 시계를 목표로 건너뛰어 남은 섹터를 잘라냈다 (시간제 체커·순위가 배속에 따라 달라질 수 있었음)
+	if caught_up:
+		clock = target
 	# 시간 역행·정체 방지
 	for c in cars:
 		if c.is_running() and c.started and c.sec_end < clock:

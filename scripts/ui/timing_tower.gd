@@ -66,7 +66,8 @@ func _draw() -> void:
 	_head_h = 58.0 if wec else 46.0
 	draw_rect(Rect2(0, 0, w, 4), RED)
 	var lap_now: int = mini(sim.laps, sim.leader_lap + 1)
-	draw_string(bold, Vector2(10, 26), "LAP %d/%d" % [lap_now, sim.laps], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
+	var lap_t: String = ("⏱ %s · L%d" % [sim.time_left_txt(), lap_now]) if (sim.timed and not sim.finishing) else ("LAP %d/%d" % [lap_now, sim.laps])
+	draw_string(bold, Vector2(10, 26), lap_t, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color.WHITE)
 	var mode_t: String = ["간격: 앞차 ⇄", "간격: 선두 ⇄", "직전 랩 ⇄"][gap_mode]
 	draw_string(font, Vector2(10, 42), mode_t, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, DIM)
 	if wec:
