@@ -31,6 +31,9 @@ var p_comp := "M"            # 연습 주행 타이어
 var q_speed := 4             # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤. 레이스와 같은 기준: 1× = 4초 (기본 1×)
 var q_comps: Array = ["S", "S"]
 var q_pushes: Array = ["std", "std"]
+var p_set := "auto"          # 연습 세트: auto(쓴 것 먼저) / new / used
+var q_sets: Array = ["auto", "auto"]  # 예선 세트: auto(새 것 먼저) / new / used
+const SET_ITEMS := [["auto", "자동"], ["new", "새 세트"], ["used", "쓴 세트"]]
 var _q_ver := -1
 var _q_head: RichTextLabel
 var _q_car_txt: Array = []
@@ -229,13 +232,12 @@ func _render_practice() -> void:
 	var ps: Dictionary = wk.sets[sel]
 	var pu: Dictionary = wk.used_sets[sel]
 	var pitems: Array = []
-	for k in ["S", "M", "H"]:
-		if sim.is_wec() and not sim.wec_comps(c.cls).has(k):
-			continue
+	for k in wk.dry_comps(c):
 		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), int(pu[k])]])
-	if not wk.has_any(sel, p_comp):
-		p_comp = "M"
+	if not wk.has_any(sel, p_comp) and not pitems.is_empty():
+		p_comp = pitems[0][0]
 	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
+	K.seg(card, _set_items(sel, p_comp, "쓴 것 먼저"), p_set, _on_pset, 13, anim == null)
 	var h = K.hbox(6)
 	card.add_child(h)
 	h.add_child(K.btn("셋업 테스트 (3랩)", 15, func(): _run_practice("short")))
@@ -297,12 +299,24 @@ func _on_pcomp(v) -> void:
 	refresh()
 
 
+func _on_pset(v) -> void:
+	p_set = v
+	refresh()
+
+
+## 새 세트 / 쓴 세트 고르기 버튼 (개수 표시, 없는 쪽은 "없음")
+func _set_items(slot: int, comp: String, auto_txt: String) -> Array:
+	var nn: int = int(wk.sets[slot].get(comp, 0))
+	var uu: int = int(wk.used_sets[slot].get(comp, 0))
+	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 세트 %d (+0.45초)" % uu if uu > 0 else "쓴 세트 없음"]]
+
+
 func _run_practice(kind: String) -> void:
 	if anim != null:
 		return
-	var r: Dictionary = wk.practice_run(sel, kind, p_comp)
+	var r: Dictionary = wk.practice_run(sel, kind, p_comp, p_set)
 	if r.is_empty():
-		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s 타이어가 남아 있지 않아요" % RS.TYRE_KO[p_comp])
+		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s %s타이어가 남아 있지 않아요" % [RS.TYRE_KO[p_comp], {"new": "새 ", "used": "쓴 "}.get(p_set, "")])
 		return
 	anim = {"kind": "practice", "t": 0.0, "dur": 3.5 if kind == "long" else 2.4, "car": _my(sel), "laps": 3 if kind == "long" else 2}
 	refresh()
@@ -313,6 +327,9 @@ func _render_quali() -> void:
 	var st: int = wk.Q["stage"]
 	var sub: String = ["", "P16 이하 탈락", "P11~15 결정 · 상위 10대 Q3 진출", "상위 10대 폴 포지션 결정전"][st]
 	var ttl := "%s 예선 Q%d" % [sim.CIRC["name"], st]
+	if wk.single_quali():
+		sub = "%s 예선 · 30분 단일 세션 · 탈락 없음 — 이 기록으로 그리드가 정해져요" % ("F3" if wk.fmt() == "f3" else "F2")
+		ttl = "%s 예선" % sim.CIRC["name"]
 	if sim.is_wec():
 		sub = "클래스 상위 8대 하이퍼폴 진출 · 다른 클래스는 기록순 그리드" if st == 1 else "클래스 상위 8대 폴 포지션 결정전"
 		ttl = "%s %s" % [sim.CIRC["name"], "예선" if st == 1 else "하이퍼폴"]
@@ -345,7 +362,7 @@ func _render_quali() -> void:
 			var s: Dictionary = wk.sets[slot]
 			var u: Dictionary = wk.used_sets[slot]
 			var items: Array = []
-			var al: Array = ["S", "M", "H"]
+			var al: Array = wk.dry_comps(c)
 			if sim.is_wec():
 				al = ["M"] if st >= 2 else sim.wec_comps(c.cls)
 			for k in al:
@@ -361,6 +378,7 @@ func _render_quali() -> void:
 			if not have:
 				q_comps[slot] = items[0][0]
 			K.seg(card, items, q_comps[slot], _on_q_comp.bind(slot), 14)
+			K.seg(card, _set_items(slot, q_comps[slot], "새 것 먼저"), q_sets[slot], _on_q_set.bind(slot), 13)
 			K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_pushes[slot], _on_q_push.bind(slot), 14)
 			var go = K.btn("피트 출발 ▶", 18, _on_q_go.bind(slot))
 			go.disabled = float(wk.Q["red_left"]) > 0.0 or float(wk.Q["t"]) > wk.q_last_dep()
@@ -386,6 +404,12 @@ func _on_qspeed(v) -> void:
 
 func _on_q_comp(v, slot: int) -> void:
 	q_comps[slot] = v
+	refresh()
+
+
+func _on_q_set(v, slot: int) -> void:
+	q_sets[slot] = v
+	refresh()
 
 
 func _on_q_push(v, slot: int) -> void:
@@ -393,7 +417,7 @@ func _on_q_push(v, slot: int) -> void:
 
 
 func _on_q_go(slot: int) -> void:
-	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot])
+	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot], q_sets[slot])
 	if err != "":
 		_live.text = "[color=#ef4444]%s[/color]" % err
 	if q_speed == 0:
@@ -538,22 +562,26 @@ func _render_grid() -> void:
 	if sim.is_wec():
 		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "WEC 규정: 모든 차가 새 타이어로 출발 · 이번 대회 드라이 %s · 레이스용 새 세트는 정해진 수만큼 (더블 스틴트가 기본)" % "·".join(PackedStringArray(sim.wec_comps(wk.main_cls()))))
 	else:
-		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요.")
+		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], ("파크 페르메: 윙은 예선 셋업으로 고정. 출발 타이어는 남은 할당 안에서 자유롭게 고를 수 있어요." if wk.single_quali() else "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요."))
 	for c in wk.my_cars():
 		var card = K.card(_side, "#%d %s · 그리드 P%d" % [c.slot + 1, c.name, (sim.class_pos(c) if false else c.grid + 1)], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
 		var info = K.rtl(14)
 		info.text = "윙 W%.1f 고정 · %s" % [c.wing, _sets_txt(c.slot)]
 		card.add_child(info)
-		card.add_child(K.label("출발 타이어" + (" (Q3 타이어 고정)" if c.q3_locked else " (자유 선택 · 새 세트 1개 사용)"), 14, K.DIM))
+		card.add_child(K.label("출발 타이어" + (" (Q3 타이어 고정)" if c.q3_locked else " (자유 선택)"), 14, K.DIM))
 		var slot: int = c.slot
-		var sitems: Array = [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]]
+		var sitems: Array = []
+		for k in wk.dry_comps(c):
+			sitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(wk.used_sets[c.slot][k])]])
 		if sim.is_wec():
 			var sal: Array = sim.wec_comps(c.cls)
 			sitems = []
 			for k in sal:
 				sitems.append([k, "%s (새 세트)" % RS.TYRE_KO[k]])
 		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
+		if not sim.is_wec() and not c.q3_locked and RS.SLICK.has(c.comp):
+			K.seg(card, _set_items(slot, c.comp, "새 것 먼저"), wk.start_pref[slot], _on_start_set.bind(slot), 13)
 		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):
@@ -694,6 +722,11 @@ func _on_qcomp(v) -> void:
 
 func _on_qpush(v) -> void:
 	q_push = v
+	refresh()
+
+
+func _on_start_set(v, slot: int) -> void:
+	wk.start_pref[slot] = v
 	refresh()
 
 

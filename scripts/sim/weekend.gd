@@ -29,6 +29,10 @@ var sets: Array = []         # 내 차별 '새' 타이어 세트 [{S, M, H}, {�
 var used_sets: Array = []    # 내 차별 '쓴' 세트 수 (연습·예선에서 한 번이라도 달린 세트)
 ## 주말 타이어 할당: 연습부터 결승까지 이 안에서 해결한다 (실제 F1 의 주말 13세트를 이 게임 길이에 맞춰 축소)
 const ALLOC_F1 := {"S": 3, "M": 3, "H": 2}
+## F2: 무른 쪽(옵션) 2 + 단단한 쪽(프라임) 3 · F3: 드라이 1종 4세트 (실제 주말 할당 그대로)
+const ALLOC_F2 := {"S": 2, "M": 3, "H": 0}
+const ALLOC_F3 := {"S": 0, "M": 4, "H": 0}
+const QLEN_SINGLE := 30.0   # F2·F3 예선: 탈락 없는 30분 단일 세션
 const ALLOC_WEC := {"S": 2, "M": 3, "H": 2}  # WEC 결승은 별도 레이스 할당(race_sim wec_sets)을 쓴다
 var setups: Array = []       # 내 차별 셋업 [{wing, press, fuel_load}]
 var wear_est := {}           # {err, runs, bias}
@@ -40,12 +44,37 @@ var bands: Array = []        # 내 차별 엔지니어 추천 범위 {key: {c: �
 var Q := {}                  # 예선 상태
 var done_quali := false
 var _q_soft_used := {}
+var _ai_sets := {}           # AI 차별 {new: {S,M,H}, used: {S,M,H}}
+var start_pref: Array = ["auto", "auto"]  # 내 차 결승 출발 세트: auto(새 것 먼저) / new / used
+
+
+## 주말 형식: f1 / f2 / f3 / wec (커리어 하위 리그는 rules.fmt 로 넘어옴)
+func fmt() -> String:
+	if sim.is_wec():
+		return "wec"
+	return String(sim.rules.get("fmt", "f1"))
+
+
+## 단일 예선(탈락 없음): F2·F3
+func single_quali() -> bool:
+	return fmt() == "f2" or fmt() == "f3"
+
+
+## 이 주말에 쓸 수 있는 드라이 컴파운드
+func dry_comps(c) -> Array:
+	if sim.is_wec():
+		return sim.wec_comps(c.cls)
+	var out: Array = []
+	for k in ["S", "M", "H"]:
+		if int(sets[c.slot if c.mine else 0].get(k, 0)) > 0 or int(used_sets[c.slot if c.mine else 0].get(k, 0)) > 0:
+			out.append(k)
+	return out
 
 
 ## sim 은 new_race 까지 끝난 상태여야 한다. obligation_laps: 스폰서 행사로 줄어드는 연습 랩 수.
 func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	sim = sim_
-	var al: Dictionary = ALLOC_WEC if sim.is_wec() else ALLOC_F1
+	var al: Dictionary = ALLOC_WEC if sim.is_wec() else ({"f2": ALLOC_F2, "f3": ALLOC_F3}.get(fmt(), ALLOC_F1))
 	if sim.is_wec():
 		# 이번 대회에 쓸 수 있는 컴파운드만 (2종이면 3세트씩, 르망 3종은 S2·M3·H2)
 		var ok: Array = sim.wec_comps(main_cls())
@@ -55,6 +84,19 @@ func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 				al[k] = 3
 	sets = [al.duplicate(), al.duplicate()]
 	used_sets = [{"S": 0, "M": 0, "H": 0}, {"S": 0, "M": 0, "H": 0}]
+	# AI 도 같은 할당에서 꺼내 쓴다 (연습에서 가장 단단한 컴파운드 한 세트를 연 상태로 예선 시작)
+	_ai_sets = {}
+	for c in sim.cars:
+		if c.mine:
+			continue
+		var nw: Dictionary = al.duplicate()
+		var us := {"S": 0, "M": 0, "H": 0}
+		for k in ["H", "M", "S"]:
+			if int(nw.get(k, 0)) > 0:
+				nw[k] = int(nw[k]) - 1
+				us[k] = 1
+				break
+		_ai_sets[c.id] = {"new": nw, "used": us}
 	setups = []
 	bands = []
 	for c in my_cars():
@@ -212,31 +254,55 @@ func feedback(c) -> String:
 ## 세트 꺼내기. 연습은 쓴 세트를 먼저(없으면 새 세트를 하나 연다), 예선은 새 세트를 먼저.
 ## 돌려주는 값: "new" / "used" / "" (그 컴파운드는 남은 세트가 없음)
 func take_set(slot: int, comp: String, prefer_new: bool) -> String:
+	return take_set_mode(slot, comp, "auto_new" if prefer_new else "auto_used")
+
+
+## 세트 꺼내기. mode: new(새 것만) / used(쓴 것만) / auto_new(새 것 먼저) / auto_used(쓴 것 먼저)
+## 돌려주는 값: "new" / "used" / "" (없음)
+func take_set_mode(slot: int, comp: String, mode: String) -> String:
 	var nw: Dictionary = sets[slot]
 	var us: Dictionary = used_sets[slot]
 	if not nw.has(comp):
 		return "new" # 인터·웻은 할당 밖
-	if prefer_new and int(nw[comp]) > 0 or (not prefer_new and int(us[comp]) == 0 and int(nw[comp]) > 0):
+	var can_new: bool = int(nw[comp]) > 0
+	var can_used: bool = int(us[comp]) > 0
+	var pick := ""
+	match mode:
+		"new":
+			pick = "new" if can_new else ""
+		"used":
+			pick = "used" if can_used else ""
+		"auto_used":
+			pick = "used" if can_used else ("new" if can_new else "")
+		_:
+			pick = "new" if can_new else ("used" if can_used else "")
+	if pick == "new":
 		nw[comp] = int(nw[comp]) - 1
 		us[comp] = int(us[comp]) + 1
-		return "new"
-	if int(us[comp]) > 0:
-		return "used"
-	return ""
+	return pick
+
+
+## 고를 수 있는지 (화면 버튼용): mode = new / used
+func can_take(slot: int, comp: String, mode: String) -> bool:
+	if mode == "new":
+		return int(sets[slot].get(comp, 0)) > 0
+	if mode == "used":
+		return int(used_sets[slot].get(comp, 0)) > 0
+	return has_any(slot, comp)
 
 
 func has_any(slot: int, comp: String) -> bool:
 	return int(sets[slot].get(comp, 0)) > 0 or int(used_sets[slot].get(comp, 0)) > 0
 
 
-func practice_run(slot: int, kind: String, comp: String = "M") -> Dictionary:
+func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String = "auto") -> Dictionary:
 	var c = my_cars()[slot]
 	var n := 5 if kind == "long" else 3
 	if practice_left[slot] < n:
 		return {}
 	if sim.is_wec():
 		comp = sim.wec_fit_comp(c.cls, comp)
-	if take_set(slot, comp, false) == "":
+	if take_set_mode(slot, comp, "auto_used" if set_mode == "auto" else set_mode) == "":
 		return {}
 	var wear := 0.0
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
@@ -283,7 +349,7 @@ func auto_practice() -> void:
 
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
 func start_quali() -> void:
-	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else 3, "eliminated": {}, "done": false, "auto": false, "ver": 0, "reds": 0}
+	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else (1 if single_quali() else 3), "eliminated": {}, "done": false, "auto": false, "ver": 0, "reds": 0}
 	_q_soft_used.clear()
 	for c in my_cars():
 		c.q3_locked = false
@@ -293,6 +359,8 @@ func start_quali() -> void:
 ## 세션 길이(분)
 func q_len(stage: int = -1) -> float:
 	var st: int = int(Q.get("stage", 1)) if stage < 0 else stage
+	if single_quali():
+		return QLEN_SINGLE * maxf(1.0, lap_min() / 1.7)
 	var arr: Array = QLEN_WEC if sim.is_wec() else QLEN_F1
 	# 랩이 긴 서킷(르망 3분 반)은 세션도 비례해서 길게: 아웃랩·어택·인랩 한 번에 랩 3바퀴 남짓 걸리므로
 	return float(arr[clampi(st, 1, arr.size() - 1)]) * maxf(1.0, lap_min() / 1.7)
@@ -408,7 +476,10 @@ func _start_stage(st: int) -> void:
 			Q["plan"][c.id] = _ai_plan(c, st)
 	Q["n_part"] = n
 	Q["ver"] = int(Q["ver"]) + 1
-	_log("Q%d 시작 · %d분" % [st, int(q_len(st))] if not sim.is_wec() else ("%s 시작 · %d분" % ["예선" if st == 1 else "하이퍼폴", int(q_len(st))]))
+	if single_quali():
+		_log("예선 시작 · %d분 단일 세션 (탈락 없음)" % int(q_len(st)))
+	else:
+		_log("Q%d 시작 · %d분" % [st, int(q_len(st))] if not sim.is_wec() else ("%s 시작 · %d분" % ["예선" if st == 1 else "하이퍼폴", int(q_len(st))]))
 
 
 ## AI 출발 계획: 55%는 초반에 기록을 하나 만들어 두고(뱅커), 모두 막판에 한 번 더
@@ -417,6 +488,13 @@ func _ai_plan(c, st: int) -> Array:
 	var plan: Array = []
 	if c.mine:
 		plan.append(sim.uni(T - out_min() - 3.4, T - out_min() - 0.5))
+		return plan
+	if single_quali():
+		# 30분 단일 세션: 초반 기록 하나 + 막판 어택 (일부는 중간에 한 번 더), 출발 시각을 넓게 흩어 트래픽 분산
+		plan.append(sim.uni(T * 0.08, T * 0.40))
+		if sim.rnd() < 0.4:
+			plan.append(sim.uni(T * 0.45, T * 0.65))
+		plan.append(sim.uni(T - out_min() - 6.0, T - out_min() - 0.3))
 		return plan
 	if sim.rnd() < 0.55:
 		plan.append(sim.uni(0.3, T * 0.35))
@@ -447,16 +525,34 @@ func q_phase(c) -> String:
 
 
 func _ai_comp(c, st: int, run_i: int, plan_left: int) -> Array:
-	var comp := "S"
 	if sim.is_wec():
-		comp = "M" if st >= 2 else sim.wec_fit_comp(c.cls, "S")
-	elif st == 1 and plan_left > 0 and c.speed > 0.80:
-		comp = "M" # 빠른 차는 Q1 뱅커를 미디엄으로
-	var used_n: int = _q_soft_used.get(c.id, 0)
-	var used: bool = comp == "S" and used_n >= (1 if sim.is_wec() else 2)
-	if comp == "S" and not used:
-		_q_soft_used[c.id] = used_n + 1
-	return [comp, used]
+		var wc: String = "M" if st >= 2 else sim.wec_fit_comp(c.cls, "S")
+		var used_n: int = _q_soft_used.get(c.id, 0)
+		var wu: bool = wc == "S" and used_n >= 1
+		if wc == "S" and not wu:
+			_q_soft_used[c.id] = used_n + 1
+		return [wc, wu]
+	# F1·F2·F3: 내 차와 같은 주말 할당에서 꺼낸다. 가장 무른 컴파운드로 어택, 새 세트가 없으면 쓴 세트
+	var a: Dictionary = _ai_sets.get(c.id, {"new": {"S": 9, "M": 9, "H": 9}, "used": {"S": 0, "M": 0, "H": 0}})
+	var nw: Dictionary = a["new"]
+	var us: Dictionary = a["used"]
+	var order: Array = ["S", "M", "H"]
+	# F1 Q1 뱅커: 빠른 차는 미디엄 (원작 그대로)
+	if fmt() == "f1" and st == 1 and plan_left > 0 and c.speed > 0.80:
+		order = ["M", "S", "H"]
+	# 첫 기록용(뱅커) 어택은 쓴 세트로 아끼고 마지막 어택에 새 세트 (새 세트가 남으면)
+	var save_new: bool = plan_left > 0
+	for k in order:
+		var hn: bool = int(nw.get(k, 0)) > 0
+		var hu: bool = int(us.get(k, 0)) > 0
+		if not hn and not hu:
+			continue
+		if hn and not (save_new and hu and int(nw[k]) <= 1):
+			nw[k] = int(nw[k]) - 1
+			us[k] = int(us[k]) + 1
+			return [k, false]
+		return [k, true]
+	return ["M", true]
 
 
 func _depart(c, comp: String, push: String, used: bool) -> void:
@@ -466,7 +562,7 @@ func _depart(c, comp: String, push: String, used: bool) -> void:
 
 
 ## 내 차 출발. 실패하면 이유 문자열, 성공하면 ""
-func player_depart(slot: int, comp: String, push: String) -> String:
+func player_depart(slot: int, comp: String, push: String, set_mode: String = "auto") -> String:
 	if Q.is_empty() or Q["done"] or Q["stage_over"]:
 		return "세션이 끝났어요"
 	var c = my_cars()[slot]
@@ -482,8 +578,10 @@ func player_depart(slot: int, comp: String, push: String) -> String:
 		comp = "M" if Q["stage"] >= 2 else sim.wec_fit_comp(c.cls, comp)
 	if not has_any(slot, comp):
 		return "%s 세트가 없어요" % RS.TYRE_KO[comp]
-	var used: bool = take_set(slot, comp, true) != "new"
-	_depart(c, comp, push, used)
+	var got: String = take_set_mode(slot, comp, "auto_new" if set_mode == "auto" else set_mode)
+	if got == "":
+		return "%s %s 세트가 없어요" % [RS.TYRE_KO[comp], "새" if set_mode == "new" else "쓴"]
+	_depart(c, comp, push, got != "new")
 	return ""
 
 
@@ -788,7 +886,7 @@ func finish_quali() -> void:
 		c.grid = i
 		var r: Variant = Q["res"].get(c.id)
 		# 파크 페르메: 최종 세션(Q3) 진출 차는 그 세션 타이어로 출발 (어택 1랩 마모 5%, 헌 세트 14%)
-		if r != null and r["stage"] == Q["max_stage"] and not sim.is_wec(): # WEC 는 결승을 새 타이어로 출발
+		if r != null and r["stage"] == Q["max_stage"] and not sim.is_wec() and not single_quali(): # WEC 는 결승을 새 타이어로 출발, F2·F3 는 출발 타이어 자유
 			c.comp = r["q_comp"]
 			c.used = {c.comp: true}
 			c.q3_locked = true
@@ -812,7 +910,11 @@ func commit_start_tyres() -> void:
 	for c in my_cars():
 		if c.q3_locked or not RS.SLICK.has(c.comp):
 			continue
-		if take_set(c.slot, c.comp, true) != "new":
+		var pref: String = String(start_pref[c.slot]) if c.slot < start_pref.size() else "auto"
+		var got: String = take_set_mode(c.slot, c.comp, "auto_new" if pref == "auto" else pref)
+		if got == "" and pref != "auto":
+			got = take_set_mode(c.slot, c.comp, "auto_new")
+		if got != "new":
 			c.used_set_pen = 0.45
 			c.wear = 0.10
 

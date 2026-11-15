@@ -595,7 +595,7 @@ func _refresh_pit(c) -> void:
 		d["comp"] = (String(ns["comp"]) if ns != null else "M") if it == "slick" else it
 	if wec:
 		d["comp"] = sim.wec_fit_comp(c.cls, String(d["comp"]))
-	var allowed: Array = sim.wec_comps(c.cls) if wec else ["S", "M", "H"]
+	var allowed: Array = sim.dry_list(c)
 	for i in _tyre_btns.size():
 		var comp: String = _tyre_keys[i]
 		var b: Button = _tyre_btns[i]

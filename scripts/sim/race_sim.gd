@@ -1178,7 +1178,7 @@ func _rec_cuts(from: int, ns: int, l: int, arr: Array, out: Array) -> void:
 
 ## 남은 L랩에 대한 모든 전략(스톱 0~max_stops, 컴파운드 순서, 피트 랩)의 예상 손실 시간을 계산해 정렬.
 func ai_optimize(l: int, start_comp: String, start_wear: float, rates: Dictionary, pit_cost: float, used: Dictionary, sets: Dictionary, max_stops: int) -> Array:
-	var C = ["S", "M", "H"]
+	var C: Array = rules.get("dry", ["S", "M", "H"])
 	# 스틴트 비용표 (길이 0~l) — 계산량을 줄이기 위해 미리 만들어 둔다
 	var table = {}
 	for k in C:
@@ -1344,7 +1344,9 @@ func ai_replan(c) -> void:
 func _pick_ai_slick(c, pref: String, rem_laps: int) -> String:
 	var need_diff: bool = need_two() and c.used_slicks() < 2
 	var cands: Array = ["S", "M", "H"] if rem_laps <= 5 else (["M", "H", "S"] if rem_laps <= 9 else ["H", "M", "S"])
-	if SLICK.has(pref):
+	var dl: Array = dry_list()
+	cands = cands.filter(func(x): return dl.has(x))
+	if SLICK.has(pref) and dl.has(pref):
 		var re = [pref]
 		for x in cands:
 			if x != pref:
@@ -1372,7 +1374,7 @@ func _best_final(c, rem: int) -> String:
 	var need_diff: bool = need_two() and c.used_slicks() < 2
 	var best := ""
 	var best_t := INF
-	for k in ["S", "M", "H"]:
+	for k in dry_list():
 		if need_diff and c.used.has(k):
 			continue
 		var r: float = ai_nom_rate(k, c) * c.est_err
@@ -2468,6 +2470,13 @@ func set_pace(c, p: String) -> void:
 
 func set_ers(c, m: String) -> void:
 	c.ers_mode = m if has_ers() else "balance"
+
+
+## 이 레이스에서 쓸 수 있는 드라이 컴파운드 (F2 옵션·프라임 2종, F3 1종, WEC 는 클래스·대회별)
+func dry_list(c = null) -> Array:
+	if is_wec() and c != null:
+		return wec_comps(c.cls)
+	return rules.get("dry", ["S", "M", "H"])
 
 
 ## ERS(하이브리드)가 있는 레이스인지: F1 만. WEC 는 별도 하이브리드 모델, F2·F3 는 실제로 ERS 없음

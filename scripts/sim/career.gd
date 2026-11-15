@@ -254,9 +254,9 @@ func has_sprint() -> bool:
 func race_rules(sprint: bool = false) -> Dictionary:
 	match race_format():
 		"f3":
-			return {"two_compounds": false, "wear_mult": 0.3, "no_pits": true, "no_ers": true}
+			return {"two_compounds": false, "wear_mult": 0.3, "no_pits": true, "no_ers": true, "fmt": "f3", "dry": ["M"]}
 		"f2":
-			return {"two_compounds": false, "wear_mult": 0.5, "no_pits": true, "no_ers": true, "points": SPRINT_POINTS} if sprint else {"two_compounds": true, "wear_mult": 1.0, "no_ers": true}
+			return {"two_compounds": false, "wear_mult": 0.5, "no_pits": true, "no_ers": true, "fmt": "f2", "dry": ["S", "M"], "points": SPRINT_POINTS} if sprint else {"two_compounds": true, "wear_mult": 1.0, "no_ers": true, "fmt": "f2", "dry": ["S", "M"]}
 	return {}
 
 
