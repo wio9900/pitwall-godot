@@ -338,6 +338,12 @@ func _process(_delta: float) -> bool:
 			step = 171
 		171:
 			_shot("wec_lmp2_drv")
+			main.race_panel._on_tab("pit")
+			main._refresh_ui()
+			wait = 4
+			step = 172
+		172:
+			_shot("wec_lmp2_pit")
 			main._set_cam(-1)
 			main._show_menu()
 			main._on_mode("quick")

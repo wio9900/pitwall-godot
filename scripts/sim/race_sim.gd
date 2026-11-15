@@ -1642,7 +1642,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		c.pit_req = ""
 		c.wec_req = null
 		c.crew_out = true
-		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true))}
+		return {"comp": comp1, "tyres": bool(req.get("tyres", true)), "driver": bool(req.get("driver", false)), "fuel": bool(req.get("fuel", true)), "drv": int(req.get("drv", -1))}
 	var fm: float = wec_fuel_mult(c)
 	var fuel_at_line: float = c.fuel - FPL * T.share[NS - 1] * fm
 	var need_fuel: bool = fuel_at_line < FPL * fm * 0.92 and left >= 1
@@ -1988,7 +1988,8 @@ func apply_pit(c) -> void:
 			c.fuel = TANK
 			acts.append("연료 급유")
 		if d.get("driver", false):
-			c.drv = next_driver(c)
+			var pick_d: int = int(d.get("drv", -1))
+			c.drv = pick_d if (pick_d >= 0 and pick_d < c.drivers.size() and pick_d != c.drv) else next_driver(c)
 			apply_driver(c)
 			c.stint_drv = 0
 			c.drive_warned = -1
@@ -2587,7 +2588,7 @@ func results() -> Array:
 
 
 ## WEC 내 차 박스 지시: 타이어(comp) · 급유 · 드라이버 교대를 고른다
-func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool) -> void:
+func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool, drv_idx: int = -1) -> void:
 	if not c.is_running() or c.boxing != null:
 		return
 	if not tyres and not fuel and not driver:
@@ -2595,12 +2596,14 @@ func request_pit_wec(c, comp: String, tyres: bool, fuel: bool, driver: bool) -> 
 		return
 	comp = wec_fit_comp(c.cls, comp)
 	c.pit_req = comp if tyres else c.comp
-	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver}
+	if driver and drv_idx >= 0 and (drv_idx == c.drv or drv_idx >= c.drivers.size() or drv_block(c, drv_idx) != ""):
+		drv_idx = -1
+	c.wec_req = {"tyres": tyres, "fuel": fuel, "driver": driver, "drv": drv_idx if driver else -1}
 	var parts: Array = []
 	parts.append(TYRE_KO[comp] + " 교체" if tyres else "타이어 유지")
 	parts.append("급유" if fuel else "급유 생략")
 	if driver:
-		parts.append("드라이버 교대")
+		parts.append("%s로 교대" % c.drivers[drv_idx]["name"] if drv_idx >= 0 else "드라이버 교대")
 	say(c, "박스 지시 확인: " + " + ".join(parts))
 
 
@@ -2655,6 +2658,20 @@ func next_driver(c) -> int:
 		if pick >= 0:
 			return pick
 	return (c.drv + 1) % n
+
+
+## 드라이버 di 를 다음 스틴트에 태울 수 없는 이유 ("" = 가능): 6시간 구간·총 주행 한도
+func drv_block(c, di: int) -> String:
+	if not is_wec() or di < 0 or di >= c.drivers.size():
+		return ""
+	var lim: Dictionary = drive_limits()
+	var more: int = STINT + 1
+	if drive_in_window(c, di) + more > int(lim["max_win"]):
+		return "6시간 구간 주행 한도"
+	var tot: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
+	if tot + more > int(lim["max_total"]):
+		return "총 주행 한도"
+	return ""
 
 
 ## 드라이버 di 가 규정(르망 각자 최소 주행 · 하위 클래스 등급 최소 주행)을 채우려면 더 달려야 하는 랩

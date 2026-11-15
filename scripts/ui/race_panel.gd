@@ -21,7 +21,7 @@ var sim = null
 var sel := 0
 var tab := "drive"
 ## 피트 설정 초안 (WEC 드라이버는 기본 '교대' — 주행 시간 규정 때문에 보통 교대가 맞다)
-var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true}, {"comp": "", "tyres": true, "fuel": true, "driver": true}]
+var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1}]
 var _pits_seen: Array = [0, 0]
 var _seen_seq := -1
 
@@ -298,7 +298,18 @@ func _build_pit(pg: VBoxContainer) -> void:
 	var wr2 = K.hbox(4)
 	_w_opts.add_child(wr2)
 	_w_fuel_btns = _seg(wr2, [["yes", "급유"], ["no", "급유 안 함"]], _on_w_fuel, 13)
-	_w_drv_btns = _seg(wr2, [["no", "드라이버 유지"], ["yes", "교대"]], _on_w_drv, 13)
+	# 다음 스틴트 드라이버: 크루 3명 중 직접 고른다 (지금 운전 중인 사람 = 유지)
+	var wr3 = K.hbox(4)
+	_w_opts.add_child(wr3)
+	_w_drv_btns = []
+	for i in 3:
+		var db = K.btn("", 12)
+		db.toggle_mode = true
+		db.custom_minimum_size = Vector2(0, 54)
+		db.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		db.pressed.connect(_on_w_drv.bind(i))
+		wr3.add_child(db)
+		_w_drv_btns.append(db)
 	# 타이어 선택 (F1 5종 / WEC 4종)
 	var tr = K.hbox(4)
 	pg.add_child(tr)
@@ -615,11 +626,37 @@ func _refresh_pit(c) -> void:
 		_w_fuel_fill.anchor_right = clampf(c.fuel / RS.TANK, 0.0, 1.0)
 		_press(_w_tyre_btns, [["yes"], ["no"]], "yes" if d["tyres"] else "no")
 		_press(_w_fuel_btns, [["yes"], ["no"]], "yes" if d["fuel"] else "no")
-		# 피트를 한 번 마치면 다음 피트는 다시 기본값(교대)으로
+		# 피트를 한 번 마치면 다음 피트는 다시 기본값(추천 드라이버로 교대)으로
 		if c.pits != int(_pits_seen[sel]):
 			_pits_seen[sel] = c.pits
 			d["driver"] = true
-		_press(_w_drv_btns, [["no"], ["yes"]], "yes" if d["driver"] else "no")
+			d["drv"] = -1
+		var rec_d: int = sim.next_driver(c) if c.drivers.size() >= 2 else c.drv
+		if bool(d["driver"]) and (int(d["drv"]) < 0 or int(d["drv"]) == c.drv or sim.drv_block(c, int(d["drv"])) != ""):
+			d["drv"] = rec_d
+		var target: int = int(d["drv"]) if bool(d["driver"]) else c.drv
+		var md_g: String = String(sim.min_drive["grade"]) if sim.min_drive != null else ""
+		for i in _w_drv_btns.size():
+			var db: Button = _w_drv_btns[i]
+			db.visible = i < c.drivers.size()
+			if not db.visible:
+				continue
+			var dd: Dictionary = c.drivers[i]
+			var gr: String = String(dd.get("grade", "-"))
+			var dn: String = String(dd["name"])
+			var short_n: String = dn.substr(dn.find(" ") + 1) if dn.find(". ") == 1 else dn
+			var laps_i: int = int(c.drv_laps[i]) if i < c.drv_laps.size() else 0
+			var line2 := "%d랩 · 피로 %d%%" % [laps_i, int(round(sim.fatigue(c, i) * 100))]
+			var short_i: int = sim.drv_short(c, i)
+			if short_i > 0:
+				line2 += " · 의무 %d랩 남음" % short_i
+			elif md_g != "" and gr == md_g:
+				line2 += " · 의무 충족"
+			var blk: String = sim.drv_block(c, i) if i != c.drv else ""
+			var head: String = ("유지 · " if i == c.drv else ("추천 · " if i == rec_d else "")) + "%s %s" % [short_n, RS.GRADE_KO.get(gr, gr)]
+			db.text = "%s\n%s" % [head, ("🔒 " + blk) if blk != "" else line2]
+			db.disabled = blk != ""
+			db.set_pressed_no_signal(i == target)
 		c.auto_swap = bool(d["driver"])
 	# 상태줄 · 확정/철수
 	var booked: bool = c.pit_req != "" or c.boxing != null
@@ -632,7 +669,9 @@ func _refresh_pit(c) -> void:
 	elif booked:
 		var what: String = RS.TYRE_KO[c.pit_req] if c.pit_req != "" else RS.TYRE_KO[c.boxing["comp"]]
 		if c.wec_req != null:
-			what = ("%s 교체" % what if c.wec_req["tyres"] else "타이어 유지") + (" + 급유" if c.wec_req["fuel"] else "") + (" + 교대" if c.wec_req["driver"] else "")
+			var wq: Dictionary = c.wec_req
+			var to_d: int = int(wq.get("drv", -1))
+			what = ("%s 교체" % what if wq["tyres"] else "타이어 유지") + (" + 급유" if wq["fuel"] else "") + ((" + %s 교대" % c.drivers[to_d]["name"]) if (wq["driver"] and to_d >= 0 and to_d < c.drivers.size()) else (" + 교대" if wq["driver"] else ""))
 		st = "[color=#22c55e]✅ 크루 대기 (CREW OUT) · 이번 랩 %s[/color]" % what
 	else:
 		var sets_txt := ""
@@ -818,8 +857,12 @@ func _on_w_fuel(v: String) -> void:
 	refresh()
 
 
-func _on_w_drv(v: String) -> void:
-	draft[sel]["driver"] = v == "yes"
+func _on_w_drv(i: int) -> void:
+	var c = car()
+	if c == null:
+		return
+	draft[sel]["driver"] = i != c.drv
+	draft[sel]["drv"] = i if i != c.drv else -1
 	refresh()
 
 
@@ -829,7 +872,7 @@ func _on_confirm() -> void:
 		return
 	var d: Dictionary = draft[sel]
 	if sim.is_wec():
-		sim.request_pit_wec(c, String(d["comp"]), bool(d["tyres"]), bool(d["fuel"]), bool(d["driver"]))
+		sim.request_pit_wec(c, String(d["comp"]), bool(d["tyres"]), bool(d["fuel"]), bool(d["driver"]), int(d.get("drv", -1)))
 	else:
 		sim.request_pit(c, String(d["comp"]))
 	refresh()
