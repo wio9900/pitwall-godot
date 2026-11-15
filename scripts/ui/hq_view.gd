@@ -888,7 +888,12 @@ func _tab_league() -> void:
 	var cd = K.card(_body, "시즌 %d 드라이버 순위" % int(h["season"]))
 	var drows: Array = []
 	for r in cr.driver_standings():
-		drows.append({"name": "%s  ·  %s" % [r["name"], r["team"]], "color": r["color"], "pts": r["pts"], "mine": r["mine"]})
+		var nm: String = "%s  ·  %s" % [r["name"], r["team"]]
+		if r.has("crew"):
+			nm = "%s  ·  %s" % [r["name"], r["crew"]]
+		elif String(r["name"]).begins_with(String(r["team"])):
+			nm = String(r["name"]) # 예전 저장: 다음 레이스부터 드라이버 조가 붙는다
+		drows.append({"name": nm, "color": r["color"], "pts": r["pts"], "mine": r["mine"]})
 	if drows.is_empty():
 		_txt(cd, "[color=#8b98a5]아직 레이스가 없어요.[/color]", 14)
 	else:

@@ -1735,7 +1735,13 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		var nw := "M" if want == "slick" else "W"
 		var lose: float = weather_pen(c.comp, wet) - weather_pen(nw, wet)
 		weather = lose * uni(1.8, 4.5) > wec_stop_time(c, true, false) * 0.75
-	if not need_fuel and not worn_out and not early and not weather:
+	# 주행 한도 직전(이번 랩을 마치면 한도): 연료가 남아도 들어와서 교대 — SC 로 스틴트가 길어지면 생기던 1랩 초과(AI 2%) 방지
+	var drv_due := false
+	if c.drivers.size() >= 2 and left >= 1:
+		var lim_c: Dictionary = drive_limits()
+		var tot_c: int = int(c.drv_laps[c.drv]) if c.drv < c.drv_laps.size() else 0
+		drv_due = drive_in_window(c, c.drv) + 1 >= int(lim_c["max_win"]) or tot_c + 1 >= int(lim_c["max_total"])
+	if not need_fuel and not worn_out and not early and not weather and not drv_due:
 		return null
 	var tyre_due: bool = c.stint_tyre + 1 >= c.tyre_every or c.wear >= 0.52 or worn_out
 	# 세트 제한: 남은 스틴트에 비해 새 세트가 모자라면 마모가 심하지 않은 한 한 스틴트 더 탄다
@@ -1747,7 +1753,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		elif short_sets and c.wear < 0.45 and not worn_out:
 			tyre_due = false
 	var tyres: bool = tyre_due or wrong
-	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c)
+	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c) or drv_due
 	# 하위 클래스 최소 주행(브론즈 등): 모자라면 늦지 않게 그 드라이버로 바꾸고, 채울 때까지 내리지 않는다
 	# (예전엔 순서대로만 돌려서 짧은 레이스에서 AI 가 거의 다 60초 페널티를 받았음)
 	# 르망의 드라이버별 최소 주행(각자 6시간 분량)도 같이: 다른 드라이버들이 채워야 할 랩이 남은 랩에 가까워지면 교대
@@ -1810,11 +1816,12 @@ func _drive_lap(c) -> void:
 	var over: bool = inw > int(lim["max_win"]) or tot > int(lim["max_total"])
 	if over and c.drive_warned != c.drv + 100:
 		c.drive_warned = c.drv + 100
-		c.time_pen += 60.0
 		_tally("drive_viol")
+		# 페널티 기록(pen_log)에 남겨야 차 정보 창·결과·복기에 사유가 나온다
+		var why: String = ("%s 6시간 구간 주행 초과 (%d/%d랩)" % [c.name, inw, int(lim["max_win"])]) if inw > int(lim["max_win"]) else ("%s 총 주행 초과 (%d/%d랩)" % [c.name, tot, int(lim["max_total"])])
+		add_penalty(c, 60.0, why)
 		if c.mine:
 			say(c, "주행 시간 규정 위반 (%s) → 60초 페널티" % c.name)
-		event("%s %s 주행 시간 초과 → 60초 페널티" % [name_of(c), c.name], "bad")
 	elif c.mine and not over and c.drive_warned != c.drv and (inw + 1 >= int(lim["max_win"]) or tot + 1 >= int(lim["max_total"])):
 		c.drive_warned = c.drv
 		say(c, "%s 주행 시간 한도 임박! 다음 피트에서 드라이버 교대하세요" % c.name)

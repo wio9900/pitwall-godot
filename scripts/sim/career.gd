@@ -2286,6 +2286,12 @@ func _track_season(classified: Array, mine: Array, pts_table: Array, mult: int, 
 			dp[k] = {"name": k, "team": c.team, "color": "#" + c.color.to_html(false), "pts": 0, "wins": 0, "mine": c.mine}
 		dp[k]["pts"] = int(dp[k]["pts"]) + pv
 		dp[k]["team"] = c.team
+		if is_wec() and "drivers" in c and c.drivers.size() > 0:
+			# WEC 는 차 한 대를 여럿이 탄다 → 순위표에 드라이버 조(성만)를 보여준다 (팀 이름 반복 대신)
+			var sn: PackedStringArray = []
+			for d in c.drivers:
+				sn.append(String(d.get("name", "")).get_slice(" ", String(d.get("name", "")).get_slice_count(" ") - 1))
+			dp[k]["crew"] = " / ".join(sn)
 		if i == 0 and pts_table == POINTS:
 			dp[k]["wins"] = int(dp[k]["wins"]) + 1
 	if pts_table != POINTS:
