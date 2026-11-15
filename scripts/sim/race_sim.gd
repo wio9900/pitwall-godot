@@ -912,7 +912,10 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var wear_rate = true_wear_rate(c.comp) * float(CIRC["wear"]) * (WEC_WEAR if is_wec() else WEAR_SCALE / laps)
 	var lift_wear = 0.80 if c.instr == "lift" else (0.92 if c.instr == "hold" else 1.0)
 	var lift_fuel = 0.86 if c.instr == "lift" else 1.0
-	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
+	# 연료 무게: 탱크가 가득한 초반엔 타이어가 더 닳고(×1.08) 가벼워질수록 덜 닳는다(×0.92). 레이스 평균은 거의 ×1.0
+	var fuel_full: float = TANK if is_wec() else laps * FPL
+	var fuel_wear: float = 0.92 + 0.16 * clampf(c.fuel / maxf(1.0, fuel_full), 0.0, 1.0)
+	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * fuel_wear * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
 	if is_wec():
 		c.fuel -= FPL * sh * wec_fuel_mult(c) * lift_fuel
 	else:
@@ -2686,7 +2689,13 @@ func next_driver(c) -> int:
 			var tot: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
 			if pass_i == 0 and (drive_in_window(c, di) + more > int(lim["max_win"]) or tot + more > int(lim["max_total"])):
 				continue
-			var sc_d: float = float(c.drivers[di].get("speed", 0.8)) - 0.05 * fatigue(c, di)
+			var dd: Dictionary = c.drivers[di]
+			var sc_d: float = float(dd.get("speed", 0.8)) - 0.05 * fatigue(c, di)
+			# 밤엔 실수 적은(안정성) 드라이버, 비가 오면 웻에 강한 드라이버를 더 쳐준다
+			if night:
+				sc_d += (float(dd.get("cons", 0.8)) - 0.8) * 0.3
+			if wet > 0.2:
+				sc_d += (float(dd.get("wet", 0.8)) - 0.8) * 0.5 * wet
 			if sc_d > ps:
 				ps = sc_d
 				pick = di
