@@ -47,6 +47,9 @@ const WEC_COLD_TT := {"S": 0.30, "M": 0.24, "H": 0.17, "I": 0.30, "W": 0.32} # �
 const WPIT := {"lane": 30.0, "fuel": 30.0, "tyres": 12.0, "driver": 3.0}
 # 급유 시간 = 고정(호스 연결) 20% + 넣는 양에 비례 80%. FUEL_REF = 예전 '항상 가득' 시절 평균 주유량(탱크 대비, 5서킷 3105회 측정 0.90) → 평균 정차 시간이 예전과 같게
 const FUEL_FIX := 0.2
+# 연료 무게 → 랩타임 (연료 1단위당 초/랩). F1 은 원작 0.03. WEC 는 가득 찬 탱크가 랩당 약 +1.0초가 되게 (실제 ~0.03초/kg/랩, 스틴트 연료 수십 kg)
+# — 예전 0.03 이면 가득 vs 빈 탱크 0.26초라 급유량 선택이 체감되지 않았다
+const FUEL_K_WEC := 1.0 / (5.45 * 1.6)
 const FUEL_REF := 0.90
 const WEC_FUEL_KO := {"lean": "세이브", "std": "표준", "rich": "리치"}
 const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
@@ -786,6 +789,10 @@ func wec_stop_time(c, tyres: bool, driver: bool, fuel: bool = true, fill: float 
 	return (lane_loss + work) * scf
 
 
+func fuel_k() -> float:
+	return FUEL_K_WEC if is_wec() else 0.03
+
+
 ## 이번 피트에서 넣을 연료 (목표 = 탱크 × fill, 이미 그보다 많으면 0)
 func fuel_add(c, fill: float) -> float:
 	return maxf(0.0, TANK * clampf(fill, 0.0, 1.0) - maxf(0.0, c.fuel))
@@ -832,7 +839,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var t = base * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"] * spd)
 	var evo_bonus = -0.65 * track_evo * (1.0 - w)
 	var ws := wsc()
-	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * 0.03 + evo_bonus) * sh * ws
+	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * fuel_k() + evo_bonus) * sh * ws
 	t += setup_sec(c, c.sec, w)
 	var sx: Dictionary = setup_extra(c)
 	t += float(sx["dt"]) * sh

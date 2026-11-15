@@ -21,7 +21,7 @@ var sim = null
 var sel := 0
 var tab := "drive"
 ## 피트 설정 초안 (WEC 드라이버는 기본 '교대' — 주행 시간 규정 때문에 보통 교대가 맞다)
-var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "full", "fill": 1.0}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "full", "fill": 1.0}]
+var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "yes", "fill": 1.0}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "yes", "fill": 1.0}]
 var _pits_seen: Array = [0, 0]
 var _seen_seq := -1
 
@@ -299,7 +299,7 @@ func _build_pit(pg: VBoxContainer) -> void:
 	_w_tyre_btns = _seg(wr, [["yes", "타이어 교체"], ["no", "타이어 유지"]], _on_w_tyres, 13)
 	var wr2 = K.hbox(4)
 	_w_opts.add_child(wr2)
-	_w_fuel_btns = _seg(wr2, [["full", "가득"], ["finish", "완주까지"], ["none", "급유 안 함"]], _on_w_fuel, 13)
+	_w_fuel_btns = _seg(wr2, [["yes", "급유 하기"], ["none", "급유 안 함"]], _on_w_fuel, 13)
 	# 급유량 직접 조절: 급유 후 연료(탱크 대비). 적게 넣으면 정차가 짧고 차가 가벼워 빠르지만 일찍 다시 들어와야 한다
 	_w_fuel_sl = HSlider.new()
 	_w_fuel_sl.min_value = 0.0
@@ -415,7 +415,7 @@ func reset_for(sim_) -> void:
 		d["comp"] = ""
 		d["tyres"] = true
 		d["fuel"] = true
-		d["fuel_pick"] = "full"
+		d["fuel_pick"] = "yes"
 		d["fill"] = 1.0
 		d["driver"] = true
 	_pits_seen = [0, 0]
@@ -644,30 +644,36 @@ func _refresh_pit(c) -> void:
 	if wec:
 		_w_fuel_fill.anchor_right = clampf(c.fuel / RS.TANK, 0.0, 1.0)
 		_press(_w_tyre_btns, [["yes"], ["no"]], "yes" if d["tyres"] else "no")
-		# 급유: 가득 / 완주까지(남은 거리에 맞춰 계속 다시 계산) / 안 함 / 슬라이더로 직접
-		var pick: String = String(d.get("fuel_pick", "full"))
-		var fill: float = float(d.get("fill", 1.0))
-		if pick == "full":
-			fill = 1.0
-		elif pick == "finish":
-			fill = sim.fill_to_finish(c)
-		elif pick == "none":
-			fill = 0.0
+		# 급유: 하기(양은 슬라이더, 기본 가득) / 안 함. 얼마나 넣을지는 플레이어 판단 — 대신 손익을 숫자로 보여준다
+		var pick: String = "none" if String(d.get("fuel_pick", "yes")) == "none" else "yes"
+		var fill: float = 0.0 if pick == "none" else float(d.get("fill", 1.0))
 		d["fill"] = fill
-		d["fuel"] = pick != "none" and sim.fuel_add(c, fill) > 0.0
-		_press(_w_fuel_btns, [["full"], ["finish"], ["none"]], pick)
+		d["fuel"] = pick == "yes" and sim.fuel_add(c, fill) > 0.0
+		_press(_w_fuel_btns, [["yes"], ["none"]], pick)
 		_w_fuel_sl.set_value_no_signal(fill)
+		_w_fuel_sl.editable = pick == "yes"
 		var burn: float = maxf(0.01, sim._wec_burn(c, c.fuel_mode))
 		var need_l: float = sim.laps_to_go(c)
 		var after: float = maxf(c.fuel, RS.TANK * fill) / burn
-		var col: String = "#ef4444" if after < minf(need_l, 1.5) else ("#22c55e" if pick == "finish" else "#e6edf3")
-		_w_fuel_txt.text = "급유 후 [b][color=%s]%.1f랩[/color][/b] 주행 · 지금 %.1f랩 · 가득 %.1f랩 · 체커까지 약 %.1f랩" % [col, after, c.fuel / burn, RS.TANK / burn, need_l]
+		var pit_l: int = c.lap + 1
+		var col: String = "#ef4444" if after < minf(need_l, 1.5) else "#e6edf3"
+		var t1: String = "급유 후 [b][color=%s]%.1f랩[/color][/b] 주행 → 다음 피트 약 [b]L%d[/b] (가득이면 L%d) · 체커까지 약 %.1f랩" % [col, after, pit_l + int(after), pit_l + int(RS.TANK / burn), need_l]
+		var full_after: float = maxf(c.fuel, RS.TANK)
+		var my_after: float = maxf(c.fuel, RS.TANK * fill)
+		if pick == "yes" and my_after < full_after - 0.05:
+			var stop_gain: float = sim.wec_stop_time(c, bool(d["tyres"]), bool(d["driver"]), true, 1.0) - sim.wec_stop_time(c, bool(d["tyres"]), bool(d["driver"]), true, fill)
+			var lap_gain: float = (full_after - my_after) * sim.fuel_k()
+			t1 += "\n[color=#22c55e]가득 대비: 정차 −%.1f초 · 피트 아웃 직후 랩당 −%.2f초[/color] [color=#8b98a5](대신 %d랩 일찍 다시 들어와요)[/color]" % [stop_gain, lap_gain, int(RS.TANK / burn) - int(after)]
+		elif pick == "yes":
+			t1 += "\n[color=#8b98a5]가득: 연료 무게로 피트 아웃 직후 랩당 약 +%.1f초 — 스틴트 끝으로 갈수록 가벼워져요[/color]" % (full_after * sim.fuel_k())
+		_w_fuel_txt.text = t1
 		# 피트를 한 번 마치면 다음 피트는 다시 기본값(추천 드라이버로 교대)으로
 		if c.pits != int(_pits_seen[sel]):
 			_pits_seen[sel] = c.pits
 			d["driver"] = true
 			d["drv"] = -1
-			d["fuel_pick"] = "full"
+			d["fuel_pick"] = "yes"
+			d["fill"] = 1.0
 		var rec_d: int = sim.next_driver(c) if c.drivers.size() >= 2 else c.drv
 		var rec_why := ""
 		if rec_d != c.drv:
@@ -915,11 +921,13 @@ func _on_w_tyres(v: String) -> void:
 
 func _on_w_fuel(v: String) -> void:
 	draft[sel]["fuel_pick"] = v
+	if v == "yes" and float(draft[sel].get("fill", 1.0)) <= 0.001:
+		draft[sel]["fill"] = 1.0
 	refresh()
 
 
 func _on_w_fuel_sl(v: float) -> void:
-	draft[sel]["fuel_pick"] = "custom" if v > 0.001 else "none"
+	draft[sel]["fuel_pick"] = "yes" if v > 0.001 else "none"
 	draft[sel]["fill"] = v
 	refresh()
 
