@@ -203,12 +203,25 @@ func _render_practice() -> void:
 	tr.text = _trait(c)
 	card.add_child(tr)
 	var ed: bool = anim == null
-	_setup_slider(card, c, "wing", ed)
-	card.add_child(K.label("타이어 공기압", 14, K.DIM))
-	K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, anim == null)
-	card.add_child(K.label("연료 탑재", 14, K.DIM))
-	K.seg(card, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, anim == null)
-	# 세부 셋업
+	# ── 버튼으로 고르는 것끼리 ──
+	_section(card, "공기압 · 연료")
+	var bg = GridContainer.new()
+	bg.columns = 2 if get_viewport_rect().size.x >= 900.0 else 1
+	bg.add_theme_constant_override("h_separation", 10)
+	bg.add_theme_constant_override("v_separation", 6)
+	card.add_child(bg)
+	var pv = K.vbox(4)
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bg.add_child(pv)
+	pv.add_child(K.label("타이어 공기압", 14, K.DIM))
+	K.seg(pv, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, ed)
+	var fv = K.vbox(4)
+	fv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bg.add_child(fv)
+	fv.add_child(K.label("연료 탑재", 14, K.DIM))
+	K.seg(fv, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, ed)
+	# ── 슬라이더끼리 ──
+	_section(card, "셋업 슬라이더")
 	var ct: Dictionary = sim.circ_traits()
 	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
 	var hint := []
@@ -216,9 +229,9 @@ func _render_practice() -> void:
 	hint.append("코너 탈출 트랙션이 중요해요" if ct["trac"] > 0.3 else ("긴 직선·고속 구간 위주" if ct["trac"] < -0.3 else "트랙션 비중 보통"))
 	hint.append("%s는 브레이킹이 공격적이에요" % c.name if ag > 0.3 else ("%s는 부드럽게 브레이킹해요" % c.name if ag < -0.3 else "%s의 브레이킹은 무난해요" % c.name))
 	var dh = K.rtl(13)
-	dh.text = "[color=#8b98a5]세부 셋업 · 서킷: %s[/color]" % " · ".join(hint)
+	dh.text = "[color=#8b98a5]서킷: %s[/color]" % " · ".join(hint)
 	card.add_child(dh)
-	for key in ["susp", "bbias", "diff"]:
+	for key in ["wing", "susp", "bbias", "diff"]:
 		_setup_slider(card, c, key, ed)
 	var eb = K.btn("🔧 엔지니어 추천값으로 맞추기 (%s)" % _eng_grade(), 14, _on_engineer)
 	eb.disabled = not ed
@@ -623,6 +636,7 @@ func _on_press(v, slot: int) -> void:
 ## 셋업 슬라이더 한 줄: 이름·값 + 추천 범위 띠 + 슬라이더
 const SET_FMT := {"wing": "W %.1f", "susp": "%.1f", "bbias": "앞 %.1f%%", "diff": "%d%%"}
 const SET_END := {"wing": ["눕힘 (직선)", "세움 (코너)"], "susp": ["부드럽게", "단단하게"], "bbias": ["뒤쪽", "앞쪽"], "diff": ["열림", "잠김"]}
+const SET_END_SHORT := {"wing": ["직선", "코너"]} # 좁은 화면(세로 폰)에서 줄바꿈 안 되게
 
 
 func _setup_val(c, key: String) -> float:
@@ -640,28 +654,56 @@ func _setup_label(c, key: String) -> String:
 
 
 func _setup_slider(card: VBoxContainer, c, key: String, ed: bool) -> void:
-	var lab = K.rtl(14)
+	# 한 항목 = 제목 줄 + [왼쪽 뜻 | 추천 띠·슬라이더 | 오른쪽 뜻] — 양끝 글자가 다음 항목에 붙어 보이지 않게 같은 줄 양옆에
+	var blk = K.vbox(2)
+	card.add_child(blk)
+	var lab = K.rtl(15)
 	lab.text = _setup_label(c, key)
-	card.add_child(lab)
+	blk.add_child(lab)
+	var row = K.hbox(8)
+	blk.add_child(row)
+	var narrow: bool = get_viewport_rect().size.x < 900.0
+	var end_w: float = 64.0 if narrow else 92.0
+	var ends: Array = SET_END_SHORT.get(key, SET_END[key]) if narrow else SET_END[key]
+	var l0 = K.label(ends[0], 14, K.INK)
+	l0.custom_minimum_size = Vector2(end_w, 0)
+	l0.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l0.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	l0.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(l0)
+	var mid = K.vbox(0)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
 	var r: Array = wk._span(key)
 	var bar = BandBar.new()
 	var lh: Array = wk.band_lohi(c.slot, key)
 	bar.lo = (float(lh[0]) - float(r[0])) / (float(r[1]) - float(r[0]))
 	bar.hi = (float(lh[1]) - float(r[0])) / (float(r[1]) - float(r[0]))
-	card.add_child(bar)
+	mid.add_child(bar)
 	var sl = K.slider(float(r[0]), float(r[1]), {"wing": 0.1, "susp": 0.1, "bbias": 0.5, "diff": 1.0}[key], _setup_val(c, key), _on_setup_val.bind(key, lab), ed)
-	card.add_child(sl)
-	# 양 끝 설명 (띠·슬라이더와 같은 폭이 되도록 슬라이더 아래 한 줄로)
-	var row = K.hbox(6)
-	card.add_child(row)
-	var l0 = K.label(SET_END[key][0], 12, K.DIM)
-	l0.autowrap_mode = TextServer.AUTOWRAP_OFF
-	l0.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(l0)
-	var l1 = K.label(SET_END[key][1], 12, K.DIM)
-	l1.autowrap_mode = TextServer.AUTOWRAP_OFF
-	l1.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mid.add_child(sl)
+	var l1 = K.label(ends[1], 14, K.INK)
+	l1.custom_minimum_size = Vector2(end_w, 0)
+	l1.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	l1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	row.add_child(l1)
+	# 항목 사이 간격
+	var gap = Control.new()
+	gap.custom_minimum_size = Vector2(0, 8)
+	card.add_child(gap)
+
+
+## 카드 안 소제목 (버튼 묶음 · 슬라이더 묶음 구분)
+func _section(card: VBoxContainer, title: String) -> void:
+	var gap = Control.new()
+	gap.custom_minimum_size = Vector2(0, 4)
+	card.add_child(gap)
+	var t = K.label(title, 15, K.AMBER)
+	card.add_child(t)
+	var ln = ColorRect.new()
+	ln.color = Color(1, 1, 1, 0.08)
+	ln.custom_minimum_size = Vector2(0, 1)
+	card.add_child(ln)
 
 
 func _on_setup_val(v: float, key: String, lab) -> void:
