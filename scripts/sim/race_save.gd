@@ -103,6 +103,10 @@ static func unpack(data: Dictionary):
 	sim.cars = cars
 	for n in s:
 		sim.set(n, _dec(s[n], by_id))
+	# 예전 버그(주말 연습에서 WEC 차에 F1 식 연료 탑재)로 탱크보다 많이 실린 저장 → 탱크로 맞춘다
+	if sim.is_wec():
+		for c in sim.cars:
+			c.fuel = minf(float(c.fuel), sim.TANK)
 	sim.rng.seed = int(data["rng_seed"])
 	sim.rng.state = int(data["rng_state"])
 	return sim

@@ -2928,6 +2928,10 @@ func fuel_laps(c) -> float:
 ## 주말 모드면 내 차 출발 타이어 세트를 소모한다(예선 최종 세션 진출 차는 예선 타이어 그대로).
 func prepare_start() -> void:
 	cars.sort_custom(func(a, b): return a.grid < b.grid)
+	# WEC 는 늘 가득(한 탱크)으로 출발 — 어떤 경로로든 탱크보다 많이 실리지 않게
+	if is_wec():
+		for c in cars:
+			c.fuel = minf(c.fuel, TANK)
 	# 그리드 강등 페널티 (파워유닛 교체 등)
 	# 강등 차를 모두 빼고, 목표 칸(원래 칸 + 강등) 앞쪽부터 다시 넣는다 → 여러 대가 동시에 강등돼도 서로 밀어주지 않는다
 	var pen_cars: Array = []

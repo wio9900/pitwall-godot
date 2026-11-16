@@ -152,6 +152,9 @@ func set_detail(slot: int, key: String, v: float) -> void:
 
 func set_fuel_load(slot: int, f: String) -> void:
 	var c = my_cars()[slot]
+	# WEC 는 급유 레이스라 '레이스 전체 연료 탑재' 개념이 없다 (출발은 늘 가득 = TANK) — F1 식 계산을 하면 탱크의 몇 배가 실렸다
+	if sim.is_wec():
+		return
 	c.fuel_load = f
 	setups[slot]["fuel_load"] = f
 	c.fuel = sim.laps * RS.FPL * (1.0 + float(RS.FUEL_LOAD[f])) * c.fuel_burn_rate

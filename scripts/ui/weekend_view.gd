@@ -204,7 +204,7 @@ func _render_practice() -> void:
 	card.add_child(tr)
 	var ed: bool = anim == null
 	# ── 버튼으로 고르는 것끼리 ──
-	_section(card, "공기압 · 연료")
+	_section(card, "공기압" if sim.is_wec() else "공기압 · 연료")
 	var bg = GridContainer.new()
 	bg.columns = 2 if get_viewport_rect().size.x >= 900.0 else 1
 	bg.add_theme_constant_override("h_separation", 10)
@@ -215,11 +215,12 @@ func _render_practice() -> void:
 	bg.add_child(pv)
 	pv.add_child(K.label("타이어 공기압", 14, K.DIM))
 	K.seg(pv, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, ed)
-	var fv = K.vbox(4)
-	fv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bg.add_child(fv)
-	fv.add_child(K.label("연료 탑재", 14, K.DIM))
-	K.seg(fv, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, ed)
+	if not sim.is_wec(): # WEC 는 급유 레이스 — 출발 연료는 늘 가득, 연료량은 레이스 중 피트에서 정한다
+		var fv = K.vbox(4)
+		fv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bg.add_child(fv)
+		fv.add_child(K.label("연료 탑재", 14, K.DIM))
+		K.seg(fv, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, ed)
 	# ── 슬라이더끼리 ──
 	_section(card, "셋업 슬라이더")
 	var ct: Dictionary = sim.circ_traits()
