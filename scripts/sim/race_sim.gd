@@ -6,6 +6,7 @@ extends RefCounted
 ## sec_end에 예약하고, advance()가 가장 먼저 끝나는 차부터 순서대로 처리한다(이벤트 큐 방식).
 
 const CarS = preload("res://scripts/sim/car.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const DB = preload("res://scripts/data/game_db.gd")
 const TraitsS = preload("res://scripts/sim/traits.gd")
 
@@ -2962,6 +2963,7 @@ func fuel_laps(c) -> float:
 ## 주말 모드면 내 차 출발 타이어 세트를 소모한다(예선 최종 세션 진출 차는 예선 타이어 그대로).
 func prepare_start() -> void:
 	cars.sort_custom(func(a, b): return a.grid < b.grid)
+	BLog.add("레이스 시작 · %s · %s · %d랩%s · %d대 · 날씨 %.2f" % [CIRC.get("name", "?"), "WEC" if is_wec() else str(rules.get("fmt", "f1")), laps, (" (시간제 %.0f분)" % (time_limit / 60.0)) if timed else "", cars.size(), wet])
 	# WEC 는 늘 가득(한 탱크)으로 출발 — 어떤 경로로든 탱크보다 많이 실리지 않게
 	if is_wec():
 		for c in cars:

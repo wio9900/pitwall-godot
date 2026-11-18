@@ -4,6 +4,7 @@ extends SceneTree
 
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const WeekendS = preload("res://scripts/sim/weekend.gd")
+const BLogT = preload("res://scripts/sim/blog.gd")
 
 
 func _init() -> void:
@@ -49,5 +50,32 @@ func _init() -> void:
 			for c in mine:
 				mtxt += "%s 그리드P%d→%s 세트%s pen%.2f / " % [c.code, c.grid + 1, "DNF" if c.dnf != "" else "완주", c.tyre_sets, c.used_set_pen]
 			print("%-8s #%d | 완주=%s 폴=%s 우승=%s | 롱런 %.2f 오차±%d%% 연습남음%s | %s" % [key, n, ok, pole.code, res[0]["car"].code, r0.get("best", 0.0), int(wk.wear_est["err"] * 100), wk.practice_left, mtxt])
+	# WEC 예선: Q1 뒤 내 클래스 상위 8대만 하이퍼폴 (작업목록 #9), 이상 감지 기록(⚠)이 없어야 함
+	for key in ["spa", "lemans"]:
+		var ws = RaceSimS.new()
+		ws.new_race(key, 0, 20, "dry", ["M", "M"], 31)
+		var wkw = WeekendS.new()
+		wkw.setup(ws, 2)
+		wkw.auto_practice()
+		var warn0 := 0
+		for l in BLogT.lines:
+			if l.contains("⚠"):
+				warn0 += 1
+		wkw.start_quali()
+		var gq := 0
+		while not wkw.Q.get("stage_over", false) and not wkw.done_quali and gq < 5000:
+			wkw.q_advance(5.0)
+			gq += 1
+		var n2 := 0
+		for c in ws.cars:
+			if wkw._participant(c, 2):
+				n2 += 1
+		var warn1 := 0
+		for l in BLogT.lines:
+			if l.contains("⚠"):
+				warn1 += 1
+		print("   WEC 예선 %s: 하이퍼폴 진출 %d대 · 이상 감지 %d건" % [key, n2, warn1 - warn0])
+		if n2 != 8 or warn1 != warn0:
+			fails += 1
 	print("주말 테스트 실패 %d" % fails)
 	quit(1 if fails > 0 else 0)

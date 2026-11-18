@@ -20,6 +20,7 @@ const DebriefS = preload("res://scripts/ui/debrief.gd")
 const RivalS = preload("res://scripts/ui/rival_card.gd")
 const ST = preload("res://scripts/ui/settings.gd")
 const SettingsViewS = preload("res://scripts/ui/settings_view.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 const RecS = preload("res://scripts/sim/records.gd")
 const RecordsViewS = preload("res://scripts/ui/records_view.gd")
@@ -705,6 +706,7 @@ func _autosave() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		_autosave()
+		BLog.save()
 
 
 ## 레이스 중 나가기: 저장하고 메뉴(커리어는 본부)로. 메뉴의 "이어하기"로 돌아올 수 있다

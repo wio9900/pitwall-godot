@@ -5,6 +5,7 @@ extends RefCounted
 
 const DB = preload("res://scripts/data/game_db.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 
 const SAVE_PATH := "user://career_f1.json"
 const SAVE_VER := 1
@@ -1329,6 +1330,7 @@ func _regulation_reset(notes: Array) -> void:
 
 
 func _on_tier_change() -> void:
+	BLog.add("리그 변경 · 시즌 %d · %s tier %d" % [int(hq["season"]), "WEC" if is_wec() else "F", int(hq["tier"])])
 	# 신규 팀이 F1(1부)에 올라오면 기본 차를 그리드 최하위 팀 수준까지는 맞춘다 — 승격 직후엔 후미권, 개발로 올라가는 곡선
 	if not is_wec() and int(hq["tier"]) >= 3 and hq.get("entry", "") == "create":
 		var t: Dictionary = hq["teams"][my_team()]
@@ -2483,6 +2485,7 @@ func _season_end(notes: Array) -> void:
 	_ai_develop(1.0 / 3.0)
 	_cost_cap_audit(notes)
 	var ls: Dictionary = hq["last_season"]
+	BLog.add("시즌 %d 종료 · tier %d · %d위" % [int(hq["season"]), tier(), rank])
 	hq["season_log"].append({"season": hq["season"], "rank": rank, "cash": hq["cash"], "spent": hq["spent_cap"], "cap": hq["cost_cap_limit"], "tier": tier(),
 		"pts": ls["pts"], "champ": ls["champ"], "drv_champ": ls["drv_champ"], "wins": int(ls["stats"].get("wins", 0)), "podiums": int(ls["stats"].get("podiums", 0)),
 		"tier_name": ls.get("tier_name", ""), "series": ls.get("series", ""), "my_drv": int(ls.get("my_drv", 0)), "team": hq.get("team_name", "")})

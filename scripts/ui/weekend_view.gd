@@ -366,7 +366,14 @@ func _render_quali() -> void:
 	K.seg(hc, [["0", "⏸ 멈춤"], ["4", "1×"], ["20", "5×"], ["40", "10×"]], str(q_speed), _on_qspeed, 14)
 	if wk.Q["stage_over"]:
 		var oc = K.card(_side, "Q%d 종료" % st, K.AMBER)
-		oc.add_child(K.label("탈락: %s" % ", ".join(wk.Q.get("cut_names", PackedStringArray())), 15, K.INK))
+		# 누가 다음 세션에 가고 누가 그리드가 정해졌는지 분명히 (내 차 둘 다 탈락이면 "전부 확정"처럼 보이던 것)
+		var nx_name: String = "하이퍼폴" if sim.is_wec() else "Q%d" % (st + 1)
+		var my_line: PackedStringArray = []
+		for c in wk.my_cars():
+			my_line.append("%s %s" % [c.code, ("[color=#22c55e]%s 진출[/color]" % nx_name) if wk._participant(c, st + 1) else "[color=#8b98a5]탈락 · 그리드 확정[/color]"])
+		var oq = K.rtl(15)
+		oq.text = "%s 진출: 상위 %d대%s\n내 차: %s\n탈락(그리드 확정): %s" % [nx_name, wk._cut_n(), (" (%s 클래스)" % wk.main_cls()) if sim.is_wec() else "", " · ".join(my_line), ", ".join(wk.Q.get("cut_names", PackedStringArray()))]
+		oc.add_child(oq)
 		var nb = K.btn("다음 세션 시작 ▶", 18, _on_next_stage)
 		oc.add_child(nb)
 	# 내 차: 차고에 있으면 타이어·강도를 골라 내보내고, 아웃랩 중이면 포기할 수 있다

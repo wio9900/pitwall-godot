@@ -6,6 +6,7 @@ signal changed
 const K = preload("res://scripts/ui/kit.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const ST = preload("res://scripts/ui/settings.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 
 var _box: VBoxContainer
 var _panel: PanelContainer
@@ -78,9 +79,20 @@ func _render() -> void:
 	K.seg(_box, [["off", "숨기기"], ["on", "보이기"]], "on" if ST.get_v("show_fps") else "off", _on_fps, 15)
 	_box.add_child(K.label("글씨·버튼 크기", 15, K.DIM))
 	K.seg(_box, [["0.9", "작게"], ["1.0", "보통"], ["1.1", "크게"], ["1.2", "아주 크게"]], "%.1f" % float(ST.get_v("ui_scale")), _on_scale, 15)
+	_box.add_child(K.label("버그 기록 — 이상한 일이 생기면 복사해서 AI 채팅에 붙여넣기", 15, K.DIM))
+	var bl = K.btn("🐞 버그 기록 복사", 16)
+	bl.pressed.connect(_on_copy_log.bind(bl))
+	_box.add_child(bl)
 	var close = K.btn("닫기", 18, _on_close)
 	close.custom_minimum_size = Vector2(0, 46)
 	_box.add_child(close)
+
+
+func _on_copy_log(b: Button) -> void:
+	BLog.add("기록 복사")
+	BLog.save()
+	DisplayServer.clipboard_set(BLog.text())
+	b.text = "✓ 복사됨 — 채팅에 붙여넣기 하세요"
 
 
 func _on_vol(v: float, vl: Label) -> void:

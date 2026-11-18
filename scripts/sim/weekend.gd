@@ -4,6 +4,7 @@ extends RefCounted
 ## 레이스 시뮬레이션(race_sim)을 먼저 만든 뒤 그 차들을 가지고 연습·예선을 돌린다. 화면과 무관.
 
 const RS = preload("res://scripts/sim/race_sim.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const NS := 6
 const STINT := 5
 ## 예선 한 랩의 컴파운드 차이 (레이스용 COMP 보다 작다: 실제 예선에서 소프트-미디엄 약 0.5초).
@@ -375,6 +376,7 @@ func auto_practice() -> void:
 # ═════════ 예선 (원랩 어택, Q1→Q2→Q3) ═════════
 func start_quali() -> void:
 	Q = {"res": {}, "stage": 1, "max_stage": 2 if sim.is_wec() else (1 if single_quali() else 3), "eliminated": {}, "done": false, "auto": false, "ver": 0, "reds": 0}
+	BLog.add("예선 시작 · %s" % _q_snapshot())
 	_q_soft_used.clear()
 	for c in my_cars():
 		c.q3_locked = false
@@ -482,6 +484,15 @@ func _participant(c, st: int) -> bool:
 
 func _start_stage(st: int) -> void:
 	Q["stage"] = st
+	var ins := 0
+	for c in sim.cars:
+		if _participant(c, st):
+			ins += 1
+	for c in my_cars():
+		if st == 1 and not _participant(c, st):
+			BLog.warn("예선 Q1 시작부터 내 차 %s 가 탈락 상태 · %s" % [c.code, _q_snapshot()])
+	if ins == 0:
+		BLog.warn("예선 Q%d 참가 차 0대 · %s" % [st, _q_snapshot()])
 	Q["t"] = 0.0
 	Q["red_left"] = 0.0
 	Q["red_done"] = false
@@ -824,8 +835,27 @@ func _end_stage() -> void:
 		Q["eliminated"][ord[i].id] = true
 	Q["stage_over"] = true
 	Q["cut_names"] = out_names
+	var nxt := 0
+	for c in sim.cars:
+		if _participant(c, st + 1):
+			nxt += 1
+	if nxt == 0 or nxt > cut:
+		BLog.warn("예선 Q%d 뒤 다음 세션 진출 %d대 (정상 1~%d) · %s" % [st, nxt, cut, _q_snapshot()])
+	else:
+		BLog.add("Q%d 종료 · 진출 %d대 · 내 차 %s" % [st, nxt, ", ".join(PackedStringArray(my_cars().map(func(x): return "%s %s" % [x.code, "진출" if _participant(x, st + 1) else "탈락"])))])
 	_log("Q%d 종료 · 탈락: %s" % [st, ", ".join(out_names)])
 	Q["ver"] = int(Q["ver"]) + 1
+
+
+## 버그 기록용 예선 상태 한 줄: 서킷·형식·세션·내 클래스·클래스별 대수·탈락 수
+func _q_snapshot() -> String:
+	var cls := {}
+	for c in sim.cars:
+		cls[c.cls] = int(cls.get(c.cls, 0)) + 1
+	var my: PackedStringArray = []
+	for c in my_cars():
+		my.append("%s(%s)" % [c.code, c.cls])
+	return "%s · 형식 %s · Q%d/%d · 내 클래스 %s · 클래스별 %s · 탈락 %d대 · 내 차 %s" % [sim.CIRC.get("name", "?"), fmt(), int(Q.get("stage", 0)), int(Q.get("max_stage", 0)), main_cls(), str(cls), Q.get("eliminated", {}).size(), ", ".join(my)]
 
 
 ## 다음 세션 시작

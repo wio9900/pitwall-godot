@@ -6,6 +6,7 @@ extends RefCounted
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const CarS = preload("res://scripts/sim/car.gd")
 const DB = preload("res://scripts/data/game_db.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const PATH := "user://race_resume.bin"
 const VER := 1
 const SKIP := ["T", "CIRC", "rng", "cars", "_oc", "_oc_clock"]
@@ -129,6 +130,7 @@ static func save(sim, meta: Dictionary, extra_sim = null) -> void:
 static func load_save() -> Dictionary:
 	if not has_save():
 		return {}
+	BLog.add("레이스 이어하기 불러옴")
 	var f = FileAccess.open(PATH, FileAccess.READ)
 	if f == null:
 		return {}
