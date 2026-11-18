@@ -36,8 +36,10 @@ var _pages := {}
 # 주행
 var _d_head: RichTextLabel
 var _pace_btns: Array = []
+var _pace_fx: RichTextLabel
 var _d_instr_head: RichTextLabel
 var _instr_btns: Array = []
+var _instr_fx: RichTextLabel
 var _d_tyre_head: RichTextLabel
 var _temp_mark: ColorRect
 var _wear_fill: ColorRect
@@ -221,6 +223,24 @@ func _rt(parent: Control, fs := 14) -> RichTextLabel:
 	return r
 
 
+## 고른 페이스·지시의 장점/대가 한 줄
+func _fx_line(c, kind: String, key: String) -> String:
+	var fx: Dictionary = sim.mode_effects(c, kind, key)
+	var pros: Array = fx["pros"]
+	var cons: Array = fx["cons"]
+	var parts: PackedStringArray = []
+	if not bool(fx["active"]):
+		var wr: String = String(fx.get("wait_reason", ""))
+		parts.append("[color=#f59e0b][b][대기 중%s][/b][/color]" % ((" · " + wr) if wr != "" else ""))
+	if not pros.is_empty():
+		parts.append("[color=#22c55e]장점: %s[/color]" % " · ".join(PackedStringArray(pros)))
+	if not cons.is_empty():
+		parts.append("[color=#ef4444]대가: %s[/color]" % " · ".join(PackedStringArray(cons)))
+	if parts.is_empty():
+		return "[color=#8b98a5]기준 상태 (추가 득실 없음)[/color]"
+	return "  /  ".join(parts)
+
+
 func _build_prompt() -> void:
 	_prompt = PanelContainer.new()
 	_prompt.add_theme_stylebox_override("panel", _box(Color("#2a2410"), K.AMBER, 10))
@@ -238,8 +258,10 @@ func _build_prompt() -> void:
 func _build_drive(pg: VBoxContainer) -> void:
 	_d_head = _rt(pg, 14)
 	_pace_btns = _seg_row(pg, PACE_ITEMS, _on_pace)
+	_pace_fx = _rt(pg, 13)
 	_d_instr_head = _rt(pg, 14)
 	_instr_btns = _seg_row(pg, INSTR, _on_instr)
+	_instr_fx = _rt(pg, 13)
 	_d_tyre_head = _rt(pg, 14)
 	# 타이어 온도: 차가움(파랑) · 적정(초록) · 과열(빨강) 구간 위에 현재 위치 표시
 	var wrap = Control.new()
@@ -268,7 +290,6 @@ func _build_drive(pg: VBoxContainer) -> void:
 	_wear_fill = _meter(pg, K.GOOD, 6.0)
 	_d_hint = _rt(pg, 12)
 	_d_radio = _rt(pg, 14)
-
 
 func _build_pit(pg: VBoxContainer) -> void:
 	var pc = PanelContainer.new()
@@ -564,9 +585,18 @@ func _refresh_drive(c, ord: Array) -> void:
 	var fs := "🔥 존 진입" if fv >= 85 else ("⚠ 흔들림 (실수 주의)" if fv <= 55 else "안정적")
 	_d_head.text = "[color=#8b98a5]페이스%s · 집중력 %d%% (%s)[/color]   [b]앞 %s · 뒤 %s[/b]" % [(" · " + c.name) if sim.is_wec() else "", fv, fs, g[0], g[1]]
 	_press(_pace_btns, PACE_ITEMS, c.pace)
+	_pace_fx.text = _fx_line(c, "pace", c.pace)
 	var mech: String = ("[color=#ef4444]⚠ %s (리프트 앤 코스트로 식혀요)[/color]" % c.mech_trouble) if c.mech_trouble != "" else "[color=#8b98a5]기계 부하 %d%% (정상)[/color]" % int(round(c.mech_stress * 100))
 	_d_instr_head.text = "[color=#8b98a5]상황 지시[/color] · %s" % mech
+	for i in _instr_btns.size():
+		var ik: String = String(INSTR[i][0])
+		var base_lbl: String = String(INSTR[i][1])
+		var waiting: bool = (ik == "attack" or ik == "defend") and not sim.instr_active(c, ik)
+		var lbl: String = ("%s(대기)" % base_lbl) if waiting else base_lbl
+		if _instr_btns[i].text != lbl:
+			_instr_btns[i].text = lbl
 	_press(_instr_btns, INSTR, c.instr)
+	_instr_fx.text = _fx_line(c, "instr", c.instr)
 	var tt_txt := "차가움" if c.tt < 0.42 else ("과열" if c.tt > 0.8 else "적정")
 	_d_tyre_head.text = "[color=#8b98a5]타이어 온도 · 마모[/color]  [b]%s[/b] · %s %s [color=#8b98a5](소모 ×%.2f · 연비 ×%.2f)[/color]" % [tt_txt, RS.TYRE_KO[c.comp], _pct(c.wear), c.tyre_deg_rate, c.fuel_burn_rate]
 	_temp_mark.anchor_left = clampf(c.tt, 0.0, 1.0)
@@ -575,7 +605,6 @@ func _refresh_drive(c, ord: Array) -> void:
 	_wear_fill.color = K.BAD if c.wear > 0.7 else (K.WARN if c.wear > 0.45 else K.GOOD)
 	_d_hint.text = "[color=#8b98a5]%s[/color]" % ("리프트 앤 코스트(연비)는 브레이크·기어박스 과열을 식히고 연료를 아껴요." if sim.is_wec() else "공격은 빠르지만 타이어와 브레이크가 과열돼요. 기계 트러블 경고가 뜨면 '연비'(리프트 앤 코스트)로 식혀요.")
 	_d_radio.text = _radio_line(c)
-
 
 func _refresh_pit(c) -> void:
 	var wec: bool = sim.is_wec()
@@ -889,12 +918,14 @@ func _on_pace(v: String) -> void:
 	var c = car()
 	if c != null:
 		sim.set_pace(c, v)
+		refresh()
 
 
 func _on_instr(v: String) -> void:
 	var c = car()
 	if c != null:
 		sim.set_instr(c, v)
+		refresh()
 
 
 func _on_ers(v: String) -> void:

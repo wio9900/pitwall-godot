@@ -20,6 +20,7 @@ const SLICK := {"S": true, "M": true, "H": true}
 const TYRE_KO := {"S": "소프트", "M": "미디엄", "H": "하드", "I": "인터", "W": "웻"}
 const TYRE_HEX := {"S": "#ef4444", "M": "#facc15", "H": "#f1f5f9", "I": "#22c55e", "W": "#3b82f6"}
 const PACE := {"attack": [1.2, 1.35, 1.6, 0.78], "standard": [1.0, 1.0, 1.0, 0.62], "save": [0.7, 0.75, 0.6, 0.52]}
+const PACE_FUEL := {"attack": 1.06, "standard": 1.0, "save": 0.93} # 페이스별 연료 소모 배율
 const PACE_KO := {"attack": "공격", "standard": "표준", "save": "세이브"}
 const ERS := {"harvest": [0.40, 0.30], "balance": [0.0, 0.02], "deploy": [-0.60, -0.35]}
 const ERS_KO := {"harvest": "충전", "balance": "밸런스", "deploy": "오버테이크"}
@@ -969,7 +970,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	if is_wec():
 		c.fuel -= FPL * sh * wec_fuel_mult(c) * lift_fuel
 	else:
-		c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (2.0 - c.eng_eff) * (1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0))
+		c.fuel -= FPL * sh * float(fm[1]) * c.fuel_burn_rate * lift_fuel * (2.0 - c.eng_eff) * float(PACE_FUEL[c.pace])
 	return {"t": t, "crash": crash}
 
 
@@ -1690,6 +1691,20 @@ func _front_same_class(c) -> Variant:
 	return best
 
 
+func _behind_same_class(c) -> float:
+	var k: int = c.cross.size() - 1
+	if k <= 0:
+		return INF
+	var bg := INF
+	for o in cars:
+		if o == c or o.cls != c.cls or o.dnf != "" or o.cross.size() <= k - 1:
+			continue
+		var g: float = float(o.cross[k - 1]) - float(c.cross[k - 1])
+		if g > 0.0 and g < bg:
+			bg = g
+	return bg
+
+
 func _wec_burn(c, m: String) -> float:
 	return FPL * wec_fuel_mult(c, m)
 
@@ -1699,7 +1714,7 @@ func _wec_burn(c, m: String) -> float:
 ## 주행 페이스(공격 +6% · 세이브 -7%)는 그대로. 화면 표시·AI 판단·실제 소모가 모두 이 값을 쓴다
 func wec_fuel_mult(c, m: String = "") -> float:
 	var mode: String = c.fuel_mode if m == "" else m
-	var pace_m: float = 1.06 if c.pace == "attack" else (0.93 if c.pace == "save" else 1.0)
+	var pace_m: float = float(PACE_FUEL[c.pace])
 	return float(FUEL[mode][1]) * (1.0 + (c.fuel_burn_rate - 1.0) * 0.35) * (1.0 + (1.0 - c.eng_eff) * 0.35) * pace_m
 
 
@@ -3163,6 +3178,94 @@ func set_auto(c, on: bool) -> void:
 
 func set_instr(c, v: String) -> void:
 	c.instr = v
+
+
+## 조건부 지시가 지금 실제로 작동 중인지 확인 (false 면 화면에 '대기 중' 표시)
+func instr_active(c, key: String = "") -> bool:
+	var k: String = c.instr if key == "" else key
+	if not c.started or not c.is_running() or sc:
+		return k == "free"
+	match k:
+		"attack":
+			var f: Variant = _front_same_class(c)
+			return f != null and not is_pitting(f) and not is_pitting(c)
+		"defend":
+			return _behind_same_class(c) < 1.0
+	return true
+
+
+## 페이스(kind="pace") · 주행 지시(kind="instr")의 표준 대비 효과 요약 (UI 표시용)
+## shortcut: 지시 효과 글(마모 -8%·+0.32초 등)은 sector_time·schedule_next 식을 옮겨 적은 것, 그 식을 바꾸면 여기도 같이
+func mode_effects(c, kind: String, key: String) -> Dictionary:
+	var pros: Array = []
+	var cons: Array = []
+	var active := true
+	var wait_reason := ""
+	if kind == "pace":
+		var pc: Array = PACE.get(key, PACE["standard"])
+		var spd: float = float(pc[0])
+		var wear_m: float = float(pc[1])
+		var err_m: float = float(pc[2])
+		var dt: float = lap_base(c) * c.speed * float(K["drv_k"]) * (1.0 - spd)
+		var wear_pct: int = int(round((wear_m - 1.0) * 100.0))
+		var err_pct: int = int(round((err_m - 1.0) * 100.0))
+		var fuel_m: float = float(PACE_FUEL.get(key, 1.0))
+		var fuel_pct: int = int(round((fuel_m - 1.0) * 100.0))
+		if dt < -0.005:
+			pros.append("랩당 %.2f초" % dt)
+		elif dt > 0.005:
+			cons.append("랩당 +%.2f초" % dt)
+		if wear_pct < 0:
+			pros.append("마모 %d%%" % wear_pct)
+		elif wear_pct > 0:
+			cons.append("마모 +%d%%" % wear_pct)
+		if err_pct < 0:
+			pros.append("실수·사고 %d%%" % err_pct)
+		elif err_pct > 0:
+			cons.append("실수·사고 +%d%%" % err_pct)
+		if fuel_pct < 0:
+			pros.append("연료 %d%%" % fuel_pct)
+		elif fuel_pct > 0:
+			cons.append("연료 +%d%%" % fuel_pct)
+		if key == "attack":
+			cons.append("기계부하 ×3.6 · 고장 +30%")
+		elif key == "save":
+			pros.append("기계부하 감소")
+		else:
+			pros.append("집중력 회복(75% 미만 시 +1.5/랩)")
+	elif kind == "instr":
+		active = instr_active(c, key)
+		match key:
+			"free":
+				pros.append("상황 제약 없는 기본 주행")
+			"attack":
+				var ot_add: float = 0.08 * float(K["overtake_scale"]) * 100.0
+				pros.append("추월 확률 +%.1f%%p" % ot_add)
+				pros.append("타이어 목표 온도 +5%")
+				cons.append("실수 +20%")
+				cons.append("경합 접촉 +60%")
+				if not is_wec():
+					cons.append("트랙 리밋 +30%")
+				if not active:
+					wait_reason = "앞차 없음"
+			"defend":
+				var def_sub: float = 0.12 * float(K["overtake_scale"]) * 100.0
+				pros.append("상대 추월 확률 -%.1f%%p" % def_sub)
+				cons.append("랩당 +0.30초 (뒤차 1초 이내)")
+				cons.append("피추월 접촉 위험 +30%")
+				if not active:
+					wait_reason = "뒤차 1초 밖"
+			"hold":
+				pros.append("마모 -8%")
+				if not is_wec():
+					pros.append("더티 에어 손실 제거")
+				cons.append("추월 시도 안 함 (앞차와 1.0초 유지)")
+			"lift":
+				pros.append("마모 -20%")
+				pros.append("연료 -14%")
+				pros.append("기계부하 -14%/랩 · 타이어 냉각")
+				cons.append("랩당 +0.32초")
+	return {"pros": pros, "cons": cons, "active": active, "wait_reason": wait_reason}
 
 
 ## 계획 요약 문자열 (UI용): "L9 H → L15 M"
