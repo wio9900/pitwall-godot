@@ -591,7 +591,7 @@ func _refresh_drive(c, ord: Array) -> void:
 	for i in _instr_btns.size():
 		var ik: String = String(INSTR[i][0])
 		var base_lbl: String = String(INSTR[i][1])
-		var waiting: bool = (ik == "attack" or ik == "defend") and not sim.instr_active(c, ik)
+		var waiting: bool = (ik == "attack" or ik == "defend" or ik == "hold") and not sim.instr_active(c, ik)
 		var lbl: String = ("%s(대기)" % base_lbl) if waiting else base_lbl
 		if _instr_btns[i].text != lbl:
 			_instr_btns[i].text = lbl

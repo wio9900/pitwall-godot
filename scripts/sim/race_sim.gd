@@ -856,11 +856,17 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 			t -= 0.25 * w * sh * ws
 		if c.traits.has("closer") and laps > 0 and float(c.lap) >= float(laps) * 0.85:
 			t -= 0.12 * sh * ws
+	# 지시는 조건이 맞을 때만 효과·대가가 함께 붙는다 (공짜 선택 없음): 추월 = 앞차 1초 안, 유지 = 앞차 1.5초 안
+	var att_on: bool = c.instr == "attack" and gap_ahead != null and gap_ahead < 1.0
+	var hold_on: bool = c.instr == "hold" and gap_ahead != null and gap_ahead < 1.5
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
 	if not is_wec():
-		if gap_ahead != null and gap_ahead < K["dirty"] and c.instr != "hold":
-			t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
+		if gap_ahead != null and gap_ahead < K["dirty"]:
+			if c.instr == "hold":
+				t += (K["dirty"] - gap_ahead) * 0.6 * sh # 유지: 더티 에어를 피해 1초 간격까지 물러나는 만큼 손해
+			else:
+				t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
 		if has_ers():
 			var em: String = c.ers_mode
 			if em == "deploy" and c.ers <= 0.02:
@@ -899,7 +905,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		for i in poisson(lam_fast * sh):
 			t += uni(0.15, 0.6)
 	# 타이어 온도
-	var target = tt_target + (0.05 if c.instr == "attack" else 0.0) + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
+	var target = tt_target + (0.05 if att_on else 0.0) + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
@@ -916,9 +922,9 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var pressure = 1.5 if (not is_launch and gap_ahead != null and gap_ahead < 0.5) else 1.0
 	var p_err = 0.0
 	if not is_launch:
-		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet) * (0.7 if c.traits.has("rain") else 1.0)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if c.instr == "attack" else 1.0) * ((1.15 if c.traits.has("night") else 1.5) if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
+		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet) * (0.7 if c.traits.has("rain") else 1.0)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if att_on else 1.0) * ((1.15 if c.traits.has("night") else 1.5) if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
 	# 트랙 리밋: 연석 공략이 과하면 경고, 세 번째부터 5초 페널티 (F1, 그린 상황에서만)
-	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if c.instr == "attack" else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
+	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if att_on else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
 		c.tl_warn += 1
 		if c.tl_warn >= 3:
 			add_penalty(c, 5.0, "트랙 리밋 위반 %d회" % c.tl_warn)
@@ -961,7 +967,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	# 마모·연료
 	var over = 2.0 if (not SLICK.has(c.comp) and w < 0.2) else 1.0
 	var wear_rate = true_wear_rate(c.comp) * float(CIRC["wear"]) * (WEC_WEAR if is_wec() else WEAR_SCALE / laps)
-	var lift_wear = 0.80 if c.instr == "lift" else (0.92 if c.instr == "hold" else 1.0)
+	var lift_wear = 0.80 if c.instr == "lift" else (0.92 if hold_on else 1.0)
 	var lift_fuel = 0.86 if c.instr == "lift" else 1.0
 	# 연료 무게: 탱크가 가득한 초반엔 타이어가 더 닳고(×1.08) 가벼워질수록 덜 닳는다(×0.92). 레이스 평균은 거의 ×1.0
 	var fuel_full: float = TANK if is_wec() else laps * FPL
@@ -1689,6 +1695,15 @@ func _front_same_class(c) -> Variant:
 			bt = ot
 			best = o
 	return best
+
+
+## 같은 클래스 바로 앞차와의 간격(초), 없으면 INF (화면 '대기' 표시용)
+func _ahead_same_class(c) -> float:
+	var f: Variant = _front_same_class(c)
+	var k: int = c.cross.size() - 1
+	if f == null or k < 0 or is_pitting(f):
+		return INF
+	return float(c.cross[k]) - float(f.cross[k])
 
 
 func _behind_same_class(c) -> float:
@@ -3187,8 +3202,9 @@ func instr_active(c, key: String = "") -> bool:
 		return k == "free"
 	match k:
 		"attack":
-			var f: Variant = _front_same_class(c)
-			return f != null and not is_pitting(f) and not is_pitting(c)
+			return _ahead_same_class(c) < 1.0 and not is_pitting(c)
+		"hold":
+			return _ahead_same_class(c) < 1.5
 		"defend":
 			return _behind_same_class(c) < 1.0
 	return true
@@ -3246,8 +3262,9 @@ func mode_effects(c, kind: String, key: String) -> Dictionary:
 				cons.append("경합 접촉 +60%")
 				if not is_wec():
 					cons.append("트랙 리밋 +30%")
+				cons.append("(앞차 1초 안일 때만)")
 				if not active:
-					wait_reason = "앞차 없음"
+					wait_reason = "앞차 1초 밖"
 			"defend":
 				var def_sub: float = 0.12 * float(K["overtake_scale"]) * 100.0
 				pros.append("상대 추월 확률 -%.1f%%p" % def_sub)
@@ -3256,10 +3273,12 @@ func mode_effects(c, kind: String, key: String) -> Dictionary:
 				if not active:
 					wait_reason = "뒤차 1초 밖"
 			"hold":
-				pros.append("마모 -8%")
+				pros.append("마모 -8% (앞차 1.5초 안일 때)")
 				if not is_wec():
-					pros.append("더티 에어 손실 제거")
-				cons.append("추월 시도 안 함 (앞차와 1.0초 유지)")
+					pros.append("더티 에어 손실 대신")
+				cons.append("앞차와 1초까지 물러남 · 추월 시도 안 함")
+				if not active:
+					wait_reason = "앞차 1.5초 밖"
 			"lift":
 				pros.append("마모 -20%")
 				pros.append("연료 -14%")
