@@ -1935,7 +1935,7 @@ func on_cross(c, t: float) -> void:
 			_drive_lap(c)
 		c.lap_hist.push_front({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap})
 		c.pos_hist.append({"lap": c.lap, "pos": pos_at_line(c)})
-		c.lap_times.append({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap, "cliff": SLICK.has(c.comp) and c.wear > ai_lim(c.comp)})
+		c.lap_times.append({"lap": c.lap, "t": lt, "comp": c.comp, "pit": c.pit_lap, "cliff": SLICK.has(c.comp) and c.wear > ai_lim(c.comp), "drv": c.drv, "fuel": snappedf(c.fuel, 0.1)})
 		if c.lap_hist.size() > 45:
 			c.lap_hist.pop_back()
 		if c.crew_cooldown > 0:
@@ -2066,6 +2066,8 @@ func apply_pit(c) -> void:
 	c.crew_out = false
 	c.pit_total += c.garage
 	c.garage = 0.0
+	if not c.pit_log.is_empty() and int(c.pit_log[-1]["lap"]) == c.lap + 1:
+		c.pit_log[-1]["loss"] = snappedf(c.pit_total, 0.1) # 복기: 피트로 잃은 시간(레인+정차)
 	if d["tyres"]:
 		c.comp = d["comp"]
 		c.used[c.comp] = true
@@ -2703,7 +2705,9 @@ func car_pos_angle(c) -> Array:
 		if e < lane:
 			return T.pit_lane_point(_lane_u(0.35 + 0.65 * (e / maxf(0.01, lane)), stall))
 		var f_out: float = T.exit_frac + (1.0 - T.exit_frac) * clampf((e - lane) / maxf(0.01, total - lane), 0.0, 1.0)
-		return [T.point_at(0, f_out), T.head_at_dist(T.dist_at(0, f_out))]
+		var d_out: float = T.dist_at(0, f_out)
+		# 세 번째 값 = 본 트랙 위 누적 거리 (화면이 앞차를 넘지 않게 맞출 때 씀)
+		return [T.point_at(0, f_out), T.head_at_dist(d_out), c.lap * T.L + d_out]
 	var fr = e / total
 	return [T.point_at(c.sec, fr), T.head_at_dist(T.dist_at(c.sec, fr))]
 

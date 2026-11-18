@@ -80,6 +80,7 @@ func refresh() -> void:
 			_tab_spon()
 		_:
 			_tab_league()
+	K.relayout_later(_body)
 	K.clear(_foot)
 	_foot.add_child(K.btn("◀ 메뉴", 15, _on_menu))
 	var nc: Dictionary = DB.circuits[cr.next_circuit()]

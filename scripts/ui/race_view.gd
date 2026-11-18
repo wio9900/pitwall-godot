@@ -210,11 +210,20 @@ func _update_cars(delta: float) -> void:
 				var pl: Array = T.pit_lane_point(sim._lane_u(0.35 * ((el - COOL_S) / LANE_S), sim._stall_u(c.stall_idx)))
 				targets[c.id] = [pl[0], pl[1]]
 			continue
+		var dist: float = 0.0
 		if sim.is_pitting(c):
 			var pa: Array = sim.car_pos_angle(c)
-			targets[c.id] = [pa[0], pa[1]]
+			if pa.size() < 3:
+				targets[c.id] = [pa[0], pa[1]]
+				continue
+			# 피트 출구를 나와 본 트랙에 오른 차: 바로 앞차를 넘어 그리지 않는다 (SC 대열 사이에 끼었다 뒤로 밀리던 것)
+			dist = float(pa[2])
+			var ld: Variant = last_by_cls.get(c.cls)
+			if ld != null and ld - dist < T.L * 0.5:
+				dist = minf(dist, ld - gap_d)
+			targets[c.id] = {"d": dist, "cls": c.cls}
 			continue
-		var dist: float = sim.car_dist(c)
+		dist = sim.car_dist(c)
 		var last_d: Variant = last_by_cls.get(c.cls)
 		if last_d != null and last_d - dist < T.L * 0.5:
 			dist = minf(dist, last_d - gap_d)

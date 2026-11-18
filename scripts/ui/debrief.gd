@@ -106,7 +106,11 @@ class TimeChart extends Control:
 				if r["pit"] or int(r["lap"]) <= 1 or _sc_lap(int(r["lap"])):
 					prev = null
 					continue
-				var tv: float = clampf(float(r["t"]), lo, hi)
+				if float(r["t"]) > hi:
+					# 범위 밖(수리·트래픽 등 느린 랩)은 점을 찍지 않고 선을 끊는다
+					prev = null
+					continue
+				var tv: float = maxf(float(r["t"]), lo)
 				var q := Vector2(pad.x + w * float(r["lap"]) / L, pad.y + h * (1.0 - (tv - lo) / (hi - lo)))
 				if prev != null:
 					draw_line(prev, q, Color(col, 0.7), 1.6, true)
@@ -258,7 +262,7 @@ func _car_report(c, ord: Array) -> void:
 				continue
 			if c.best < INF and lt > c.best * 1.15:
 				continue
-			clean.append(lt)
+			clean.append(r)
 		var comp: String = st[0]["comp"]
 		var avg_s := "-"
 		var best_s := "-"
@@ -266,61 +270,107 @@ func _car_report(c, ord: Array) -> void:
 		if not clean.is_empty():
 			var tot := 0.0
 			var best := INF
-			for lt in clean:
-				tot += lt
-				best = minf(best, lt)
+			for r in clean:
+				tot += float(r["t"])
+				best = minf(best, float(r["t"]))
 			avg_s = K.fmt_lap(tot / clean.size())
 			best_s = K.fmt_lap(best)
-			if clean.size() >= 3:
-				# 앞 2랩 평균 대비 뒤 2랩 평균 = 타이어가 닳으며 느려진 정도
-				var a0: float = (float(clean[0]) + float(clean[1])) / 2.0
-				var a1: float = (float(clean[-1]) + float(clean[-2])) / 2.0
-				deg = " · 스틴트 동안 [b]%+.2f초[/b] 느려짐" % (a1 - a0) if a1 >= a0 else " · 스틴트 동안 [b]%.2f초[/b] 빨라짐 (연료가 줄어서)" % (a0 - a1)
+			deg = _stint_deg(clean)
 		t += "S%d [color=%s]%s[/color] %d랩 · 평균 %s · 최고 %s%s%s\n" % [si + 1, RS.TYRE_HEX[comp], RS.TYRE_KO[comp], st.size(), avg_s, best_s, deg, " [color=#ef4444][절벽 구간!][/color]" if cliff else ""]
-	# 피트 평가: 피트 들어갈 때 예상한 복귀 순위 vs 2랩 뒤 실제 순위
-	t += "[b]피트 결정 평가[/b] [color=#8b98a5](들어갈 때 예상한 복귀 순위와 2랩 뒤 실제 순위 비교%s)[/color]\n" % (" · 같은 때 피트한 차는 빼고 계산 · 클래스 순위" if sim.is_wec() else "")
+	# 피트 평가: 들어가기 전 랩 순위 vs 비슷한 때 피트한 차들까지 다 돈 뒤(피트 사이클 후) 순위
+	t += "[b]피트 결정 평가[/b] [color=#8b98a5](피트 직전 순위 → 앞뒤 3랩 안에 피트한 같은 클래스 차들까지 다 돈 뒤 순위%s)[/color]\n" % (" · 클래스 순위" if sim.is_wec() else "")
 	if c.pit_log.is_empty():
 		t += "[color=#8b98a5]• 피트 없음 (원스틴트 주행)[/color]\n"
 	for ev in c.pit_log:
-		var after: int = int(ev["pos"])
-		for ph in c.pos_hist:
-			if int(ph["lap"]) <= int(ev["lap"]) + 2:
-				after = int(ph["pos"])
-		var pred: int = int(ev.get("pred", ev["pos"]))
-		# WEC: 다들 비슷한 때 피트에 들어가므로, '앞설 것'으로 셌던 차 중 앞뒤 몇 랩 안에 같이 피트한 차는 빼고 다시 센다
-		# (안 그러면 "P1에서 들어가 예상 P18 → P6, 12계단 이득" 같은 엉뚱한 평가가 나옴)
-		if sim.is_wec() and ev.has("ahead_ids"):
-			pred = 1
-			for oid in ev["ahead_ids"]:
-				var o = sim.car_by_id(int(oid))
-				if o == null:
-					continue
-				var pitted := false
-				for pl in o.pit_log:
-					if absi(int(pl["lap"]) - int(ev["lap"])) <= 3:
-						pitted = true
-						break
-				if not pitted:
-					pred += 1
-		var better: int = pred - after
-		var tag := ""
-		if better >= 1:
-			tag = "[color=#22c55e]예상보다 %d계단 앞 (언더컷·페이스 성공)[/color]" % better
-		elif better <= -1:
-			tag = "[color=#f59e0b]예상보다 %d계단 뒤 (트래픽·오버컷 당함)[/color]" % -better
-		else:
-			tag = "예상대로"
-		var sc_note := ""
-		if String(ev["sc"]) != "":
-			var pg: int = int(ev.get("pred_green", pred))
-			if pg > pred:
-				sc_note = " · [color=#22c55e]%s 덕분에 평소(P%d)보다 %d계단 덜 잃음[/color]" % [ev["sc"], pg, pg - pred]
-			else:
-				sc_note = " · %s 중 피트" % ev["sc"]
-		var tyre_txt: String = ("%s→%s" % [ev["from"], ev["to"]]) if ev.get("tyres", true) else "타이어 유지"
-		t += "• L%d 피트 (%s): P%d에서 들어가 예상 복귀 P%d → 2랩 뒤 P%d · %s%s\n" % [int(ev["lap"]), tyre_txt, int(ev["pos"]), pred, after, tag, sc_note]
+		t += _pit_line(c, ev)
 	var pen := ""
 	if c.penalty > 0.0:
 		pen = "\n[color=#ef4444]페널티 +%.0f초[/color]" % c.penalty
 	t += "[color=#8b98a5]추월 %d회 · 피트 %d회 · 개인 최고 %s[/color]%s" % [c.overtakes, c.pits, K.fmt_lap(c.best) if c.best < INF else "-", pen]
 	_txt(card, t, 14)
+
+
+## 랩 기록에서 그 랩까지의 순위 (없으면 그리드)
+func _pos_at(c, lap: int) -> int:
+	var p: int = c.grid + 1
+	for ph in c.pos_hist:
+		if int(ph["lap"]) > lap:
+			break
+		p = int(ph["pos"])
+	return p
+
+
+## 스틴트 마모 추이: 가장 오래 탄 드라이버 랩만, 연료 무게를 빼고 앞 2랩 대 뒤 2랩 (4랩 미만이면 생략)
+func _stint_deg(clean: Array) -> String:
+	var cnt := {}
+	for r in clean:
+		var dk: int = int(r.get("drv", 0))
+		cnt[dk] = int(cnt.get(dk, 0)) + 1
+	var main_d: int = 0
+	var most := -1
+	for dk in cnt:
+		if int(cnt[dk]) > most:
+			most = int(cnt[dk])
+			main_d = int(dk)
+	var vals: Array = []
+	var fixed := true
+	for r in clean:
+		if int(r.get("drv", 0)) != main_d:
+			continue
+		var f: float = float(r.get("fuel", -1.0))
+		if f < 0.0:
+			fixed = false
+			f = 0.0
+		vals.append(float(r["t"]) - f * sim.fuel_k())
+	if vals.size() < 4:
+		return " · [color=#8b98a5]랩이 적어 추이 생략[/color]"
+	var a0: float = (float(vals[0]) + float(vals[1])) / 2.0
+	var a1: float = (float(vals[-1]) + float(vals[-2])) / 2.0
+	var how: String = "연료 무게 뺀 " if fixed else ""
+	if cnt.size() > 1:
+		how += "같은 드라이버 "
+	return " · %s타이어 마모 [b]%+.2f초[/b]" % [how, a1 - a0]
+
+
+## 피트 한 번 평가 줄
+func _pit_line(c, ev: Dictionary) -> String:
+	var lap: int = int(ev["lap"])
+	var before: int = _pos_at(c, lap - 1)
+	# 피트 사이클 끝 = 같은 클래스에서 앞뒤 3랩 안에 피트한 차 중 가장 늦은 랩 (최대 +6랩)
+	var cyc: int = lap
+	var stops: Array = []
+	for o in sim.cars:
+		if o.cls != c.cls:
+			continue
+		for pl in o.pit_log:
+			if o != c and absi(int(pl["lap"]) - lap) <= 3:
+				cyc = maxi(cyc, int(pl["lap"]))
+			if pl.has("loss") and String(pl["sc"]) == String(ev["sc"]):
+				stops.append(float(pl["loss"]))
+	cyc = mini(cyc, lap + 6)
+	var after: int = _pos_at(c, cyc + 1)
+	var better: int = before - after
+	# 왜 잃었나: 피트에서 쓴 시간(클래스 보통 대비) · 아니면 아웃랩 트래픽·페이스
+	var why := ""
+	var stop_d := 0.0
+	if ev.has("loss") and stops.size() >= 3:
+		stops.sort()
+		var med: float = float(stops[stops.size() / 2])
+		stop_d = float(ev["loss"]) - med
+		why = " · 피트 %.1f초 (보통 %.1f초, %+.1f)" % [float(ev["loss"]), med, stop_d]
+	var tag := "순위 유지"
+	if better >= 1:
+		tag = "[color=#22c55e]%d계단 얻음[/color]" % better
+	elif better <= -1:
+		var cause: String = "피트가 길었음" if stop_d > 2.0 else "피트 아웃 뒤 트래픽·페이스"
+		tag = "[color=#f59e0b]%d계단 잃음 (%s)[/color]" % [-better, cause]
+	var sc_note := ""
+	if String(ev["sc"]) != "":
+		var pg: int = int(ev.get("pred_green", 0))
+		var pr: int = int(ev.get("pred", 0))
+		if pg > pr and pr > 0:
+			sc_note = " · [color=#22c55e]%s 덕분에 평소보다 약 %d계단 덜 잃음[/color]" % [ev["sc"], pg - pr]
+		else:
+			sc_note = " · %s 중 피트" % ev["sc"]
+	var tyre_txt: String = ("%s→%s" % [ev["from"], ev["to"]]) if ev.get("tyres", true) else "타이어 유지"
+	return "• L%d 피트 (%s): P%d → 사이클 뒤(L%d) P%d · %s%s%s\n" % [lap, tyre_txt, before, cyc + 1, after, tag, why, sc_note]
