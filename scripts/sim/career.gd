@@ -595,11 +595,16 @@ func calendar_profile() -> Dictionary:
 ## 레이스 시뮬레이션에 넘길 내 차 보정치
 func my_mods() -> Dictionary:
 	var ex := hq_extra()
+	# 스펙 리그(공통 섀시·엔진)는 공력·파워트레인 보너스(설비·인력·지역·철학)를 레이스에 안 쓴다 — 투자는 남아서 승격 후 적용.
+	# 예전엔 개발 프로젝트만 막고 풍동·벤치(레벨당 +0.6%)·책임자 보너스는 그대로 붙어 공통 차 리그에서 돈으로 빨라졌다
+	var spec: bool = is_spec_tier()
+	var aero: float = 0.0 if spec else hq_bonus("aero") + ex["aero"]
+	var eng: float = 0.0 if spec else hq_bonus("engine") + ex["engine"]
 	if is_wec():
-		var perf: float = (hq_bonus("aero") + hq_bonus("engine") + hq_bonus("chassis") + ex["aero"] + ex["engine"] + ex["chassis"]) * 0.45
+		var perf: float = (aero + eng + hq_bonus("chassis") + ex["chassis"]) * 0.45
 		return {"perf": perf, "rel": hq_bonus("rel") + ex["rel"], "crew": hq_bonus("crew"), "bop": float(hq.get("wec_bop", 0.0))}
 	return {
-		"aero": hq_bonus("aero") + ex["aero"], "engine": hq_bonus("engine") + ex["engine"],
+		"aero": aero, "engine": eng,
 		"chassis": hq_bonus("chassis") + ex["chassis"], "rel": hq_bonus("rel") + ex["rel"], "crew": hq_bonus("crew"),
 	}
 

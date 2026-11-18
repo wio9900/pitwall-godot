@@ -426,7 +426,7 @@ func _tab_rnd() -> void:
 				bt.append("%s [color=%s]%+.2f%%[/color]" % [k, "#ef4444" if v > 0.0005 else ("#22c55e" if v < -0.0005 else "#8b98a5"), v * 100.0])
 			_txt(c0, "[b]BoP 현황[/b] (+ 핸디캡 / − 완화): " + " · ".join(bt), 13)
 	elif cr.is_spec_tier():
-		_txt(c0, "%s는 [b]공통 섀시·엔진[/b]을 쓰는 스펙 시리즈라 공력·파워트레인 개발이 금지돼요. 섀시와 신뢰성만 개선할 수 있고, 여기서 쌓은 [b]설비와 인력은 상위 리그로 그대로 이어져요.[/b]" % cr.tier_meta()["short"])
+		_txt(c0, "%s는 [b]공통 섀시·엔진[/b]을 쓰는 스펙 시리즈라 공력·파워트레인 개발이 금지돼요. 섀시와 신뢰성만 개선할 수 있고, 여기서 쌓은 [b]설비와 인력은 상위 리그로 그대로 이어져요.[/b] 풍동·엔진 벤치와 공력·파워트레인 인력 보너스는 [b]승격 후부터 차에 적용[/b]돼요 (지금 레이스엔 섀시·신뢰성·크루 보너스만)." % cr.tier_meta()["short"])
 	else:
 		_txt(c0, "공력 개발 효율은 [b]ATR(공력 시험 제한)[/b]을 따라요. 기준 순위 P%d → 풍동·CFD 허용량 [color=#ffc53d][b]%d%%[/b][/color]%s. 시즌 전반은 지난 시즌 순위, 후반은 현재 순위로 정해요. %s" % [
 			cr.atr_rank(), int(round(cr.atr_mult() * 100)), (" (코스트캡 제재 -%d%% 포함)" % int(float(h["atr_pen"]) * 100)) if float(h["atr_pen"]) > 0 else "",
@@ -577,6 +577,9 @@ func _tab_base() -> void:
 		"factory": ["카본 복합재 공장", "Lv6·Lv10에서 개발 기간 -1경기 · 사고 수리비 최대 -40%"],
 		"pit": ["피트 크루 훈련센터", "피트 정차 시간 단축 (Lv10 약 -0.8초)"],
 	}
+	if cr.is_spec_tier():
+		desc["wind"][1] += "  [color=#ffc53d]· 스펙 리그: 승격 후 적용[/color]"
+		desc["bench"][1] += "  [color=#ffc53d]· 스펙 리그: 엔진 몫은 승격 후 적용 (신뢰성은 지금도)[/color]"
 	var proj: float = cr.projected_spend()
 	var ds := int(cr.D["econ"]["deprSeasons"])
 	var cap: int = cr.fac_cap()
