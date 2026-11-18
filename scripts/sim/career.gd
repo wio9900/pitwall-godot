@@ -659,6 +659,28 @@ func _hash01(sv: String, i: int) -> float:
 	return float(h % 10000) / 10000.0
 
 
+## 하위 리그 AI 2번 차 드라이버 3명. 팀 이름 해시로 고르므로 매 레이스 같은 사람 (저장·난수 흐름 영향 없음)
+func _car2_names(team: String, taken: Dictionary) -> Array:
+	var nd: Dictionary = DB.names.get("nat", {})
+	var keys: Array = nd.keys()
+	var out: Array = []
+	for i in 3:
+		var nm := "X. Driver %d" % i
+		for t in 20:
+			if keys.is_empty():
+				break
+			var sd: String = "%s#2.%d.%d" % [team, i, t]
+			var d: Dictionary = nd[keys[int(_hash01(sd, 7) * keys.size()) % keys.size()]]
+			var init: String = d["init"]
+			var lasts: Array = d["last"]
+			nm = "%s. %s" % [init[int(_hash01(sd, 8) * init.length()) % init.length()], lasts[int(_hash01(sd, 9) * lasts.size()) % lasts.size()]]
+			if not taken.has(nm):
+				break
+		taken[nm] = true
+		out.append(nm)
+	return out
+
+
 ## 하위 리그 로스터 크루를 등급제로 만든다 (이름 기반 고정 난수라 매번 같은 실력)
 func _roster_crew(names: Array) -> Array:
 	var grades: Array = WEC_TIER_GRADES[str(tier())]
@@ -982,14 +1004,23 @@ func _race_opts(sprint: bool) -> Dictionary:
 	var cls: String = WEC_TIER_CLS.get(tier(), "P2")
 	var entries: Array = []
 	var rs: Array = DB.wec["rosters"][str(tier())]
+	var taken := {}
+	for r0 in rs:
+		for n0 in r0["crew_names"]:
+			taken[n0] = true
+	for k0 in 2:
+		for d0 in my_crew(k0):
+			taken[d0["name"]] = true
 	for ri in rs.size():
 		var r: Dictionary = rs[ri]
 		var team := {"name": r["name"], "color": r["color"], "rim": "#ffffff", "perf": r["perf"], "rel": r["rel"], "crew": 0.82, "strategy": 0.8}
 		var names: Array = r["crew_names"]
-		for k in 2:
-			# 2번 차는 크루 순서를 돌려서 다른 라인업으로
-			var nm2: Array = [names[(0 + k) % 3], names[(1 + k) % 3], names[(2 + k) % 3]]
-			entries.append({"cls": cls, "team": team, "k": k, "ti": ri, "crew": _roster_crew(nm2), "mine": false})
+		entries.append({"cls": cls, "team": team, "k": 0, "ti": ri, "crew": _roster_crew(names), "mine": false})
+		# 2번 차는 실제처럼 다른 3명 (데이터에 없으면 팀 이름 기반 고정 가상 인물)
+		var nm2: Array = r.get("crew_names2", [])
+		if nm2.size() < 3:
+			nm2 = _car2_names(r["name"], taken)
+		entries.append({"cls": cls, "team": team, "k": 1, "ti": ri, "crew": _roster_crew(nm2), "mine": false})
 	var me: Dictionary = my_team_dict()
 	var eng: Dictionary = DB.wec["engines"].get(me.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
 	var my_t := {"name": me["name"], "color": me["color"], "rim": me.get("rim", "#ffffff"), "perf": float(me["perf"]), "rel": clampf(float(me["rel"]) + float(eng["relMod"]), 0.75, 0.98), "crew": float(me["crew"]), "strategy": float(me["strategy"]), "eng_eff": float(eng["eff"])}
