@@ -38,7 +38,9 @@ var setups: Array = []       # 내 차별 셋업 [{wing, press, fuel_load}]
 var wear_est := {}           # {err, runs, bias}
 var practice_left: Array = [PRACTICE_LAPS, PRACTICE_LAPS]
 var practice_runs: Array = []
-var last_feedback := ""
+var last_feedback: Array = ["", ""]  # 차별 마지막 드라이버 멘트
+var setup_dirty: Array = [false, false]  # 멘트 뒤 셋업을 바꿨나 (다시 달려야 확인)
+var fb_lap: Array = [0, 0]  # 멘트가 나온 연습 랩 (몇 랩째 주행 기준인지)
 var eng_q := 0.5             # 엔지니어 실력 0~1 (추천 범위 폭)
 var bands: Array = []        # 내 차별 엔지니어 추천 범위 {key: {c: 중심, hw: 반폭}}
 var Q := {}                  # 예선 상태
@@ -111,6 +113,9 @@ func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	var lp = maxi(3, PRACTICE_LAPS - obligation_laps)
 	practice_left = [lp, lp]
 	practice_runs = []
+	last_feedback = ["", ""]
+	setup_dirty = [false, false]
+	fb_lap = [0, 0]
 	done_quali = false
 	Q = {}
 
@@ -134,12 +139,14 @@ func set_wing(slot: int, w: float) -> void:
 	var c = my_cars()[slot]
 	c.wing = snappedf(clampf(w, 1.0, 5.0), 0.1)
 	setups[slot]["wing"] = c.wing
+	_mark_dirty(slot)
 
 
 func set_press(slot: int, p: String) -> void:
 	var c = my_cars()[slot]
 	c.press = p
 	setups[slot]["press"] = p
+	_mark_dirty(slot)
 
 
 func set_detail(slot: int, key: String, v: float) -> void:
@@ -148,6 +155,7 @@ func set_detail(slot: int, key: String, v: float) -> void:
 	var val: float = snappedf(clampf(v, float(r[0]), float(r[1])), 0.1 if key == "susp" else (0.5 if key == "bbias" else 1.0))
 	c.set(key, val)
 	setups[slot][key] = val
+	_mark_dirty(slot)
 
 
 func set_fuel_load(slot: int, f: String) -> void:
@@ -158,6 +166,13 @@ func set_fuel_load(slot: int, f: String) -> void:
 	c.fuel_load = f
 	setups[slot]["fuel_load"] = f
 	c.fuel = sim.laps * RS.FPL * (1.0 + float(RS.FUEL_LOAD[f])) * c.fuel_burn_rate
+	_mark_dirty(slot)
+
+
+## 멘트를 들은 뒤 셋업을 바꾸면 "다시 달려야 확인" 표시
+func _mark_dirty(slot: int) -> void:
+	if String(last_feedback[slot]) != "":
+		setup_dirty[slot] = true
 
 
 # ═════════ 세부 셋업 · 엔지니어 추천 범위 ═════════
@@ -315,7 +330,7 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 	var res: Array = []
 	for i in n:
 		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + float(sim.setup_extra(c)["dt"])
-		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * 0.03) * ws + sim.gauss(0.25)
+		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * sim.fuel_k()) * ws + sim.gauss(0.25)
 		if c.press == "low" and wear > 0.5:
 			t += 0.3 * float(RS.PRESS_FX["low"]["heat"])
 		res.append(t)
@@ -332,9 +347,16 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
 	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
 	practice_runs.push_front(r)
-	last_feedback = "%s: %s" % [c.name, feedback(c)]
+	var fb := "%s: %s" % [c.name, feedback(c)]
 	if kind == "long":
-		last_feedback += " (마모 추정 오차 ±%d%%로 축소)" % int(round(float(wear_est["err"]) * 100.0))
+		fb += " (마모 추정 오차 ±%d%%로 축소)" % int(round(float(wear_est["err"]) * 100.0))
+	last_feedback[slot] = fb
+	setup_dirty[slot] = false
+	var ran := 0
+	for pr in practice_runs:
+		if pr["code"] == c.code:
+			ran += (pr["laps"] as Array).size()
+	fb_lap[slot] = ran
 	return r
 
 

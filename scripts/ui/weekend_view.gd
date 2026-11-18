@@ -265,8 +265,11 @@ func _render_practice() -> void:
 	card.add_child(info)
 	if anim != null:
 		_live.text = "[b]%s[/b] 주행 중…" % c.name
-	elif wk.last_feedback != "":
-		_live.text = "[color=#ffc53d]“%s”[/color]" % wk.last_feedback
+	elif String(wk.last_feedback[sel]) != "":
+		var note: String = "[color=#8b98a5] · 연습 %d랩째 주행 기준[/color]" % int(wk.fb_lap[sel])
+		if wk.setup_dirty[sel]:
+			note = "\n[color=#f59e0b]⚠ 셋업이 바뀌었어요 — 다시 달려야 새 멘트를 들을 수 있어요[/color]"
+		_live.text = "[color=#ffc53d]“%s”[/color]%s" % [wk.last_feedback[sel], note]
 	else:
 		_live.text = "[color=#8b98a5]롱런을 하면 타이어 마모 추정 오차가 절반으로 줄어요 (35%→17%→9%).[/color]"
 	# 기록
