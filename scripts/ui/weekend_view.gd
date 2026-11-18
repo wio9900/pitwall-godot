@@ -263,15 +263,7 @@ func _render_practice() -> void:
 		left, _sets_txt(sel), int(round(float(wk.wear_est["err"]) * 100.0)), (", 롱런 %d회" % int(wk.wear_est["runs"])) if int(wk.wear_est["runs"]) > 0 else ", 미측정",
 		wk.est_range_text("S"), wk.est_range_text("M"), wk.est_range_text("H")]
 	card.add_child(info)
-	if anim != null:
-		_live.text = "[b]%s[/b] 주행 중…" % c.name
-	elif String(wk.last_feedback[sel]) != "":
-		var note: String = "[color=#8b98a5] · 연습 %d랩째 주행 기준[/color]" % int(wk.fb_lap[sel])
-		if wk.setup_dirty[sel]:
-			note = "\n[color=#f59e0b]⚠ 셋업이 바뀌었어요 — 다시 달려야 새 멘트를 들을 수 있어요[/color]"
-		_live.text = "[color=#ffc53d]“%s”[/color]%s" % [wk.last_feedback[sel], note]
-	else:
-		_live.text = "[color=#8b98a5]롱런을 하면 타이어 마모 추정 오차가 절반으로 줄어요 (35%→17%→9%).[/color]"
+	_update_live_feedback()
 	# 기록
 	if not wk.practice_runs.is_empty():
 		var tc = K.card(_side, "연습 기록")
@@ -716,6 +708,23 @@ func _on_setup_val(v: float, key: String, lab) -> void:
 	else:
 		wk.set_detail(sel, key, v)
 	lab.text = _setup_label(_my(sel), key)
+	_update_live_feedback()
+
+
+## 연습 드라이버 멘트 줄 (슬라이더를 움직이는 즉시 "셋업 바뀜" 표시가 뜨도록 따로 뺌)
+func _update_live_feedback() -> void:
+	var c = _my(sel)
+	var fb: String = String(wk.last_feedback[sel]) if sel < wk.last_feedback.size() else ""
+	var dirty: bool = bool(wk.setup_dirty[sel]) if sel < wk.setup_dirty.size() else false
+	if anim != null:
+		_live.text = "[b]%s[/b] 주행 중…" % c.name
+	elif fb != "":
+		var note: String = "[color=#8b98a5] · 연습 %d랩째 주행 기준[/color]" % int(wk.fb_lap[sel])
+		if dirty:
+			note = "\n[color=#f59e0b]⚠ 셋업이 바뀌었어요 — 다시 달려야 새 멘트를 들을 수 있어요[/color]"
+		_live.text = "[color=#ffc53d]“%s”[/color]%s" % [fb, note]
+	else:
+		_live.text = "[color=#8b98a5]롱런을 하면 타이어 마모 추정 오차가 절반으로 줄어요 (35%→17%→9%).[/color]"
 
 
 func _eng_grade() -> String:
