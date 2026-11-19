@@ -58,3 +58,49 @@ Pit Wall 작업 이어서 하자.
 - 작업목록은 Claude 만 고친다 (다른 AI 결과를 합칠 때 상태를 완료로 옮김).
 
 사용량 아끼기: 묶음 하나 끝나면 새 대화(A 붙이기) · 여러 개를 한 번에("수정 9, 10") · 간단한 합치기·APK 는 가벼운 모델로.
+
+---
+
+## D. 다른 AI 작업 프롬프트 (B절 지시문 뒤 "할 일" 자리에 그대로 붙이기)
+
+### D-1. 연료 패널 묶음 — 첨부: AGENTS.md, scripts/ui/race_panel.gd, scripts/sim/race_sim.gd(읽기만), scripts/ui/kit.gd(읽기만)
+
+```
+## 할 일: WEC 레이스 피트 탭의 급유 슬라이더 개선 (화면만, sim 계산은 건드리지 마)
+
+배경: race_panel.gd 의 WEC 피트 탭에 급유 슬라이더가 있다.
+- 만드는 곳: _build_pit() 안 "_w_fuel_sl = HSlider.new()" 부분. 값은 탱크 대비 0.0~1.0 (step 0.01).
+- 갱신하는 곳: _refresh_pit(c) 안 "if wec:" 블록. 지금 _w_fuel_txt 에
+  "급유 후 N랩 주행 → 다음 피트 약 L.. (가득이면 L..) · 체커까지 약 N랩" 과 가득 대비 손익을 쓴다.
+- 슬라이더를 움직이면 _on_w_fuel_sl(v) 가 draft[sel]["fill"] 을 바꾸고 refresh() 한다.
+- 쓸 수 있는 값 (전부 이미 있음, 새로 계산식 만들지 마):
+  RS.TANK = 탱크 크기(연료 단위), c.fuel = 지금 연료,
+  sim._wec_burn(c, "std" / "lean" / "rich") = 그 모드의 랩당 연료 소모 (lean=세이브, rich=리치),
+  sim.laps_to_go(c) = 체커까지 남은 랩, sim.next_stop(c) = 다음 계획 정차 (null 이거나 {"lap": 정수, "comp": ...}),
+  c.lap = 지금 랩.
+
+할 일 1 — 슬라이더 양옆에 −/+ 버튼
+- 슬라이더를 HBoxContainer 하나에 넣고 왼쪽에 "−", 오른쪽에 "+" 버튼 (K.btn 사용, 글자 18, 최소 크기 48×40 — 폰에서 누르기 쉽게).
+- 한 번 누를 때 표준 모드 기준 0.5랩만큼: 0.5 * sim._wec_burn(c, "std") / RS.TANK.
+- 범위: 최소 = 지금 연료(c.fuel / RS.TANK), 최대 = 1.0. 범위 밖으로 안 나가게 clampf.
+- 누른 뒤 처리는 이미 있는 _on_w_fuel_sl(새 값) 을 불러서 같게 (새 저장 로직 만들지 마).
+- "급유 안 함" 상태(_w_fuel_sl.editable == false)일 땐 두 버튼도 disabled.
+- 새 버튼 변수 2개는 _w_fuel_sl 변수 선언 바로 아래에.
+
+할 일 2 — 모드별 주행 가능 랩 한 줄
+- _w_fuel_txt 맨 아래에 한 줄 추가:
+  "이 양이면  표준 N랩 · 세이브 N랩 · 리치 N랩" (소수 한 자리)
+  N = maxf(c.fuel, RS.TANK * fill) / sim._wec_burn(c, 모드).
+- 지금 고른 연료 모드(c.fuel_mode)는 굵게([b]).
+- 색은 기존처럼 설명 회색 #8b98a5, 숫자만 흰색.
+
+할 일 3 — 모자라면 경고
+- 목표 랩 = sim.next_stop(c) 가 있으면 그 "lap" - c.lap, 없으면 sim.laps_to_go(c).
+- 지금 연료 모드 기준 주행 가능 랩(할 일 2의 c.fuel_mode 값)이 목표 랩보다 작으면
+  빨간(#ef4444) 한 줄: "⚠ 다음 계획 정차(L52)까지 1.3랩 모자라요 → 더 넣거나 세이브" (계획이 없으면 "체커까지").
+- 모자라지 않으면 아무것도 안 씀.
+
+꼭: 함수 _build_pit, _refresh_pit 는 바뀐 부분이 있으면 함수 전체를 돌려줘. _on_w_fuel_sl 은 바꾸지 마.
+새 함수가 필요하면(예: _on_w_fuel_step(dir: int)) "_on_w_fuel_sl 바로 다음"에 넣는다고 적어줘.
+확인: F1 레이스(wec 아님)에선 이 화면이 안 보이니 영향 없어야 함.
+```
