@@ -102,6 +102,17 @@ func _process(_delta: float) -> bool:
 			rp._on_draft_comp("W")
 			rp._on_w_tyres("no")
 			rp._on_w_tyres("yes")
+			if main.sim.is_wec():
+				# 급유 −/+ : 가득에서 − 한 번이면 줄고, + 로 다시 가득 (지금 연료보다 아래로는 안 감)
+				rp._on_w_fuel_sl(1.0)
+				rp._on_w_fuel_step(-1)
+				var f1: float = float(rp.draft[rp.sel]["fill"])
+				rp._on_w_fuel_step(1)
+				var lo: float = rp.car().fuel / main.sim.TANK
+				if not (f1 <= 1.0 and f1 >= lo - 0.001 and float(rp.draft[rp.sel]["fill"]) >= f1):
+					print("❌ 급유 −/+ 이상: %.3f → %.3f (하한 %.3f)" % [f1, float(rp.draft[rp.sel]["fill"]), lo])
+					quit(1)
+					return true
 			rp._on_confirm()
 			rp._on_cancel()
 			rp._on_chip(0)

@@ -57,6 +57,8 @@ var _w_fuel_btns: Array = []
 var _w_drv_btns: Array = []
 var _w_fuel_fill: ColorRect
 var _w_fuel_sl: HSlider       # WEC 급유 목표 (탱크 대비 0~1)
+var _w_fuel_minus: Button     # 급유 −0.5랩 (표준 모드 기준)
+var _w_fuel_plus: Button
 var _w_fuel_txt: RichTextLabel
 var _tyre_btns: Array = []
 var _tyre_keys: Array = []
@@ -329,7 +331,17 @@ func _build_pit(pg: VBoxContainer) -> void:
 	_w_fuel_sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_w_fuel_sl.custom_minimum_size = Vector2(0, 28)
 	_w_fuel_sl.value_changed.connect(_on_w_fuel_sl)
-	_w_opts.add_child(_w_fuel_sl)
+	# 슬라이더 양옆 −/+ : 손가락으로 미세 조절이 어려워 0.5랩씩
+	var frow = K.hbox(6)
+	_w_opts.add_child(frow)
+	_w_fuel_minus = K.btn("−", 18, _on_w_fuel_step.bind(-1))
+	_w_fuel_plus = K.btn("+", 18, _on_w_fuel_step.bind(1))
+	for b in [_w_fuel_minus, _w_fuel_plus]:
+		b.size_flags_horizontal = Control.SIZE_FILL
+		b.custom_minimum_size.x = 48
+	frow.add_child(_w_fuel_minus)
+	frow.add_child(_w_fuel_sl)
+	frow.add_child(_w_fuel_plus)
 	_w_fuel_txt = K.rtl(12)
 	_w_opts.add_child(_w_fuel_txt)
 	# 다음 스틴트 드라이버: 크루 3명 중 직접 고른다 (지금 운전 중인 사람 = 유지)
@@ -695,7 +707,22 @@ func _refresh_pit(c) -> void:
 			t1 += "\n[color=#22c55e]가득 대비: 정차 −%.1f초 · 피트 아웃 직후 랩당 −%.2f초[/color] [color=#8b98a5](대신 %d랩 일찍 다시 들어와요)[/color]" % [stop_gain, lap_gain, int(RS.TANK / burn) - int(after)]
 		elif pick == "yes":
 			t1 += "\n[color=#8b98a5]가득: 연료 무게로 피트 아웃 직후 랩당 약 +%.1f초 — 스틴트 끝으로 갈수록 가벼워져요[/color]" % (full_after * sim.fuel_k())
+		# 이 양이면 모드별 몇 랩 (지금 모드 굵게)
+		var base_f: float = maxf(c.fuel, RS.TANK * fill)
+		var parts: Array = []
+		for kv in [["표준", "std"], ["세이브", "lean"], ["리치", "rich"]]:
+			var nm: String = ("[b]%s[/b]" % kv[0]) if kv[1] == c.fuel_mode else kv[0]
+			parts.append("[color=#8b98a5]%s[/color] %.1f랩" % [nm, base_f / maxf(0.01, sim._wec_burn(c, kv[1]))])
+		t1 += "\n[color=#8b98a5]이 양이면[/color] " + " · ".join(parts)
+		# 다음 계획 정차(없으면 체커)까지 모자라면 경고
+		var nst = sim.next_stop(c)
+		var stop_tgt: float = (float(nst["lap"]) - float(c.lap)) if nst != null else need_l
+		if pick == "yes" and after < stop_tgt:
+			var where: String = ("다음 계획 정차(L%d)" % int(nst["lap"])) if nst != null else "체커"
+			t1 += "\n[color=#ef4444]⚠ %s까지 %.1f랩 모자라요 → 더 넣거나 세이브[/color]" % [where, stop_tgt - after]
 		_w_fuel_txt.text = t1
+		_w_fuel_minus.disabled = pick != "yes"
+		_w_fuel_plus.disabled = pick != "yes"
 		# 피트를 한 번 마치면 다음 피트는 다시 기본값(추천 드라이버로 교대)으로
 		if c.pits != int(_pits_seen[sel]):
 			_pits_seen[sel] = c.pits
@@ -961,6 +988,16 @@ func _on_w_fuel_sl(v: float) -> void:
 	draft[sel]["fuel_pick"] = "yes" if v > 0.001 else "none"
 	draft[sel]["fill"] = v
 	refresh()
+
+
+## −/+ : 표준 모드 0.5랩만큼, 지금 연료 ~ 가득 사이
+func _on_w_fuel_step(dir: int) -> void:
+	var c = car()
+	if c == null or not _w_fuel_sl.editable:
+		return
+	var step_f: float = 0.5 * sim._wec_burn(c, "std") / RS.TANK
+	var lo: float = clampf(c.fuel / RS.TANK, 0.0, 1.0)
+	_on_w_fuel_sl(clampf(_w_fuel_sl.value + dir * step_f, lo, 1.0))
 
 
 func _on_w_drv(i: int) -> void:
