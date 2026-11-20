@@ -92,6 +92,7 @@ var comp := "M"
 var used: Dictionary = {}
 var used_set_pen := 0.0   # 헌 타이어 세트 페널티 (초/랩)
 var tyre_sets: Variant = null # 내 차: 주말 타이어 세트 {S, M, H} (주말 모드에서만)
+var used_tyres: Variant = null # 내 차: 주말에 쓴 세트 {S: [{w, h}…]} (주말 모드에서만, weekend.used_sets 와 같은 것)
 var q3_locked := false     # 예선 최종 세션 타이어로 출발 고정
 var fuel_load := "std"
 var fuel := 0.0

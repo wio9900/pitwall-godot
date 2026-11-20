@@ -133,3 +133,29 @@ _draw_car_tex 는 이미 draw_set_transform(pos, ang, sc) 안에서 불린다 �
 - 전체 화면(확대 안 함)에서는 이름표가 안 보여야 함. 추적(#1 추적)으로 확대하면 주변 차에만 보여야 함.
 - 그림 없는 팀(Williams 등, 코드 그림)은 지금처럼 그대로.
 ```
+
+### D-3. 쓴 타이어 세트 칩 (수정 15 화면) — 브랜치 ai/used-set-chips, 볼 파일: scripts/ui/weekend_view.gd, scripts/sim/weekend.gd(읽기만), scripts/ui/kit.gd(읽기만)
+
+```
+## 할 일: 주말 화면(연습·예선·결승 출발 타이어)에서 쓴 세트를 세트마다 마모 %로 보여주고 직접 고르게 (화면만, sim 은 건드리지 마)
+
+배경 (계산은 이미 끝남):
+- wk.used_sets[slot][comp] = 세트 배열, 세트마다 {"w": 마모 0~1, "h": 달군 횟수}. 개수는 wk.used_n(slot, comp).
+- wk.take_set_mode(slot, comp, mode, idx) — mode "used" 에 idx(배열 번호)를 주면 그 세트, -1 이면 가장 덜 쓴 세트.
+- 새 세트 개수 = wk.sets[slot][comp].
+- 예선 손해 예상 = wk.q_used_pen(comp, 세트 w) (초), 결승은 그 세트 마모에서 출발 + 달군 횟수(최대 3)×RS.HEAT_PEN 초/랩.
+
+할 일 1 — 세트 칩 글자
+- weekend_view.gd _set_items() 의 "쓴 세트 N" 을 "쓴 N (12% · 18% · 31%)" 로: 세트 w 를 % 정수로, 작은 순.
+- 컴파운드 목록 글("소프트 (새 2·쓴 3)")은 그대로 둬도 됨.
+
+할 일 2 — 쓴 세트 직접 고르기 (깊이는 선택: 기본은 지금처럼 자동)
+- "쓴 세트"를 고른 상태에서만 그 아래 작은 버튼 줄: 세트마다 "18% · 2회" (K.seg 재사용, 글자 12). 기본 선택 = 가장 덜 쓴 세트.
+- 고른 번호를 화면 변수(슬롯별)로 들고 있다가, 세트를 꺼내는 곳에 idx 로 넘긴다 (인자는 이미 있음):
+  연습 wk.practice_run(slot, kind, comp, "used", idx) / 예선 wk.player_depart(slot, comp, push, "used", idx) / 결승 출발 wk.start_pref[slot] = "used" + wk.start_idx[slot] = idx.
+- 고른 세트 옆에 예상 손해 한 줄: 예선이면 "예선 약 +0.53초", 결승 출발이면 "달군 2회 → 랩당 +0.30초 · 마모 18%에서 출발".
+
+## 확인
+- 쓴 세트가 없으면 아무 줄도 안 보임. 새 세트만 고르면 지금과 똑같음.
+- 세로 폰(좁은 화면)에서 칩 줄이 넘치면 줄바꿈.
+```

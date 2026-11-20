@@ -77,5 +77,28 @@ func _init() -> void:
 		print("   WEC 예선 %s: 하이퍼폴 진출 %d대 · 이상 감지 %d건" % [key, n2, warn1 - warn0])
 		if n2 != 8 or warn1 != warn0:
 			fails += 1
+	# 수정 15: 쓴 세트마다 마모 기록 → 예선 손해 · 결승 출발 마모
+	var su = RaceSimS.new()
+	su.new_race("bahrain", 6, 15, "dry", ["M", "M"], 77)
+	var wu = WeekendS.new()
+	wu.setup(su, 0)
+	wu.practice_run(0, "long", "M")   # 새 M 세트 열고 5랩
+	wu.practice_run(0, "short", "M")  # 같은 세트 3랩 더
+	wu.practice_run(0, "short", "S")  # 새 S 세트 열고 3랩
+	var m_set: Dictionary = wu.used_sets[0]["M"][0]
+	var lw: float = su.set_lap_wear("M") * float(RaceSimS.PRESS[su.my_cars()[0].press][1])
+	var one_run: float = wu.q_used_pen("S", su.set_lap_wear("S") * WeekendS.Q_RUN_LAPS)
+	var more: float = wu.q_used_pen("S", float(wu.used_sets[0]["S"][0]["w"]))
+	# 결승 출발: 새 M 이 없으면 가장 덜 쓴 M 세트의 마모에서 출발
+	wu.sets[0]["M"] = 0
+	var c0 = su.my_cars()[0]
+	c0.comp = "M"
+	wu.start_pref[0] = "used"
+	wu.commit_start_tyres()
+	var ok15: bool = wu.used_n(0, "M") == 1 and int(m_set["h"]) == 3 and absf(float(c0.wear) - float(m_set["w"])) < 0.001 \
+		and float(m_set["w"]) > lw * 7.0 and absf(one_run - 0.45) < 0.01 and more > one_run and absf(c0.used_set_pen - RaceSimS.HEAT_PEN * 2.0) < 0.001
+	print("   쓴 세트 마모: M 세트 %.0f%% (달군 %d) → 출발 마모 %.0f%% · 열 사이클 +%.2f초/랩 · 예선 손해 런1 %.2f / 숏런 세트 %.2f %s" % [float(m_set["w"]) * 100.0, int(m_set["h"]), c0.wear * 100.0, c0.used_set_pen, one_run, more, "OK" if ok15 else "실패"])
+	if not ok15:
+		fails += 1
 	print("주말 테스트 실패 %d" % fails)
 	quit(1 if fails > 0 else 0)

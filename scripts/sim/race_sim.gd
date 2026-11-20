@@ -571,6 +571,48 @@ func true_wear_rate(comp: String) -> float:
 	return float(COMP[comp][1]) * float(true_mult.get(comp, 1.0)) * float(rules.get("wear_mult", 1.0))
 
 
+# ── 쓴 타이어 세트 (수정 15): 세트마다 {"w": 쌓인 마모(이 레이스 랩 단위 0~1), "h": 달군 횟수} ──
+const SET_LAP_EQ := 0.35   # 연습·예선 1랩 = 결승 1랩 마모의 0.35배 (결승 랩은 실제 레이스를 압축한 것)
+const HEAT_PEN := 0.15     # 달군 횟수(최대 3회)당 결승 랩당 손해 (초) — 고무가 굳는 열 사이클.
+                           # 예선 런 1~2번 쓴 소프트로 출발할 때 손해가 예전 고정(+0.45초·마모 0.10)과 평균이 같게 맞춤
+const USED_W_OLD := 0.10   # 세트 기록이 없을 때(옛 저장) 쓴 세트 기본 마모
+
+
+## 연습·예선 1랩에 그 세트에 쌓이는 마모 (mult = 공기압·윙·셋업·드라이버 마모 배율)
+func set_lap_wear(comp: String, mult: float = 1.0) -> float:
+	var per: float = (WEC_WEAR if is_wec() else WEAR_SCALE / maxf(1.0, float(laps)) * 0.85)
+	return true_wear_rate(comp) * float(CIRC["wear"]) * per * SET_LAP_EQ * mult
+
+
+## 가장 덜 쓴 세트 번호 (없으면 -1)
+static func least_worn(arr: Array) -> int:
+	var bi := -1
+	for i in arr.size():
+		if bi < 0 or float(arr[i]["w"]) < float(arr[bi]["w"]):
+			bi = i
+	return bi
+
+
+## 쓴 세트를 끼우고 출발: 그 세트 마모에서 시작 + 열 사이클 손해 (스틴트 동안)
+func fit_used(c, st: Variant) -> void:
+	if st == null:
+		c.wear = maxf(c.wear, USED_W_OLD)
+		c.used_set_pen = HEAT_PEN
+		return
+	c.wear = clampf(float(st["w"]), 0.0, 0.9)
+	c.used_set_pen = HEAT_PEN * float(mini(3, int(st["h"])))
+	st["h"] = int(st["h"]) + 1
+
+
+## 내 차 결승 피트: 새 세트가 없으면 주말에 쓴 세트 중 가장 덜 쓴 것 (쓴 세트 목록이 없으면 옛 방식 기본값)
+func _fit_used_from_pool(c) -> void:
+	var pool: Variant = c.used_tyres.get(c.comp) if c.used_tyres != null else null
+	if pool != null and not (pool as Array).is_empty():
+		fit_used(c, pool[least_worn(pool)])
+	else:
+		fit_used(c, null)
+
+
 ## 두 컴파운드 의무가 지금 적용되는지 (드라이 레이스 + 규칙)
 func need_two() -> bool:
 	return bool(rules.get("two_compounds", true)) and not is_wec() and not ever_wet
@@ -2136,7 +2178,7 @@ func apply_pit(c) -> void:
 			if c.tyre_sets[c.comp] > 0:
 				c.tyre_sets[c.comp] -= 1
 			else:
-				c.used_set_pen = 0.45
+				_fit_used_from_pool(c)
 		c.tt = 0.35
 		if is_wec():
 			# 타이어 워머 금지: 차가운 새 타이어로 나간다 (하드일수록·밤일수록 더 차갑다)
@@ -3035,7 +3077,7 @@ func prepare_start() -> void:
 				c.tyre_sets[c.comp] -= 1
 				c.used_set_pen = 0.0
 			else:
-				c.used_set_pen = 0.45
+				_fit_used_from_pool(c)
 	if wet_start:
 		for c in cars:
 			c.comp = "W"
@@ -3188,7 +3230,7 @@ func eval_plan(c, stops: Array) -> Dictionary:
 	if c.tyre_sets != null:
 		for k in ["S", "M", "H"]:
 			if int(need[k]) > int(c.tyre_sets[k]):
-				warn.append("새 %s 세트 부족 (헌 타이어 +0.45초/랩)" % TYRE_KO[k])
+				warn.append("새 %s 세트 부족 (쓴 세트 — 마모만큼 일찍 닳음)" % TYRE_KO[k])
 	return {"cost": cost, "stints": stints, "warn": warn}
 
 

@@ -189,7 +189,7 @@ func _wing_desc(w: float) -> String:
 func _sets_txt(slot: int) -> String:
 	var s: Dictionary = wk.sets[slot]
 	var u: Dictionary = wk.used_sets[slot]
-	return "주말 타이어 (연습·예선·결승 공용) — 새 [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d  /  쓴 S %d · M %d · H %d" % [s["S"], s["M"], s["H"], u["S"], u["M"], u["H"]]
+	return "주말 타이어 (연습·예선·결승 공용) — 새 [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d  /  쓴 S %d · M %d · H %d" % [s["S"], s["M"], s["H"], u["S"].size(), u["M"].size(), u["H"].size()]
 
 
 # ── 연습 ──
@@ -247,7 +247,7 @@ func _render_practice() -> void:
 	var pu: Dictionary = wk.used_sets[sel]
 	var pitems: Array = []
 	for k in wk.dry_comps(c):
-		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), int(pu[k])]])
+		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), (pu[k] as Array).size()]])
 	if not wk.has_any(sel, p_comp) and not pitems.is_empty():
 		p_comp = pitems[0][0]
 	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
@@ -316,14 +316,14 @@ func _on_pset(v) -> void:
 ## 새 세트 / 쓴 세트 고르기 버튼 (개수 표시, 없는 쪽은 "없음")
 func _set_items(slot: int, comp: String, auto_txt: String) -> Array:
 	var nn: int = int(wk.sets[slot].get(comp, 0))
-	var uu: int = int(wk.used_sets[slot].get(comp, 0))
-	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 세트 %d (+0.45초)" % uu if uu > 0 else "쓴 세트 없음"]]
+	var uu: int = wk.used_n(slot, comp)
+	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 세트 %d" % uu if uu > 0 else "쓴 세트 없음"]]
 
 
 ## 세트 버튼 줄: 없는 쪽은 눌리지 않게 막고, 고른 쪽이 바닥났으면 "자동"으로 되돌린다. 돌려주는 값 = 실제 선택
 func _set_seg(card: Control, slot: int, comp: String, auto_txt: String, cur: String, cb: Callable, enabled := true) -> String:
 	var nn: int = int(wk.sets[slot].get(comp, 0))
-	var uu: int = int(wk.used_sets[slot].get(comp, 0))
+	var uu: int = wk.used_n(slot, comp)
 	if (cur == "new" and nn <= 0) or (cur == "used" and uu <= 0):
 		cur = "auto"
 	var bs: Array = K.seg(card, _set_items(slot, comp, auto_txt), cur, cb, 13, enabled)
@@ -396,7 +396,7 @@ func _render_quali() -> void:
 				al = sim.wec_comps(c.cls) # 하이퍼폴도 대회 허용 컴파운드 안에서 자유 (2026 르망: 대부분 소프트, 페라리 미디엄)
 			for k in al:
 				if wk.has_any(slot, k):
-					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])
+					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), (u[k] as Array).size()]])
 			if items.is_empty():
 				card.add_child(K.label("남은 타이어가 없어요", 14, K.BAD))
 				continue
@@ -421,7 +421,7 @@ func _render_quali() -> void:
 	_q_log = K.rtl(13)
 	lc.add_child(_q_log)
 	var hint = K.rtl(12)
-	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요(아웃랩 한 바퀴). 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 +0.45초).[/color]" % wk.out_min()
+	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요(아웃랩 한 바퀴). 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 — 많이 쓴 세트일수록 느려요).[/color]" % wk.out_min()
 	_side.add_child(hint)
 	_side.add_child(K.btn("⚡ 남은 예선 자동 진행", 15, _on_auto_quali))
 	_q_live_update()
@@ -602,7 +602,7 @@ func _render_grid() -> void:
 		var slot: int = c.slot
 		var sitems: Array = []
 		for k in wk.dry_comps(c):
-			sitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(wk.used_sets[c.slot][k])]])
+			sitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), wk.used_n(c.slot, k)]])
 		if sim.is_wec():
 			var sal: Array = sim.wec_comps(c.cls)
 			sitems = []

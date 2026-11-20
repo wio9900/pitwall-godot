@@ -32,7 +32,7 @@ func _pick(a: Array):
 func _check_sets(wk, tag: String) -> void:
 	for slot in wk.sets.size():
 		for k in ["S", "M", "H"]:
-			if int(wk.sets[slot][k]) < 0 or int(wk.used_sets[slot][k]) < 0:
+			if int(wk.sets[slot][k]) < 0 or wk.used_n(slot, k) < 0:
 				_bad("%s 주말 타이어 음수 %s %s" % [tag, wk.sets[slot], wk.used_sets[slot]])
 
 

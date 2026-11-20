@@ -693,7 +693,7 @@ func _refresh_pit(c) -> void:
 			pass # WEC 새 세트 수는 컴파운드 공용이라 아래 한 줄에만 표시
 		elif RS.SLICK.has(comp) and c.tyre_sets != null and c.tyre_sets.has(comp):
 			var rem := int(c.tyre_sets[comp])
-			sub = "새 %d세트" % rem if rem > 0 else "헌 (+0.45s)"
+			sub = "새 %d세트" % rem if rem > 0 else "쓴 세트"
 		b.text = "%s\n%s" % [comp, sub]
 		b.set_pressed_no_signal(comp == String(d["comp"]))
 		b.disabled = wec and not bool(d["tyres"])
