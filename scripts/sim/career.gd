@@ -1023,7 +1023,8 @@ func _race_opts(sprint: bool) -> Dictionary:
 			nm2 = _car2_names(r["name"], taken)
 		entries.append({"cls": cls, "team": team, "k": 1, "ti": ri, "crew": _roster_crew(nm2), "mine": false})
 	var me: Dictionary = my_team_dict()
-	var eng: Dictionary = DB.wec["engines"].get(me.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+	# 스펙 리그: 엔진 패키지(연비·신뢰성)는 하이퍼카 승격 후에만, 여기선 AI 와 같은 기본값
+	var eng: Dictionary = {"pwr": 0.88, "eff": 1.0, "relMod": 0.0}
 	var my_t := {"name": me["name"], "color": me["color"], "rim": me.get("rim", "#ffffff"), "perf": float(me["perf"]), "rel": clampf(float(me["rel"]) + float(eng["relMod"]), 0.75, 0.98), "crew": float(me["crew"]), "strategy": float(me["strategy"]), "eng_eff": float(eng["eff"])}
 	for k in 2:
 		entries.append({"cls": cls, "team": my_t, "k": k, "ti": 99, "crew": my_crew(k), "mine": true})
@@ -1055,6 +1056,8 @@ func car_stats() -> Dictionary:
 	var ex := hq_extra()
 	if is_wec():
 		var eng: Dictionary = DB.wec["engines"].get(t.get("engine", ""), {"pwr": 0.88, "eff": 1.0, "relMod": 0.0})
+		if is_spec_tier():
+			eng = {"pwr": 0.88, "eff": 1.0, "relMod": 0.0}
 		var pf: float = float(t["perf"])
 		var rows_w := [
 			["에어로(공력)", 0.76 + pf * 0.16, hq_bonus("aero") + ex["aero"]],

@@ -185,6 +185,13 @@ func _init() -> void:
 	if ci.cal_len() != 6 or ci.my_class() != "P3" or ci.next_circuit() != "sepang_wec":
 		print("  ! 아시안 르망 리그 설정 이상: %d경기 %s %s" % [ci.cal_len(), ci.my_class(), ci.next_circuit()])
 		fails += 1
+	# 스펙 리그: 내 차도 엔진 패키지 연비·신뢰성 보정 없음 (AI 와 같음)
+	ci.hq["engine_supplier"] = "Toyota H8909 3.5L V6 Twin-Turbo Hybrid"
+	ci.my_team_dict()["engine"] = ci.hq["engine_supplier"]
+	for en in ci.race_opts()["wec_entries"]:
+		if en["mine"] and float(en["team"].get("eng_eff", 1.0)) != 1.0:
+			print("  ! 스펙 리그 내 차에 엔진 연비 보정 %.2f" % float(en["team"]["eng_eff"]))
+			fails += 1
 	ci.hq["lemans_invite"] = true
 	var rc0: int = int(ci.hq["race_count"])
 	ci.start_invite()

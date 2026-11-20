@@ -48,6 +48,7 @@ func open() -> void:
 	_panel.custom_minimum_size = Vector2(minf(620.0, vs.x - 32.0), 0)
 	_scroll.custom_minimum_size = Vector2(0, minf(640.0, vs.y - 70.0))
 	visible = true
+	move_to_front() # 일시정지 창 등 나중에 올라온 창보다 위에
 	_render()
 
 

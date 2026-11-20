@@ -604,9 +604,15 @@ func _refresh_drive(c, ord: Array) -> void:
 		var ik: String = String(INSTR[i][0])
 		var base_lbl: String = String(INSTR[i][1])
 		var waiting: bool = (ik == "attack" or ik == "defend" or ik == "hold") and not sim.instr_active(c, ik)
-		var lbl: String = ("%s(대기)" % base_lbl) if waiting else base_lbl
-		if _instr_btns[i].text != lbl:
-			_instr_btns[i].text = lbl
+		# 대기 중이면 글자는 그대로, 색만 주황 (폰 가로에서 "(대기)" 가 잘림)
+		if _instr_btns[i].text != base_lbl:
+			_instr_btns[i].text = base_lbl
+		if waiting:
+			_instr_btns[i].add_theme_color_override("font_color", K.AMBER)
+			_instr_btns[i].add_theme_color_override("font_pressed_color", Color("#b45309"))
+		else:
+			_instr_btns[i].remove_theme_color_override("font_color")
+			_instr_btns[i].remove_theme_color_override("font_pressed_color")
 	_press(_instr_btns, INSTR, c.instr)
 	_instr_fx.text = _fx_line(c, "instr", c.instr)
 	var tt_txt := "차가움" if c.tt < 0.42 else ("과열" if c.tt > 0.8 else "적정")

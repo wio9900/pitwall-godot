@@ -3286,6 +3286,8 @@ func mode_effects(c, kind: String, key: String) -> Dictionary:
 				pros.append("연료 -14%")
 				pros.append("기계부하 -14%/랩 · 타이어 냉각")
 				cons.append("랩당 +0.32초")
+	if not active and wait_reason != "" and sc:
+		wait_reason = "SC·VSC 중"
 	return {"pros": pros, "cons": cons, "active": active, "wait_reason": wait_reason}
 
 

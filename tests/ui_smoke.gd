@@ -56,6 +56,13 @@ func _process(_delta: float) -> bool:
 				print("  ! 일시정지가 멈추지 않음")
 				quit(1)
 				return true
+			# 일시정지 중 설정: 설정 창이 일시정지 창보다 위 (#16)
+			main._open_settings()
+			if main.settings_view.get_index() < main.pause_box.get_index():
+				print("  ! 설정 창이 일시정지 창 뒤에 깔림")
+				quit(1)
+				return true
+			main.settings_view._on_close()
 			main._close_pause()
 			if main.speed_x == 0:
 				print("  ! 계속하기 후에도 멈춰 있음")
