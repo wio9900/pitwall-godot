@@ -20,6 +20,8 @@ const LABEL := Color("#7d8796")
 const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
 const BANNER_H := 34.0 # 화면 아래 안내 띠 높이
 const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같게)
+const CAR_U_PER_M := 14.4 / 5.6 # 차 그림 길이: 코드 F1(윙 끝~노즈 14.4) = 실제 5.6m
+const DB = preload("res://scripts/data/game_db.gd")
 
 var sim: Variant = null
 var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
@@ -33,6 +35,7 @@ var banner_t := -10.0
 ## 연습·예선 화면용: 차 한 대만 그린다 {car, dist(트랙 거리)}. null 이면 레이스 모드.
 var solo: Variant = null
 var _fcls := ""   # 자세히 그릴 클래스 (WEC 에서 내 차 클래스)
+var _tex := {}    # 팀 그림 캐시 "클래스|팀" → Texture2D 또는 null
 
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0
@@ -91,6 +94,7 @@ class Layer extends Control:
 
 func _init() -> void:
 	_ci = self
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS # 256px 차 그림을 작게 줄여도 자글거리지 않게
 	_layer = Layer.new()
 	_layer.host = self
 	_layer.show_behind_parent = true
@@ -830,7 +834,8 @@ func _focus_cls() -> String:
 
 func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	var sc := _car_scale(c.mine)
-	if _fcls != "" and c.cls != _fcls and not c.mine:
+	var tex: Texture2D = _car_tex(c)
+	if tex == null and _fcls != "" and c.cls != _fcls and not c.mine:
 		_draw_car_simple(pos, ang, c, sc * 0.92, night)
 		return
 	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
@@ -838,13 +843,15 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 		var beam := Color(1, 0.97, 0.78, 0.38)
 		var fade := Color(1, 0.97, 0.78, 0.0)
 		_ci.draw_polygon(PackedVector2Array([Vector2(4, -2), Vector2(28, -9), Vector2(28, 9), Vector2(4, 2)]), PackedColorArray([beam, fade, fade, beam]))
+	if tex != null:
+		_draw_car_tex(c, tex)
+		_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
+		return
 	# 그림자
 	_ci.draw_colored_polygon(_car_body(Vector2(0.8, 1.1)), Color(0, 0, 0, 0.35))
-	# 내 차 강조 링 · DRS 오라
+	# 내 차: 얇은 테두리 (DRS 는 리어 윙 색으로 — 큰 원 대신)
 	if c.mine:
-		_ellipse(Vector2.ZERO, Vector2(9.5, 6.2), AMBER, 2.0 if c.slot == sel_slot else 1.3)
-	if c.drs and not sim.sc:
-		_ellipse(Vector2(-1, 0), Vector2(10.5, 6.8), GREEN, 1.4)
+		_mine_outline(Rect2(-7.2, -5.0, 14.4, 10.0), c)
 	if c.cls != "F1":
 		_draw_wec_body(c)
 		_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
@@ -861,7 +868,7 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_ci.draw_rect(Rect2(-4.6, -4.7, 1.2, 1.3), tcol)
 	_ci.draw_rect(Rect2(-4.6, 3.4, 1.2, 1.3), tcol)
 	# 리어·프런트 윙
-	_ci.draw_rect(Rect2(-7.2, -4.2, 1.6, 8.4), c.rim)
+	_ci.draw_rect(Rect2(-7.2, -4.2, 1.6, 8.4), GREEN if c.drs and not sim.sc else c.rim)
 	_ci.draw_rect(Rect2(5.8, -4.4, 1.4, 8.8), c.rim)
 	# 바디 (노즈 + 사이드포드)
 	_ci.draw_colored_polygon(_car_body(Vector2.ZERO), c.color)
@@ -870,6 +877,32 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_fill_ellipse(Vector2(-0.5, 0), Vector2(2.0, 1.1), Color("#11161d"))
 	_ci.draw_arc(Vector2(-0.3, 0), 1.6, -1.2, 1.2, 8, Color("#6b7280"), 0.5)
 	_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+## 팀 그림 (수정 18, data/car_art.json): 실제 길이 비율로 그림자 → 그림 → DRS 열리면 리어 윙 초록 → 내 차 테두리
+func _draw_car_tex(c, tex: Texture2D) -> void:
+	var L: float = CAR_U_PER_M * float(DB.car_art["len_m"].get(c.cls, 5.0))
+	var W: float = L * tex.get_height() / tex.get_width()
+	var r := Rect2(-L * 0.5, -W * 0.5, L, W)
+	_ci.draw_texture_rect(tex, Rect2(r.position + Vector2(0.8, 1.1), r.size), false, Color(0, 0, 0, 0.35))
+	_ci.draw_texture_rect(tex, r, false)
+	if c.drs and not sim.sc:
+		_ci.draw_rect(Rect2(r.position.x, -W * 0.4, L * 0.07, W * 0.8), Color(GREEN, 0.9))
+	if c.mine:
+		_mine_outline(r, c)
+
+
+func _mine_outline(r: Rect2, c) -> void:
+	_round_rect_line(r.grow(0.7), 2.2, AMBER, 1.0 if c.slot == sel_slot else 0.6)
+
+
+## 팀 그림 찾기 (클래스·팀마다 한 번만 불러옴, 없으면 null → 코드 그림)
+func _car_tex(c) -> Texture2D:
+	var k: String = c.cls + "|" + c.team
+	if not _tex.has(k):
+		var f: String = DB.car_art.get(c.cls, {}).get(c.team, "")
+		_tex[k] = load("res://assets/cars/%s.png" % f) if f != "" else null
+	return _tex[k]
 
 
 ## 간단 모델: 클래스별 실루엣 크기만 다른 둥근 사각형 + 앞쪽 표시 (그리기 3번)
@@ -955,14 +988,6 @@ func _car_body(o: Vector2) -> PackedVector2Array:
 	for p in pts:
 		out.append(p + o)
 	return out
-
-
-func _ellipse(center: Vector2, r: Vector2, col: Color, width: float) -> void:
-	var pts := PackedVector2Array()
-	for k in 25:
-		var a := TAU * k / 24.0
-		pts.append(center + Vector2(cos(a) * r.x, sin(a) * r.y))
-	_ci.draw_polyline(pts, col, width, true)
 
 
 func _fill_ellipse(center: Vector2, r: Vector2, col: Color) -> void:

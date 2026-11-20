@@ -13,6 +13,7 @@ static var career: Dictionary = {}
 static var wec: Dictionary = {}
 static var wec_keys: Array = []
 static var names: Dictionary = {}
+static var car_art: Dictionary = {}   # 트랙 위 차 그림: 클래스 → 팀 → 파일 (data/car_art.json)
 static var _tracks: Dictionary = {}
 
 
@@ -31,6 +32,7 @@ static func load_all() -> void:
 		circuits[k] = cw[k]
 	career = _read_json("res://data/career_f1.json")
 	names = _read_json("res://data/names.json")
+	car_art = _read_json("res://data/car_art.json")
 	loaded = true
 
 

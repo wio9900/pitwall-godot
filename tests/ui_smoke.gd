@@ -235,5 +235,16 @@ func _process(_delta: float) -> bool:
 		print("  ! 이어하기 테스트가 돌지 않음")
 		quit(1)
 		return true
+	# 수정 18: data/car_art.json 의 차 그림이 전부 있어야 함 (없으면 코드 그림으로 조용히 바뀌어 모름)
+	var art: Dictionary = DB.car_art
+	var n_art := 0
+	for cls in ["F1", "HY"]:
+		for team in art.get(cls, {}):
+			n_art += 1
+			if not ResourceLoader.exists("res://assets/cars/%s.png" % art[cls][team]):
+				print("  ! 차 그림 없음: %s %s" % [cls, team])
+				quit(1)
+				return true
+	print("차 그림 연결 %d개 확인" % n_art)
 	print("UI 테스트 통과 (%d프레임)" % frames)
 	return true
