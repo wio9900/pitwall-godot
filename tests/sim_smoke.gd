@@ -47,6 +47,33 @@ func _init() -> void:
 			if fx["pros"].is_empty() or fx["cons"].is_empty():
 				print("  ! %s %s %s: 장점 또는 대가 표시 없음 %s" % [wk[0], kk[0], kk[1], fx])
 				fails += 1
+	# 전략 뷰: 스틴트가 0랩부터 끊김 없이 이어지고, 예상 피트는 앞으로의 랩, 언더컷은 기회·위협 둘 다 계산
+	var sv = RaceSimS.new()
+	sv.new_race("monza", 0, 20, "dry", ["M", "M"], 515)
+	sv.prepare_start()
+	var sg := 0
+	while sv.leader_lap < 12 and not sv.done and sg < 100000:
+		sv.advance(1.0)
+		sg += 1
+	var sv_bad := 0
+	var cuts := 0
+	var sv_ord: Array = sv.order()
+	for j in sv_ord.size():
+		var o = sv_ord[j]
+		var sl: Array = sv.stints(o)
+		if int(sl[0][1]) != 0 or int(sl[-1][2]) < o.lap:
+			sv_bad += 1
+		for q in range(1, sl.size()):
+			if int(sl[q][1]) != int(sl[q - 1][2]):
+				sv_bad += 1
+		var ep: Variant = sv.est_next_pit(o)
+		if ep != null and (int(ep[0]) <= o.lap or int(ep[1]) < int(ep[0])):
+			sv_bad += 1
+		if j > 0 and sv.undercut_net(o, sv_ord[j - 1]) != null:
+			cuts += 1
+	print("  전략 뷰: 이상 %d · 언더컷 계산된 쌍 %d" % [sv_bad, cuts])
+	if sv_bad > 0 or cuts == 0:
+		fails += 1
 	# 자동 전략: 내 차 두 대를 자동(A·B)에 맡겨 완주 + 컴파운드 규정 위반 없는지
 	for key in ["monza", "silverstone", "singapore", "interlagos"]:
 		for n in 2:

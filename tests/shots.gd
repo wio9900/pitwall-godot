@@ -89,6 +89,12 @@ func _process(_delta: float) -> bool:
 			step = 46
 		46:
 			_shot("race_tab_laps")
+			main.race_panel._on_tab("strat")
+			main._refresh_ui()
+			wait = 3
+			step = 471
+		471:
+			_shot("race_tab_strat")
 			main._on_tower_click(str(main.sim.order()[0].id))
 			wait = 3
 			step = 48
@@ -168,6 +174,16 @@ func _process(_delta: float) -> bool:
 			step = 112
 		112:
 			_shot("portrait_laps")
+			main.race_panel._on_tab("strat")
+			step = 1141
+		1141:
+			main.sim.advance(1.5)
+			if main.sim.leader_lap >= 10 or main.sim.done:
+				main._refresh_ui()
+				wait = 4
+				step = 1151
+		1151:
+			_shot("portrait_strat")
 			root.size = Vector2i(1100, 1200) # 폴드 펼친 화면 비율
 			main._on_resize()
 			main.race_panel._on_tab("drive")

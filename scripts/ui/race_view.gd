@@ -28,6 +28,7 @@ var sim: Variant = null
 var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
 var speed_hint := 4.0        # 화면 배속 (빠를수록 위치 보정을 빠르게 → 끊김 방지)
 var sel_slot := 0            # 강조 링을 굵게 그릴 내 차
+var ghost_on := false        # 피트·전략 탭: 선택한 내 차의 '지금 박스하면 복귀할 자리'를 반투명으로
 var lights := -1             # 출발 신호: -1 숨김, 0~5 점등 개수
 var lights_out_t := -10.0    # 소등 시각(실시간) — GO! 표시용
 var banner_text := ""
@@ -487,6 +488,8 @@ func _draw() -> void:
 			_draw_car(_X(sp["p"]), sp["a"], c, night)
 	_draw_crews()
 	_draw_flashes()
+	if ghost_on:
+		_draw_ghost(font)
 	_draw_my_labels(font)
 	_draw_safety_car(font)
 	_draw_popups(font)
@@ -1044,6 +1047,43 @@ func _draw_my_labels(font) -> void:
 			_ci.draw_rect(box, Color(0.08, 0.1, 0.13, 0.88 * a))
 			_ci.draw_rect(box, Color(AMBER, 0.8 * a), false, 1.5)
 			_ci.draw_string(font, bp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, a))
+
+
+## 박스 시 복귀 자리: 복귀 예측의 앞차·뒤차 사이를 시간 간격 비율로 나눈 트랙 위 점
+func _draw_ghost(font) -> void:
+	var mc: Array = sim.my_cars()
+	if sel_slot >= mc.size():
+		return
+	var c = mc[sel_slot]
+	if sim.is_pitting(c) or not _smooth.has(c.id):
+		return
+	var pr: Variant = sim.predict_pit(c)
+	if pr == null:
+		return
+	var T = sim.T
+	var v: float = T.L / maxf(30.0, c.last_lap_t if c.last_lap_t > 0.0 else 90.0) # 트랙 거리/초
+	var d: float
+	var ah = pr["ahead"]
+	var bh = pr["behind"]
+	var da: Variant = _smooth.get(ah[0].id, {}).get("d") if ah != null else null # 피트레인 차는 트랙 거리 없음
+	var db: Variant = _smooth.get(bh[0].id, {}).get("d") if bh != null else null
+	if da != null and db != null:
+		var back: float = fposmod(float(da) - float(db), T.L)
+		d = float(da) - back * float(ah[1]) / maxf(0.01, float(ah[1]) - float(bh[1]))
+	elif da != null:
+		d = float(da) - float(ah[1]) * v
+	elif db != null:
+		d = float(db) - float(bh[1]) * v
+	else:
+		return
+	d = fposmod(d, T.L)
+	var q := _X(T.point_at_dist(d))
+	var r := 9.0 * _car_scale(true)
+	_ci.draw_circle(q, r, Color(GREEN, 0.25))
+	_ci.draw_arc(q, r, 0, TAU, 28, Color(GREEN, 0.9), 2.0, true)
+	var t := "박스 시 P%d" % int(pr["pos"])
+	_ci.draw_string_outline(font, q + Vector2(r + 4, 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 4, Color(0, 0, 0, 0.7))
+	_ci.draw_string(font, q + Vector2(r + 4, 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, GREEN)
 
 
 func _draw_safety_car(font) -> void:

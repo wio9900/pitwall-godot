@@ -1711,6 +1711,7 @@ func _refresh_tower(_ord: Array, _leader) -> void:
 
 ## 지시판 탭이 바뀌면: 랩타임 탭에서만 상세 순위·무전 (다른 탭에선 그 공간을 비워 둔다)
 func _on_panel_tab(t: String) -> void:
+	race_view.ghost_on = t == "pit" or t == "strat" # 피트·전략 탭: 트랙에 '박스 시 복귀 자리' 표시
 	if tabs != null:
 		tabs.visible = t == "laps" or landscape == 2 # 정사각형 화면은 오른쪽 칸에 늘 보인다
 		_refresh_ui()

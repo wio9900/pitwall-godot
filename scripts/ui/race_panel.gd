@@ -9,8 +9,9 @@ signal tab_changed(t: String)  # 랩타임 탭에서만 상세 순위·무전을
 
 const K = preload("res://scripts/ui/kit.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
+const ChartS = preload("res://scripts/ui/strat_chart.gd")
 
-const TABS := [["drive", "주행"], ["pit", "피트"], ["power", "ERS·연료"], ["laps", "랩타임"]]
+const TABS := [["drive", "주행"], ["pit", "피트"], ["power", "ERS·연료"], ["laps", "랩타임"], ["strat", "전략"]]
 const INSTR := [["free", "자유"], ["attack", "추월"], ["defend", "방어"], ["hold", "유지"], ["lift", "연비"]]
 const PACE_ITEMS := [["attack", "공격"], ["standard", "표준"], ["save", "세이브"]]
 const ERS_ITEMS := [["harvest", "충전"], ["balance", "밸런스"], ["deploy", "오버테이크"]]
@@ -83,6 +84,10 @@ var _drv_info: RichTextLabel
 var _drv_card: PanelContainer
 # 랩타임
 var _laps_rtl: RichTextLabel
+# 전략 뷰
+var _st_pred: RichTextLabel
+var _st_cut: RichTextLabel
+var _st_chart: Control
 # 팀 오더
 var _order_row: HBoxContainer
 var _order_btns: Array = []
@@ -156,6 +161,10 @@ func _init() -> void:
 	_build_power(_pages["power"])
 	_laps_rtl = K.rtl(14)
 	_pages["laps"].add_child(_laps_rtl)
+	_st_pred = _rt(_pages["strat"], 14)
+	_st_cut = _rt(_pages["strat"], 14)
+	_st_chart = ChartS.new()
+	_pages["strat"].add_child(_st_chart)
 	# 팀 오더
 	_order_row = K.hbox(4)
 	add_child(_order_row)
@@ -582,6 +591,8 @@ func refresh() -> void:
 			_refresh_pit(c)
 		"power":
 			_refresh_power(c)
+		"strat":
+			_refresh_strat(c)
 		_:
 			_refresh_laps(c)
 	# 팀 오더: F1 에서 두 대 모두 달릴 때
@@ -841,6 +852,49 @@ func _nm(o) -> String:
 			n = n.replace(w, "")
 		return "%s #%d" % [n, o.slot + 1]
 	return o.code
+
+
+## 전략 뷰: 박스 시 복귀 순위 · 언더컷 기회/위협 · 선두 + 내 차 앞뒤 4대 스틴트 막대 (WEC 는 내 클래스)
+func _refresh_strat(c) -> void:
+	var pr: Variant = sim.predict_pit(c) if c.is_running() and c.started else null
+	if pr == null:
+		_st_pred.text = "[color=#8b98a5]레이스가 시작되면 '지금 박스하면 몇 위로 복귀하는지'와 언더컷 계산이 나와요. 트랙에는 복귀 자리가 반투명 차로 보여요.[/color]"
+	else:
+		var a: String = ("[b]%s[/b] 뒤 %.1f초" % [_nm(pr["ahead"][0]), float(pr["ahead"][1])]) if pr["ahead"] != null else "선두로 복귀"
+		var b: String = (" · [b]%s[/b] 앞 %.1f초" % [_nm(pr["behind"][0]), -float(pr["behind"][1])]) if pr["behind"] != null else ""
+		_st_pred.text = "[color=#8b98a5]지금 박스하면[/color]  [font_size=22][b]P%d → P%d[/b][/font_size]\n%s%s [color=#8b98a5]· 손실 %.1f초[/color]" % [sim.class_pos(c), int(pr["pos"]), a, b, float(pr["loss"])]
+	# 언더컷: 기회 = 내가 앞차를, 위협 = 뒤차가 나를 (상대 마모는 비공개 → 달린 랩으로 추정)
+	var cls_ord: Array = []
+	for o in sim.order_ui():
+		if o.cls == c.cls and o.dnf == "":
+			cls_ord.append(o)
+	var i: int = cls_ord.find(c)
+	var lines: Array = []
+	if sim.is_wec():
+		lines.append("[color=#8b98a5]WEC 는 정차 시간(급유·교대) 차이가 커서 언더컷 대신 위 복귀 예측으로 판단해요.[/color]")
+	elif i >= 0 and c.is_running():
+		var op: Variant = pr["under"] if pr != null else null
+		if op != null:
+			if float(op["net"]) > 0.0:
+				lines.append("[color=#22c55e]▲ 기회: %s 언더컷 유력 +%.1f초[/color]" % [op["code"], float(op["net"])])
+			else:
+				lines.append("[color=#8b98a5]▲ %s 언더컷: %.1f초 부족[/color]" % [op["code"], -float(op["net"])])
+		if i + 1 < cls_ord.size():
+			var th: Variant = sim.undercut_net(cls_ord[i + 1], c)
+			if th != null and float(th["net"]) > 0.0:
+				lines.append("[color=#ef4444]▼ 위협: %s 가 먼저 들어오면 나를 넘음 (약 %.1f초)[/color]" % [th["code"], float(th["net"])])
+			elif th != null:
+				lines.append("[color=#8b98a5]▼ %s 언더컷 위협 낮음 (%.1f초 모자람)[/color]" % [th["code"], -float(th["net"])])
+		lines.append("[color=#6b7280]상대 마모는 비공개 — 달린 랩·컴파운드로 추정[/color]")
+	_st_cut.text = "\n".join(lines)
+	# 스틴트 막대: 선두 + 내 차 앞뒤 4대
+	var rows: Array = []
+	for j in cls_ord.size():
+		if j != 0 and absi(j - i) > 4:
+			continue
+		var o = cls_ord[j]
+		rows.append({"label": "%d %s" % [j + 1, o.code], "mine": o.mine, "sel": o == c, "stints": sim.stints(o), "est": sim.est_next_pit(o)})
+	_st_chart.set_rows(rows, sim.laps, mini(sim.laps, sim.leader_lap + 1), sim.TYRE_HEX)
 
 
 const GRADE_COL := {"P": "#a855f7", "G": "#ffc53d", "S": "#cbd5e1", "B": "#d97706"}

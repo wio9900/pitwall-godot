@@ -3525,21 +3525,69 @@ func predict_pit(c) -> Variant:
 			best_b = [o, after]
 	var under: Variant = null
 	var i := ord.find(c)
-	if not is_wec() and i > 0 and SLICK.has(c.comp):
-		var front = ord[i - 1]
-		if front.pit_phase == 0 and SLICK.has(front.comp) and front.cross.size() > k:
-			var ns: Variant = next_stop(c)
-			var nc: String = c.pit_req if c.pit_req != "" else (String(ns["comp"]) if ns != null else "M")
-			if not SLICK.has(nc):
-				nc = "M"
-			var wr: float = float(COMP[front.comp][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85
-			var fw: float = minf(1.0, front.stint_laps * wr)
-			var gain_lap: float = c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + float(COMP[c.comp][0]) - float(COMP[nc][0])
-			var front_lap: float = fw * fw * float(COMP[front.comp][2])
-			var gp: float = float(c.cross[k]) - float(front.cross[k])
-			under = {"code": front.code, "net": (gain_lap + front_lap * 0.5) * 2.0 - 1.0 - gp}
+	if i > 0:
+		under = undercut_net(c, ord[i - 1])
 	return {"pos": n_ahead + 1, "ahead": best_a, "behind": best_b, "loss": loss, "under": under, "ahead_ids": ahead_ids}
 
+
+## 공개 정보로 본 타이어 마모율(랩당). 남의 차는 실제 마모를 모르니 달린 랩 × 컴파운드 기준값(×0.85)
+func est_wear_rate(comp: String) -> float:
+	return float(COMP[comp][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85
+
+
+func _seen_wear(o) -> float:
+	return o.wear if o.mine else minf(1.0, o.stint_laps * est_wear_rate(o.comp))
+
+
+## 언더컷 계산 (F1 슬릭만): att 가 지금 박스, dfn 은 한 랩 더 → net > 0 이면 att 가 앞에 나올 전망(초).
+## 내 차 기회(att = 나)와 위협(dfn = 나)에 같이 쓴다. 남의 차는 공개 정보(달린 랩)로 마모 추정
+func undercut_net(att, dfn) -> Variant:
+	if is_wec() or sc or wet >= 0.2 or not SLICK.has(att.comp) or not SLICK.has(dfn.comp) or dfn.pit_phase != 0:
+		return null # SC·젖은 노면에선 언더컷 계산이 의미 없음 (복귀 예측만)
+	var k: int = att.cross.size() - 1
+	if k < 0 or dfn.cross.size() <= k:
+		return null
+	var nc := "M"
+	if att.mine:
+		var ns: Variant = next_stop(att)
+		nc = att.pit_req if att.pit_req != "" else (String(ns["comp"]) if ns != null else "M")
+		if not SLICK.has(nc):
+			nc = "M"
+	var aw: float = _seen_wear(att)
+	var dw: float = _seen_wear(dfn)
+	var gain_lap: float = aw * aw * float(COMP[att.comp][2]) + cliff_pen(att.comp, aw) + float(COMP[att.comp][0]) - float(COMP[nc][0])
+	var dfn_lap: float = dw * dw * float(COMP[dfn.comp][2])
+	var gp: float = float(att.cross[k]) - float(dfn.cross[k])
+	return {"code": dfn.code if att.mine else att.code, "net": (gain_lap + dfn_lap * 0.5) * 2.0 - 1.0 - gp}
+
+
+## 전략 뷰: 지금까지의 스틴트 [[comp, 시작 랩, 끝 랩]] (피트 기록에서)
+func stints(o) -> Array:
+	var out: Array = []
+	var a := 0
+	for pl in o.pit_log:
+		out.append([String(pl["from"]), a, int(pl["lap"])])
+		a = int(pl["lap"])
+	out.append([o.comp, a, maxi(a, o.lap)])
+	return out
+
+
+## 전략 뷰: 공개 정보로 추정한 다음 피트 랩 [이르면, 늦으면] (없으면 null).
+## F1 = 컴파운드 기준 수명(마모 0.52 근처), WEC = 탱크 한 통 거리(BoP 로 같은 클래스는 거의 같음)
+func est_next_pit(o) -> Variant:
+	if not o.is_running() or o.pit_phase != 0:
+		return null
+	var at: float
+	if is_wec():
+		at = o.stint_start_lap + floor(TANK / FPL)
+	elif SLICK.has(o.comp):
+		at = o.stint_start_lap + 0.52 / maxf(0.001, est_wear_rate(o.comp))
+	else:
+		return null
+	if at >= laps - 1:
+		return null # shortcut: F1 두 컴파운드 규정은 안 봄 — 미사용 차가 막판 피트하면 표시 없이 들어감, 필요하면 used 로 보강
+	var lo: int = maxi(o.lap + 1, int(at) - 1)
+	return [lo, maxi(lo, int(at) + 1)]
 
 ## WEC 엔트리: 하이퍼카(HY) 팀별 1~2대 + LMGT3(GT) 9팀 × 2대. 팀·크루는 data/wec.json (HTML WEC_FIELD 그대로).
 ## opts.wec_hy / wec_gt / wec_field 로 커리어용 명단을 넘길 수 있다.
