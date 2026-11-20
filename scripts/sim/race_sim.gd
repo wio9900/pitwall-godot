@@ -2131,11 +2131,17 @@ func apply_pit(c) -> void:
 		if d.get("fuel", true):
 			var fill: float = float(d.get("fill", 1.0))
 			var add: float = fuel_add(c, fill)
+			# 결과 확인: 부분 급유로 아낀 정차 시간 (같은 조건 가득 대비) → 무전·복기
+			var fuel_save: float = 0.0
+			if fill < 0.98 and add > 0.0:
+				fuel_save = wec_stop_time(c, d["tyres"], d.get("driver", false), true, 1.0) - wec_stop_time(c, d["tyres"], d.get("driver", false), true, fill)
+				if not c.pit_log.is_empty() and int(c.pit_log[-1]["lap"]) == c.lap + 1:
+					c.pit_log[-1]["fuel_save"] = snappedf(fuel_save, 0.1)
 			if add > 0.0:
 				c.fuel += add
 				_fuel_stat[0] += add / TANK
 				_fuel_stat[1] += 1
-				acts.append(("급유 +%.1f랩" % (add / maxf(0.01, _wec_burn(c, c.fuel_mode)))) if fill < 0.98 else "연료 급유")
+				acts.append(("급유 +%.1f랩 · 가득보다 −%.1f초" % [add / maxf(0.01, _wec_burn(c, c.fuel_mode)), fuel_save]) if fill < 0.98 else "연료 급유")
 		if d.get("driver", false):
 			var pick_d: int = int(d.get("drv", -1))
 			c.drv = pick_d if (pick_d >= 0 and pick_d < c.drivers.size() and pick_d != c.drv) else next_driver(c)

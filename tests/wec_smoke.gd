@@ -76,6 +76,15 @@ func _init() -> void:
 	var lm = RaceSimS.new()
 	lm.new_race("lemans", 0, 60, "dry", ["M", "M"], 3131)
 	lm.prepare_start()
+	# 부분 급유는 가득보다 정차가 짧아야 (무전·복기 "가득보다 −N초"의 근거)
+	var lc = lm.my_cars()[0]
+	var fuel0: float = lc.fuel
+	lc.fuel = lm.TANK * 0.1
+	var fsave: float = lm.wec_stop_time(lc, true, false, true, 1.0) - lm.wec_stop_time(lc, true, false, true, 0.4)
+	lc.fuel = fuel0
+	print("   부분 급유(탱크 30%%분) 정차 절약 %.1f초" % fsave)
+	if fsave <= 0.0:
+		fails += 1
 	var gl := 0
 	while not lm.done and gl < 200000:
 		lm.advance(20.0)

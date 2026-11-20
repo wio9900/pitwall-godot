@@ -358,6 +358,8 @@ func _pit_line(c, ev: Dictionary) -> String:
 		var med: float = float(stops[stops.size() / 2])
 		stop_d = float(ev["loss"]) - med
 		why = " · 피트 %.1f초 (보통 %.1f초, %+.1f)" % [float(ev["loss"]), med, stop_d]
+	if float(ev.get("fuel_save", 0.0)) > 0.05:
+		why += " · 부분 급유로 가득보다 −%.1f초" % float(ev["fuel_save"])
 	var tag := "순위 유지"
 	if better >= 1:
 		tag = "[color=#22c55e]%d계단 얻음[/color]" % better
