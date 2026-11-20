@@ -13,6 +13,7 @@
 
 ## 협업 안전 규칙
 - **AI마다 다른 브랜치**에서 작업 (예: `feat/<작업이름>`). 같은 브랜치를 두 도구가 동시에 고치지 않기. main 병합은 사용자가 직접.
+- 다른 AI(Claude 외)는 `feat/career-depth` 에서 `ai/<작업이름>` 브랜치를 새로 만들어 작업하고, **`feat/career-depth` 로 PR** 을 연다(main 아님). 합치기·작업목록 정리는 Claude 가 한다 → 다른 AI 는 `docs/작업목록.md`·`docs/업데이트예정.md` 를 고치지 말고 PR 설명에 ① 바꾼 함수 ② 확인 못 한 것 ③ 손대지 않은 문제를 적기.
 - **APK 서명 키(GitHub Secrets PITWALL_KEYSTORE / PITWALL_KEY_PASS)는 절대 요청·출력·변경하지 않기.** 키가 바뀌면 기존 앱 위에 덮어 설치가 안 됨.
 - 커밋 작성자 이메일은 GitHub noreply 주소만 (개인 이메일 금지).
 - 푸시 후 GitHub Actions(ci.yml) 통과를 확인하고 결과를 알리기.

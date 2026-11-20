@@ -132,9 +132,12 @@ func _draw() -> void:
 		if out:
 			g = "OUT"
 			gcol = Color("#5d6674")
-		elif sim.is_pitting(c) or c.boxing != null:
+		elif sim.is_pitting(c):
 			g = "PIT"
 			gcol = Color("#ffc53d")
+		elif c.boxing != null:
+			g = "수리" # 손상(강제 피트) — 아직 트랙 위에서 피트로 가는 중
+			gcol = Color("#ef4444")
 		elif gap_mode == 2:
 			g = _fmt_lap(c.last_lap_t)
 			if c.id == sim.fastest_id:

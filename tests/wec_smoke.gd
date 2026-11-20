@@ -127,5 +127,31 @@ func _init() -> void:
 		CareerS.delete_save()
 		if fail_n * 10 > ai_n:
 			fails += 1
+	# 수정 13: 손상 → 피트까지 절뚝이며(랩타임 +15~40%), 피트에서 감속 해제
+	var dm = RaceSimS.new()
+	dm.new_race("lemans", 0, 54, "dry", ["M", "M"], 4242)
+	dm.prepare_start()
+	while dm.leader_lap < 4:
+		dm.advance(1.0)
+	var hurt = null
+	for o in dm.cars:
+		if o.is_running() and o.boxing == null and o.pit_phase == 0 and not o.mine:
+			var tries := 0
+			while o.garage <= 0.0 and o.dnf == "" and tries < 20:
+				dm.damage(o, "테스트 접촉")
+				tries += 1
+			if o.garage > 0.0:
+				hurt = o
+				break
+	var limp0: float = hurt.limp if hurt != null else 0.0
+	var lap0: int = hurt.lap if hurt != null else 0
+	var guard2 := 0
+	while hurt != null and hurt.limp > 0.0 and not dm.done and guard2 < 5000:
+		dm.advance(0.5)
+		guard2 += 1
+	var limp_ok: bool = hurt != null and limp0 >= 0.15 and limp0 <= 0.40 and hurt.limp == 0.0 and hurt.pits >= 1 and hurt.lap <= lap0 + 1
+	print("   손상 절뚝이기: 감속 +%d%% → 피트 후 %.2f (피트 %d) %s" % [int(limp0 * 100.0), hurt.limp if hurt != null else -1.0, hurt.pits if hurt != null else -1, "OK" if limp_ok else "실패"])
+	if not limp_ok:
+		fails += 1
 	print("WEC 테스트 %dms 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)
