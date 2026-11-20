@@ -104,3 +104,29 @@ Pit Wall 작업 이어서 하자.
 새 함수가 필요하면(예: _on_w_fuel_step(dir: int)) "_on_w_fuel_sl 바로 다음"에 넣는다고 적어줘.
 확인: F1 레이스(wec 아님)에선 이 화면이 안 보이니 영향 없어야 함.
 ```
+
+### D-2. 트랙 위 차 그림 마무리 (수정 18b ②③) — 첨부: AGENTS.md, scripts/ui/race_view.gd, scripts/ui/kit.gd(읽기만), data/car_art.json(읽기만)
+
+```
+## 할 일: 트랙 위 팀 그림 차에 타이어 색 점 + 확대했을 때만 이름표 (화면만, sim 은 건드리지 마)
+
+배경: race_view.gd 는 팀 그림이 있으면 _draw_car_tex(c, tex) 로 PNG 를 그리고, 없으면 코드 그림(_draw_car)을 그린다.
+코드 그림 F1 은 바퀴마다 컴파운드 색 띠가 있는데(_draw_car 안 tcol = Color(sim.TYRE_HEX[c.comp])), 그림 차에는 없다.
+_draw_car_tex 는 이미 draw_set_transform(pos, ang, sc) 안에서 불린다 → 차 기준 좌표(앞 = +x, 차 길이 L, 폭 W)로 그리면 된다.
+
+할 일 1 — 그림 차 뒷바퀴 자리에 컴파운드 색 점
+- _draw_car_tex 안, 그림을 그린 뒤 · DRS 표시 앞에: 뒷바퀴 두 곳(대략 x = -L*0.33, y = ±W*0.42)에
+  반지름 L*0.035 정도의 원을 Color(sim.TYRE_HEX[c.comp]) 로. 테두리 없이, 그림을 많이 가리지 않게.
+- F1(오픈 휠)과 HY(풀 카울) 위치가 다를 수 있으니 c.cls 로 x·y 비율만 다르게 (숫자는 함수 위 const 딕셔너리 하나로).
+- 밤(sim.night)에도 보이게 약간 밝게 해도 됨.
+
+할 일 2 — 확대 추적 때만 다른 차 이름표
+- 차가 화면에서 충분히 클 때만(_car_scale(false) >= 2.6 정도, const 로) 내 차가 아닌 차 위에 c.code 를 작게(11~12px) 표시.
+- 위치·글자 그리기는 _draw_my_labels 의 방식(draw_string_outline + draw_string)을 따라 하되, 색은 kit.gd 의 DIM, 내 차는 이미 이름표가 있으니 제외.
+- 화면 밖 차는 건너뛰기 (Rect2(Vector2.ZERO, size).grow(40) 안에 있는지 확인) — 22대 + WEC 60대에서도 가볍게.
+- 새 함수 _draw_other_labels(font) 로 만들고 _draw() 에서 _draw_my_labels(font) 바로 앞에서 부르기.
+
+## 확인
+- 전체 화면(확대 안 함)에서는 이름표가 안 보여야 함. 추적(#1 추적)으로 확대하면 주변 차에만 보여야 함.
+- 그림 없는 팀(Williams 등, 코드 그림)은 지금처럼 그대로.
+```
