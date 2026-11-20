@@ -34,6 +34,19 @@ func _init() -> void:
 				fails += 1
 			print("%-12s #%d %s | 완주=%s 우승=%s(%s) | 스톱=%s 출발=%s DNF=%d | 계획 %dms" % [key, n, "비" if n == 2 else "맑음", ok, winner.code, winner.team, stops, starts, dnf, plan_ms])
 			print("    AI 전술·실수: %s" % sim.tally)
+	# 공짜 모드 없음: 표준·자유 외 페이스·지시는 장점과 대가가 둘 다 표시돼야 (F1·WEC)
+	for wk in [["monza", false], ["lemans", true]]:
+		var fs = RaceSimS.new()
+		fs.new_race(wk[0], 0, 12, "dry", ["M", "M"], 77)
+		if fs.is_wec() != wk[1]:
+			print("  ! %s 시리즈 판정 이상" % wk[0])
+			fails += 1
+		var fc = fs.my_cars()[0]
+		for kk in [["pace", "attack"], ["pace", "save"], ["instr", "attack"], ["instr", "defend"], ["instr", "hold"], ["instr", "lift"]]:
+			var fx: Dictionary = fs.mode_effects(fc, kk[0], kk[1])
+			if fx["pros"].is_empty() or fx["cons"].is_empty():
+				print("  ! %s %s %s: 장점 또는 대가 표시 없음 %s" % [wk[0], kk[0], kk[1], fx])
+				fails += 1
 	# 자동 전략: 내 차 두 대를 자동(A·B)에 맡겨 완주 + 컴파운드 규정 위반 없는지
 	for key in ["monza", "silverstone", "singapore", "interlagos"]:
 		for n in 2:

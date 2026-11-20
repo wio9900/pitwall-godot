@@ -3277,15 +3277,17 @@ func mode_effects(c, kind: String, key: String) -> Dictionary:
 			"hold":
 				pros.append("마모 -8% (앞차 1.5초 안일 때)")
 				if not is_wec():
-					pros.append("더티 에어 손실 대신")
-				cons.append("앞차와 1초까지 물러남 · 추월 시도 안 함")
+					var dirty_max: float = 0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * wet
+					pros.append("더티 에어(바짝 붙으면 랩당 +%.2f초) 피함" % dirty_max)
+					cons.append("1초 간격까지 물러나며 랩당 최대 +%.2f초" % (float(K["dirty"]) * 0.6))
+				cons.append("추월 시도 안 함")
 				if not active:
 					wait_reason = "앞차 1.5초 밖"
 			"lift":
 				pros.append("마모 -20%")
 				pros.append("연료 -14%")
 				pros.append("기계부하 -14%/랩 · 타이어 냉각")
-				cons.append("랩당 +0.32초")
+				cons.append("랩당 +0.32초 → 뒤차가 따라붙기 쉬움")
 	if not active and wait_reason != "" and sc:
 		wait_reason = "SC·VSC 중"
 	return {"pros": pros, "cons": cons, "active": active, "wait_reason": wait_reason}
