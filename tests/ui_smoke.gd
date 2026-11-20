@@ -132,6 +132,11 @@ func _process(_delta: float) -> bool:
 				print("❌ 확대해도 차가 안 커짐: %.2f → %.2f" % [k0, k8])
 				quit(1)
 				return true
+			# 18b ②③: 전체 화면에선 다른 차 이름표 숨김, 그림 차 타이어 점 위치 상수 존재
+			if k0 >= rv.OTHER_LABEL_SCALE or not rv.TYRE_DOT.has("F1") or not rv.TYRE_DOT.has("HY"):
+				print("❌ 다른 차 이름표 기준 또는 타이어 점 설정 이상: k0=%.2f" % k0)
+				quit(1)
+				return true
 			rp._on_confirm()
 			rp._on_cancel()
 			rp._on_chip(0)

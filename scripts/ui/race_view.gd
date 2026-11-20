@@ -23,6 +23,8 @@ const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같�
 const CAR_U_PER_M := 14.4 / 5.6 # 차 그림 길이: 코드 F1(윙 끝~노즈 14.4) = 실제 5.6m
 const TRACK_REAL_M := 13.0 # TRACK_W 가 나타내는 실제 트랙 폭 (르망·F1 서킷 약 12~15m)
 const DB = preload("res://scripts/data/game_db.gd")
+const K = preload("res://scripts/ui/kit.gd")
+const OTHER_LABEL_SCALE := 2.6 # 확대 추적 때 다른 차 이름표를 띄울 최소 차 배율
 
 var sim: Variant = null
 var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
@@ -490,6 +492,7 @@ func _draw() -> void:
 	_draw_flashes()
 	if ghost_on:
 		_draw_ghost(font)
+	_draw_other_labels(font)
 	_draw_my_labels(font)
 	_draw_safety_car(font)
 	_draw_popups(font)
@@ -885,13 +888,27 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## 팀 그림 (수정 18, data/car_art.json): 실제 길이 비율로 그림자 → 그림 → DRS 열리면 리어 윙 초록 → 내 차 테두리
+## 그림 차 뒷바퀴 타이어 색 점 위치 (차 길이 L·폭 W 대비 비율, 앞 = +x)
+const TYRE_DOT := {
+	"F1": Vector2(-0.33, 0.42),
+	"HY": Vector2(-0.31, 0.39),
+}
+
+
+## 팀 그림 (수정 18, data/car_art.json): 실제 길이 비율로 그림자 → 그림 → 타이어 색 점 → DRS 열리면 리어 윙 초록 → 내 차 테두리
 func _draw_car_tex(c, tex: Texture2D) -> void:
 	var L: float = CAR_U_PER_M * float(DB.car_art["len_m"].get(c.cls, 5.0))
 	var W: float = L * tex.get_height() / tex.get_width()
 	var r := Rect2(-L * 0.5, -W * 0.5, L, W)
 	_ci.draw_texture_rect(tex, Rect2(r.position + Vector2(0.8, 1.1), r.size), false, Color(0, 0, 0, 0.35))
 	_ci.draw_texture_rect(tex, r, false)
+	var dot: Vector2 = TYRE_DOT.get(c.cls, Vector2(-0.33, 0.42))
+	var tcol: Color = Color(sim.TYRE_HEX.get(c.comp, "#e6edf3"))
+	if sim.night:
+		tcol = tcol.lightened(0.2)
+	var dr: float = L * 0.035
+	_ci.draw_circle(Vector2(L * dot.x, -W * dot.y), dr, tcol)
+	_ci.draw_circle(Vector2(L * dot.x, W * dot.y), dr, tcol)
 	if c.drs and not sim.sc:
 		_ci.draw_rect(Rect2(r.position.x, -W * 0.4, L * 0.07, W * 0.8), Color(GREEN, 0.9))
 	if c.mine:
@@ -1015,6 +1032,24 @@ func _draw_spray(p: Vector2, ang: float, wet: float) -> void:
 	var mist := Color(0.85, 0.9, 1.0, 0.22 * wet + 0.08)
 	var clear := Color(0.85, 0.9, 1.0, 0.0)
 	_ci.draw_polygon(PackedVector2Array([base + side * 2.0, base + back * ln + side * spread, base + back * ln - side * spread, base - side * 2.0]), PackedColorArray([mist, clear, clear, mist]))
+
+
+## 확대 추적 때만 화면 안 다른 차 위에 짧은 이름표 표시
+func _draw_other_labels(font) -> void:
+	var sc: float = _car_scale(false)
+	if sc < OTHER_LABEL_SCALE:
+		return
+	var vis := Rect2(Vector2.ZERO, size).grow(40.0)
+	for c in sim.cars:
+		if c.mine or not _smooth.has(c.id):
+			continue
+		var q: Vector2 = _X(_smooth[c.id]["p"])
+		if not vis.has_point(q):
+			continue
+		var lp: Vector2 = q + Vector2(11, -9) * sc
+		var code: String = str(c.code)
+		_ci.draw_string_outline(font, lp, code, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(0, 0, 0, 0.7))
+		_ci.draw_string(font, lp, code, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, K.DIM)
 
 
 func _draw_my_labels(font) -> void:
