@@ -147,9 +147,12 @@ func _draw() -> void:
 		if out:
 			g = "OUT"
 			gcol = Color("#ef4444")
-		elif c.boxing != null or c.pit_phase == 2:
+		elif sim.is_pitting(c):
 			g = "PIT"
 			gcol = Color("#ffc53d")
+		elif c.boxing != null:
+			g = "수리" # 손상(강제 피트) — 아직 트랙 위에서 피트로 가는 중
+			gcol = Color("#ef4444")
 		elif c == lead:
 			g = "선두"
 			gcol = Color("#a855f7")

@@ -849,6 +849,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		t += 0.45 * sh * ws # 옐로 구간 감속
 	if c.lamp_out and night:
 		t *= 1.05 # 헤드라이트 없이 밤 주행
+	if c.limp > 0.0:
+		t *= 1.0 + c.limp # 손상 후 피트까지 감속
 	# 드라이버 특성
 	if not c.traits.is_empty():
 		if c.traits.has("saver") and c.stint_laps < 2:
@@ -1049,6 +1051,8 @@ func _dnf_detail(c, why: String) -> String:
 
 
 func retire(c, why: String) -> void:
+	if c.mine or (c.started and class_pos(c) <= 5):
+		BLog.add("리타이어 %s%s 클래스 P%d 랩%d · %s" % [name_of(c), " (내 차)" if c.mine else "", class_pos(c), c.lap + 1, why])
 	c.dnf_detail = _dnf_detail(c, why)
 	c.dnf = why
 	c.boxing = null
@@ -1095,12 +1099,18 @@ func damage(c, why: String) -> void:
 			say(c, "헤드라이트가 깨졌어요! 앞이 잘 안 보여요. 2랩 안에 박스해서 고쳐야 해요")
 		return
 	if rnd() < 0.6:
-		var lost: float = uni(1.5, 8.0) * float(CIRC["base"]) * laps / real_laps()
+		var sev: float = uni(1.5, 8.0)
+		var lost: float = sev * float(CIRC["base"]) * laps / real_laps()
 		c.garage += lost
 		c.repairs += 1
-		event("%s %s → 개러지 수리 (약 %d초 손실)" % [name_of(c), why, int(round(lost))], "bad")
+		# 부서진 차는 피트까지 절뚝이며 간다: 손상이 클수록(수리 시간이 길수록) 느리게, 피트에서 0
+		c.limp = maxf(c.limp, 0.15 + 0.25 * (sev - 1.5) / 6.5)
+		event("%s %s → 절뚝이며 피트로, 개러지 수리 (약 %d초 손실)" % [name_of(c), why, int(round(lost))], "bad")
+		c.limp_pos = class_pos(c)
+		if c.mine or c.limp_pos <= 5:
+			BLog.add("손상 %s%s 클래스 P%d 랩%d 섹터%d 수리 %.0f초 감속 +%d%%" % [name_of(c), " (내 차)" if c.mine else "", c.limp_pos, c.lap + 1, c.sec + 1, lost, int(round(c.limp * 100.0))])
 		if c.mine:
-			say(c, "%s. 피트로 들어가 수리합니다" % why)
+			say(c, "%s. 차가 망가져서 천천히 피트로 들어가 수리합니다 (랩타임 +%d%%)" % [why, int(round(c.limp * 100.0))])
 		if c.boxing == null:
 			c.boxing = {"comp": c.comp, "tyres": false, "driver": false, "fuel": false, "forced": true}
 			c.pit_total = WPIT["lane"] * pit_scale()
@@ -2095,8 +2105,26 @@ func apply_pit(c) -> void:
 	c.pits += 1
 	c.pit_req = ""
 	c.crew_out = false
+	if c.limp_pos > 0:
+		# 수정 13 감시: 부서진 차가 피트에 닿기 전에 순위가 올랐다면 그 순간 앞차들 상태와 함께 ⚠
+		var now_p: int = class_pos(c)
+		if now_p < c.limp_pos:
+			var st: Array = []
+			var n := 0
+			for o in order():
+				if o.cls != c.cls:
+					continue
+				n += 1
+				if n > c.limp_pos + 1:
+					break
+				st.append("P%d %s%s" % [n, o.code, " 피트" if is_pitting(o) else (" 수리중" if o.boxing != null else (" OUT" if o.dnf != "" else ""))])
+			BLog.warn("손상 차 %s 피트 가는 동안 P%d→P%d (SC %s) | %s" % [name_of(c), c.limp_pos, now_p, sc_kind if sc else "-", ", ".join(st)])
+		c.limp_pos = 0
+	if c.mine:
+		BLog.add("피트 %s%s 클래스 P%d 랩%d%s" % [name_of(c), " (내 차)" if c.mine else "", class_pos(c), c.lap + 1, " 수리 %.0f초" % c.garage if c.garage > 0.0 else ""])
 	c.pit_total += c.garage
 	c.garage = 0.0
+	c.limp = 0.0
 	if not c.pit_log.is_empty() and int(c.pit_log[-1]["lap"]) == c.lap + 1:
 		c.pit_log[-1]["loss"] = snappedf(c.pit_total, 0.1) # 복기: 피트로 잃은 시간(레인+정차)
 	if d["tyres"]:
