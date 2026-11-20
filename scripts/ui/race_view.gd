@@ -21,6 +21,7 @@ const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
 const BANNER_H := 34.0 # 화면 아래 안내 띠 높이
 const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같게)
 const CAR_U_PER_M := 14.4 / 5.6 # 차 그림 길이: 코드 F1(윙 끝~노즈 14.4) = 실제 5.6m
+const TRACK_REAL_M := 13.0 # TRACK_W 가 나타내는 실제 트랙 폭 (르망·F1 서킷 약 12~15m)
 const DB = preload("res://scripts/data/game_db.gd")
 
 var sim: Variant = null
@@ -817,9 +818,11 @@ func _draw_labels(T, font, night: bool) -> void:
 
 
 func _car_scale(is_mine: bool) -> float:
-	# 화면 크기에 맞춘 차 크기, 추적 카메라로 확대하면 조금 더 커진다
-	var base := clampf(minf(size.x, size.y) / 520.0, 0.9, 2.0)
-	return base * (1.15 if is_mine else 0.98) * clampf(sqrt(_cam_zoom), 1.0, 1.7)
+	# 수정 19: 차 크기 = max(전체 화면용 최소 크기, 실제 비율 크기)
+	# 최소 = 화면 짧은 변 기준 (고해상도 폰 상한 없음), 실제 = 트랙 폭(약 13m) 대비 차 길이 → 확대하면 차도 같이 커짐
+	var base := maxf(minf(size.x, size.y) / 520.0, 0.9)
+	var real: float = TRACK_W * _s / (TRACK_REAL_M * CAR_U_PER_M)
+	return maxf(base, real) * (1.15 if is_mine else 0.98)
 
 
 ## WEC: 내가 플레이하는 클래스만 자세한 모델, 다른 클래스는 간단한 모델 (그리기 부하 ↓)

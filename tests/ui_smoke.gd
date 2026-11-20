@@ -120,6 +120,18 @@ func _process(_delta: float) -> bool:
 					print("❌ 급유 −/+ 이상: %.3f → %.3f (하한 %.3f)" % [f1, float(rp.draft[rp.sel]["fill"]), lo])
 					quit(1)
 					return true
+			# #19: 확대하면 차도 트랙 비율로 커진다 (전체 화면 최소 크기 이상)
+			var rv = main.race_view
+			var s0: float = rv._s
+			var k0: float = rv._car_scale(false)
+			rv._s = s0 * 8.0
+			var k8: float = rv._car_scale(false)
+			rv._s = s0
+			var real8: float = rv.TRACK_W * s0 * 8.0 / (rv.TRACK_REAL_M * rv.CAR_U_PER_M)
+			if k8 < real8 * 0.98 - 0.001 or k8 < k0:
+				print("❌ 확대해도 차가 안 커짐: %.2f → %.2f" % [k0, k8])
+				quit(1)
+				return true
 			rp._on_confirm()
 			rp._on_cancel()
 			rp._on_chip(0)
