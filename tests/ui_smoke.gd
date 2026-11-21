@@ -199,13 +199,18 @@ func _process(_delta: float) -> bool:
 		var v = main.wk_view
 		# 공기압 −/+ 버튼 (21): 누르면 그 차 공기압이 0.5 psi 바뀌어야 함
 		var psi0: Array = main.wk.my_cars().map(func(cc): return float(cc.psi))
-		for b in v.find_children("*", "Button", true, false):
-			if b.text == "−" and not b.disabled and b.custom_minimum_size.x == 44:
-				b.pressed.emit()
+		# 이미 최소면 − 는 그대로가 맞으니 + 도 눌러 본다 (둘 다 안 바뀌면 실패)
+		var psi1: Array = psi0
+		for sign_t in ["−", "+"]:
+			for b in v.find_children("*", "Button", true, false):
+				if b.text == sign_t and not b.disabled and b.custom_minimum_size.x == 44:
+					b.pressed.emit()
+					break
+			psi1 = main.wk.my_cars().map(func(cc): return float(cc.psi))
+			if psi1 != psi0:
 				break
-		var psi1: Array = main.wk.my_cars().map(func(cc): return float(cc.psi))
 		if psi0 == psi1:
-			print("  ! 공기압 − 버튼이 값을 안 바꿈: %s" % [psi0])
+			print("  ! 공기압 −/+ 버튼이 값을 안 바꿈: %s" % [psi0])
 			quit(1)
 		print("공기압 − 버튼: %s → %s" % [psi0, psi1])
 		main.wk.practice_run(0, "short", "M", "new")
