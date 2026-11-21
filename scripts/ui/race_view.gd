@@ -184,16 +184,17 @@ func _update_camera(delta: float) -> void:
 # ═════════ 차량 위치: 실제 순서보다 앞서 그리지 않고, 부드럽게 보간 ═════════
 func _update_cars(delta: float) -> void:
 	var T = sim.T
-	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px)
-	var gap_d: float = maxf(T.L * 0.0045, 15.0 * _car_scale(false) / maxf(_s, 0.01))
-	var last_by_cls := {} # 클래스별로 앞차보다 앞서 그리지 않기
+	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px). 트랙 길이 비례로 두면 르망 같은 긴 서킷에서
+	# 대열이 실제보다 2~3배 늘어나 뒤 클래스와 겹쳐 보여서, 확대했을 땐 실제 차 크기(트랙 폭의 0.6 ≈ 8m) 기준
+	var gap_d: float = maxf(TRACK_W * 0.6, 15.0 * _car_scale(false) / maxf(_s, 0.01))
+	var last_by_cls := {} # 클래스별 공식 순서 (그리는 순서 정할 때)
 	var targets := {}
 	for c in sim.order_ui():
 		if c.dnf != "":
 			continue
 		if not c.started:
 			# 출발 전 그리드: 화면에서 겹치지 않는 간격 + 좌우 엇갈림
-			var gap: float = maxf(T.L * 0.0035, 13.0 * _car_scale(false) / maxf(_s, 0.01))
+			var gap: float = maxf(TRACK_W * 0.55, 13.0 * _car_scale(false) / maxf(_s, 0.01))
 			var gd: float = -(floor(c.grid / 2.0) + 1.0) * gap * 1.25 - float(c.grid % 2) * gap * 0.55
 			var dv = gd
 			if c.start_t > 0.0:
@@ -226,17 +227,29 @@ func _update_cars(delta: float) -> void:
 				continue
 			# 피트 출구를 나와 본 트랙에 오른 차: 바로 앞차를 넘어 그리지 않는다 (SC 대열 사이에 끼었다 뒤로 밀리던 것)
 			dist = float(pa[2])
-			var ld: Variant = last_by_cls.get(c.cls)
-			if ld != null and ld - dist < T.L * 0.5:
-				dist = minf(dist, ld - gap_d)
-			targets[c.id] = {"d": dist, "cls": c.cls}
-			continue
-		dist = sim.car_dist(c)
-		var last_d: Variant = last_by_cls.get(c.cls)
-		if last_d != null and last_d - dist < T.L * 0.5:
-			dist = minf(dist, last_d - gap_d)
-		last_by_cls[c.cls] = dist
+		else:
+			dist = sim.car_dist(c)
 		targets[c.id] = {"d": dist, "cls": c.cls}
+		if not last_by_cls.has(c.cls):
+			last_by_cls[c.cls] = []
+		last_by_cls[c.cls].append(c.id) # 클래스 안 공식 순서
+	# 그리는 순서: 자리(실제 거리 순)는 클래스끼리 섞일 수 있지만, 같은 클래스 안에서는 공식 순서대로 채운다
+	# → 클래스가 달라도 같은 바퀴 안에서는 앞차보다 앞서 그리지 않고 겹치지 않게 벌린다 (예전: 클래스별로만 벌려서
+	# 르망 출발 때 하이퍼카 대열이 늘어나 뒤 클래스 GT 가 그 안에 끼어 보임). 반 바퀴 넘게 차이(추월·랩다운)면 따로 그림
+	var slots: Array = targets.keys().filter(func(id): return targets[id] is Dictionary)
+	slots.sort_custom(func(a, b): return float(targets[a]["d"]) > float(targets[b]["d"]))
+	var take := {}
+	var prev_d := INF
+	for sid in slots:
+		var cl: String = targets[sid]["cls"]
+		var ti: int = int(take.get(cl, 0))
+		take[cl] = ti + 1
+		var tg_c: Dictionary = targets[last_by_cls[cl][ti]]
+		var dd: float = float(tg_c["d"])
+		if prev_d - dd < T.L * 0.5:
+			dd = minf(dd, prev_d - gap_d)
+		tg_c["d"] = dd
+		prev_d = dd
 	# 멀티 클래스: 느린 클래스 차가 빠른 클래스 차와 겹치면 옆으로 비켜 달린다 (르망에서 겹쳐 보이던 것)
 	var lat_want := {}
 	if sim.is_wec():

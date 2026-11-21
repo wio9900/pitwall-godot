@@ -45,6 +45,26 @@ func _process(_delta: float) -> bool:
 		return false
 	if not main.sim.done:
 		main.sim.advance(6.0)
+		# 수정 20: 르망 출발 직후 그림에서 GT 가 하이퍼카 대열 안에 끼지 않아야 (같은 바퀴 안 실제 거리 순서)
+		if main.sim.is_wec() and main.sim.leader_lap == 0 and main.sim.clock > 40.0 and not resumed.has("lm_draw"):
+			resumed["lm_draw"] = true
+			for k in 120: # 그림은 목표 거리를 부드럽게 따라가므로 수렴할 때까지
+				main.race_view._update_cars(0.1)
+			var hy_min := INF
+			var gt_max := -INF
+			for c in main.sim.cars:
+				if not c.is_running() or not c.started or not main.race_view._smooth.has(c.id) or not main.race_view._smooth[c.id].has("d"):
+					continue
+				var dd: float = float(main.race_view._smooth[c.id]["d"])
+				if c.cls == "HY":
+					hy_min = minf(hy_min, dd)
+				elif c.cls == "GT":
+					gt_max = maxf(gt_max, dd)
+			print("르망 출발 그림: 마지막 하이퍼카 %.0f · 맨 앞 GT %.0f" % [hy_min, gt_max])
+			if gt_max >= hy_min:
+				print("  ! 르망 출발 그림에서 GT 가 하이퍼카 대열 안에 그려짐")
+				quit(1)
+				return true
 		# 레이스 중간 저장 → 나가기 → 이어하기 (퀵 1번째 · 커리어 레이스 각각 한 번)
 		var rk: String = main.mode + str(races)
 		if main.sim.leader_lap >= 3 and not resumed.has(rk) and (races == 0 or main.mode == "career"):
