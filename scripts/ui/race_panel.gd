@@ -547,6 +547,8 @@ func refresh() -> void:
 		var line2: String = c.dnf if c.dnf != "" else "[color=%s][b]%s[/b][/color] %s [color=%s]●[/color] %s" % [RS.TYRE_HEX[c.comp], c.comp, _pct(c.wear), temp_col, extra]
 		if c.mech_trouble != "":
 			line2 += " [color=#ef4444]⚠%s[/color]" % c.mech_trouble
+		if c.fault != null:
+			line2 += " [color=#ef4444]🔧%s +%.1fs%s[/color]" % [c.fault["kind"], float(c.fault["dt"]), " (수리 예정)" if bool(c.fault["repair"]) else ""]
 		if c.time_pen > 0.0:
 			line2 += " [color=#ef4444]+%d초%s[/color]" % [int(c.time_pen), _pen_tag(c)]
 		elif c.tl_warn > 0 and c.dnf == "":

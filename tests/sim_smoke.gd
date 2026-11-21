@@ -147,5 +147,35 @@ func _init() -> void:
 		print("저장·이어하기 %s: %s (L5에서 저장, 우승 %s)" % [key, "같음" if same else "다름!", ra[0]])
 		if not same or not b.done:
 			fails += 1
+	# 고장·반쯤 고장·더티 에어·트랙 포지션 (2026-11-21)
+	var fx = RaceSimS.new()
+	fx.new_race("monaco", 0, 20, "dry", ["M", "M"], 515)
+	fx.prepare_start()
+	while fx.leader_lap < 3:
+		fx.advance(1.0)
+	var ai_f = null
+	for o in fx.cars:
+		if not o.mine and o.is_running() and fx.next_stop(o) != null:
+			ai_f = o
+			break
+	ai_f.fault = null
+	fx._start_fault(ai_f)
+	ai_f.fault["dt"] = 1.1
+	ai_f.fault["fix"] = 12.0
+	fx._fault_decide(ai_f)
+	var dt_f: float = float(ai_f.fault["dt"])
+	var rep_f: bool = bool(ai_f.fault["repair"])
+	var pits0: int = ai_f.pits
+	var gf := 0
+	while ai_f.is_running() and ai_f.pits == pits0 and gf < 20000:
+		fx.advance(0.5)
+		gf += 1
+	var fault_ok: bool = dt_f >= 0.35 and dt_f <= 1.2 and rep_f and (not ai_f.is_running() or ai_f.fault == null)
+	var mz = RaceSimS.new()
+	mz.new_race("monza", 0, 20, "dry", ["M", "M"], 1)
+	var tp_ok: bool = fx.stop_cost() - fx.pit_loss() > mz.stop_cost() - mz.pit_loss() + 6.0
+	print("   반쯤 고장: 랩당 +%.2f초 수리=%s → 피트 후 %s · 트랙 포지션 값 모나코 %.1f > 몬자 %.1f %s" % [dt_f, rep_f, "해제" if ai_f.fault == null else "남음", fx.stop_cost(), mz.stop_cost(), "OK" if fault_ok and tp_ok else "실패"])
+	if not (fault_ok and tp_ok):
+		fails += 1
 	print("총 %dms, 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

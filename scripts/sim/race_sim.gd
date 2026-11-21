@@ -32,6 +32,8 @@ const PRESS_FX := {
 	"std": {"straight": 0.0, "warm": 1.0, "heat": 1.0, "kerb": 1.0},
 	"high": {"straight": -0.12, "warm": 0.65, "heat": 0.72, "kerb": 1.28},
 }
+const DIRTY_WEAR := 0.12  # 더티 에어 바짝(0초) 붙으면 마모 +12% (다운포스 많은 서킷일수록 큼) — 따라가기만 하면 타이어가 먼저 죽음
+const DIRTY_TT := 0.06    # 더티 에어 타이어 온도 목표 +0.06 (과열 0.80 넘기 쉬워짐)
 const K := {"car_scale": 0.92, "drv_k": 0.022, "noise": 0.28, "fail": 0.0045, "crash": 0.005, "overtake_scale": 0.21, "victim": 0.25, "dirty": 1.0, "ot_gap": 0.3}
 const POINTS := [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
 # WEC 규칙 (HTML 원본과 동일)
@@ -567,6 +569,53 @@ func cliff_pen(comp: String, w: float) -> float:
 	return 0.0
 
 
+## 기계 고장 (레이스 압축 보정): 랩당 확률 × (실제 랩 ÷ 게임 랩) × FAIL_SCALE.
+## 그중 FAULT_SHARE 는 '반쯤 고장'(출력 저하·기어 문제 — 달리면서 버티거나 피트에서 고침), 나머지는 리타이어(WEC 는 손상)
+const FAIL_SCALE := 2.8      # F1·F2·F3: 레이스 고장 리타이어 한 대당 약 4% (예전 0.5% — 압축 레이스에 랩당 확률을 그대로 둬서 너무 적었음)
+const FAIL_SCALE_WEC := 1.0  # WEC
+const FAULT_SHARE := 0.5
+const FAULTS := [
+	{"kind": "출력 저하", "dt": [0.5, 1.2], "fix": [12.0, 22.0], "esc": 0.006},
+	{"kind": "기어 변속 문제", "dt": [0.35, 0.9], "fix": [18.0, 32.0], "esc": 0.02},
+]
+func fail_p(c) -> float:
+	var real_n: float = real_laps() if is_wec() else 5400.0 / float(CIRC["base"])
+	return (1.0 - c.rel) * K["fail"] * (real_n / maxf(1.0, float(laps))) * (FAIL_SCALE_WEC if is_wec() else FAIL_SCALE) * (1.3 if c.pace == "attack" else 1.0) * (1.2 if night else 1.0)
+
+
+## 반쯤 고장 발생: 남은 랩 동안 잃을 시간 vs 수리 시간으로 판단 (AI 는 팀 감각만큼 오차, 내 차는 무전으로 선택)
+func _start_fault(c) -> void:
+	var f: Dictionary = FAULTS[0] if rnd() < 0.5 else FAULTS[1]
+	c.fault = {"kind": f["kind"], "dt": uni(f["dt"][0], f["dt"][1]), "fix": uni(f["fix"][0], f["fix"][1]), "esc": f["esc"], "repair": false, "now": false}
+	_tally("반쯤고장")
+	event("🔧 %s %s — 랩당 약 +%.1f초" % [name_of(c), c.fault["kind"], c.fault["dt"]], "bad")
+	if c.mine:
+		BLog.add("반쯤 고장 %s (내 차) %s 랩%d 랩당 +%.1f초 수리 %.0f초" % [name_of(c), c.fault["kind"], c.lap + 1, c.fault["dt"], c.fault["fix"]])
+		say(c, "%s 생겼어요! 랩당 %.1f초씩 느려요. 피트에서 고치면 약 %d초 걸려요" % [c.fault["kind"], c.fault["dt"], int(round(c.fault["fix"]))])
+		c.fault["repair"] = true # 기본: 다음 피트 때 수리 (안 건드려도 합리적, 원칙 6)
+		trigger_radio(c, "FAULT")
+		return
+	_fault_decide(c)
+
+
+## AI: 버티면 잃을 시간 > 수리 시간(+계획 정차가 없으면 피트 한 번 값)이면 고친다
+func _fault_decide(c) -> void:
+	var left: int = laps - (c.lap + 1)
+	var tact: float = c.strategy
+	var stay_cost: float = (float(c.fault["dt"]) + gauss((1.0 - tact) * 0.3)) * left
+	var stops_left: bool = next_stop(c) != null
+	if stay_cost > float(c.fault["fix"]) + (0.0 if stops_left else stop_cost()):
+		c.fault["repair"] = true
+		c.fault["now"] = not stops_left
+
+
+## 전략 계산용 피트 한 번의 값: 피트 손실 + 여유 3초 + 트랙 포지션 값.
+## 추월이 어려운 서킷(모나코·싱가포르·잔트보르트)은 피트로 잃은 자리를 되찾기 힘들어 스톱을 아낀다
+const TRACK_POS_K := 8.0
+func stop_cost() -> float:
+	return pit_loss() + 3.0 + TRACK_POS_K * clampf((0.30 - float(CIRC.get("overtake", 0.3))) / 0.26, 0.0, 1.0)
+
+
 func true_wear_rate(comp: String) -> float:
 	return float(COMP[comp][1]) * float(true_mult.get(comp, 1.0)) * float(rules.get("wear_mult", 1.0))
 
@@ -893,6 +942,8 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		t *= 1.05 # 헤드라이트 없이 밤 주행
 	if c.limp > 0.0:
 		t *= 1.0 + c.limp # 손상 후 피트까지 감속
+	if c.fault != null:
+		t += float(c.fault["dt"]) * sh # 반쯤 고장
 	# 드라이버 특성
 	if not c.traits.is_empty():
 		if c.traits.has("saver") and c.stint_laps < 2:
@@ -906,11 +957,13 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var hold_on: bool = c.instr == "hold" and gap_ahead != null and gap_ahead < 1.5
 	var wp = weather_pen(c.comp, w)
 	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
+	var dirty_f := 0.0 # 더티 에어 세기 0~1 (앞차 1초 안, 가까울수록 큼): 다운포스를 잃어 미끄러짐 → 타이어 온도·마모↑
 	if not is_wec():
 		if gap_ahead != null and gap_ahead < K["dirty"]:
 			if c.instr == "hold":
 				t += (K["dirty"] - gap_ahead) * 0.6 * sh # 유지: 더티 에어를 피해 1초 간격까지 물러나는 만큼 손해
 			else:
+				dirty_f = clampf(1.0 - gap_ahead, 0.0, 1.0) * float(CIRC["wA"]) / 0.06
 				t += (0.2 + 0.3 * float(CIRC["wA"]) / 0.06 + 0.3 * w) * (1.0 - gap_ahead) * sh
 		if has_ers():
 			var em: String = c.ers_mode
@@ -950,7 +1003,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		for i in poisson(lam_fast * sh):
 			t += uni(0.15, 0.6)
 	# 타이어 온도
-	var target = tt_target + (0.05 if att_on else 0.0) + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
+	var target = tt_target + (0.05 if att_on else 0.0) + DIRTY_TT * dirty_f + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
@@ -1017,7 +1070,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	# 연료 무게: 탱크가 가득한 초반엔 타이어가 더 닳고(×1.08) 가벼워질수록 덜 닳는다(×0.92). 레이스 평균은 거의 ×1.0
 	var fuel_full: float = TANK if is_wec() else laps * FPL
 	var fuel_wear: float = 0.92 + 0.16 * clampf(c.fuel / maxf(1.0, fuel_full), 0.0, 1.0)
-	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * fuel_wear * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
+	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * fuel_wear * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * (1.0 + DIRTY_WEAR * dirty_f) * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
 	if is_wec():
 		c.fuel -= FPL * sh * wec_fuel_mult(c) * lift_fuel
 	else:
@@ -1429,7 +1482,7 @@ func plan_ai_strategy(c, fixed_start: String) -> void:
 	c.strat_style = team_style(c.team)
 	c.est_err = clampf(1.0 + gauss((1.0 - c.strategy) * 0.45), 0.7, 1.35)
 	var max_st := 0 if rules.get("no_pits", false) else (3 if laps >= 12 else 2)
-	var cands = ai_optimize(laps, fixed_start, c.wear, ai_rates(c, 1.0), pit_loss() + 3.0, {}, {"S": 1, "M": 2, "H": 1}, max_st)
+	var cands = ai_optimize(laps, fixed_start, c.wear, ai_rates(c, 1.0), stop_cost(), {}, {"S": 1, "M": 2, "H": 1}, max_st)
 	var pk: Variant = ai_choose(c, cands, true)
 	if pk == null:
 		return
@@ -1471,7 +1524,7 @@ func ai_replan(c) -> void:
 	var left: int = laps - c.lap
 	if left < 2:
 		return
-	var cands = ai_optimize(left, c.comp, c.wear, ai_rates(c, scale), pit_loss() + 3.0, c.used, c.ai_sets, 2)
+	var cands = ai_optimize(left, c.comp, c.wear, ai_rates(c, scale), stop_cost(), c.used, c.ai_sets, 2)
 	var pk: Variant = ai_choose(c, cands, false)
 	if pk == null:
 		return
@@ -1555,6 +1608,14 @@ func pit_decision(c) -> Variant:
 	var want = ideal_tyre(wet)
 	if left < 1 or c.crew_cooldown > 0:
 		return null
+	# 반쯤 고장: 남은 계획 정차가 없고 버티는 손해가 더 크면 지금 들어가 고친다 (AI 판단 · 내 차 '지금 박스' 선택)
+	if c.fault != null and bool(c.fault["now"]) and c.pit_req == "":
+		c.fault["now"] = false
+		c.crew_out = true
+		if is_wec():
+			return {"comp": c.comp, "tyres": false, "driver": false, "fuel": true, "fill": 1.0}
+		var fresh_f: String = "H" if left > 7 else ("M" if left > 4 else "S")
+		return {"comp": _pick_ai_slick(c, fresh_f, left) if want == "slick" else want, "tyres": true}
 	if is_wec():
 		return wec_decision(c, cur, left, want)
 	if pit_closed() and (c.pit_req == "" or not c.mine):
@@ -1646,7 +1707,14 @@ func pit_decision(c) -> Variant:
 			var nc: String = ns["comp"]
 			var last_stop: bool = c.stops_done >= c.plan["stops"].size() - 1
 			var ok_fin: bool = not last_stop or left * ai_nom_rate(nc, c) <= ai_lim(nc) - 0.03
-			if ok_fin and rnd() < tact * 0.3 * um:
+			# A-7.4: 확률 대신 계산 — 전략 뷰와 같은 undercut_net(순이득 초)을 팀 감각만큼 오차로 읽고,
+			# 복귀 지점이 트래픽(앞차 1초 안)이면 깨끗한 공기가 아니라서 포기
+			var un: Variant = undercut_net(c, front) if ok_fin else null
+			var go_uc: bool = un != null and float(un["net"]) + gauss((1.0 - tact) * 1.5) > 0.5 / um
+			if go_uc:
+				var pr_uc: Variant = predict_pit(c)
+				go_uc = pr_uc == null or pr_uc["ahead"] == null or float(pr_uc["ahead"][1]) >= 1.0
+			if go_uc:
 				_tally("언더컷")
 				c.stops_done += 1
 				c.crew_out = true
@@ -1674,7 +1742,20 @@ func pit_decision(c) -> Variant:
 			return {"comp": _pick_smart(c, ns["comp"], left, tact) if want == "slick" else want, "tyres": true}
 		# SC: 대부분 들어가지만, 일부는 트랙 포지션 도박(스테이 아웃), 감각 낮은 팀은 기회를 놓치기도
 		var sc_skip: bool = (c.sc_stay and c.wear < 0.55) or (tact < 0.7 and c.sc_miss)
-		if sc and not sc_skip and cur > 2 and c.wear >= 0.35 and (cur >= ns["lap"] or (c.sc_early and ns["lap"] - cur <= 4) or c.wear >= 0.50) and left > 2:
+		var free_pit := false
+		if sc and want == "slick" and left > 2:
+			var cp: int = class_pos(c)
+			# A-7.5 막판 상위권: 타이어가 버티면 트랙 포지션을 지킨다 (뒤차들이 새 타이어로 와도 SC 뒤 짧은 스프린트)
+			if cp <= 3 and left <= maxi(3, int(laps * 0.2)) and c.wear < ai_lim(c.comp) - 0.08:
+				sc_skip = true
+			# A-7.5 공짜 피트: 들어갔다 나와도 1계단 이하로 잃으면 계획보다 이르더라도 들어간다 (감각 있는 팀만)
+			elif not sc_skip and tact >= 0.6 and c.wear >= 0.25 and c.free_pit_try != c.pits:
+				c.free_pit_try = c.pits
+				var pr_sc: Variant = predict_pit(c)
+				free_pit = pr_sc != null and int(pr_sc["pos"]) - cp <= 1
+				if free_pit:
+					_tally("SC공짜피트")
+		if sc and not sc_skip and cur > 2 and (free_pit or (c.wear >= 0.35 and (cur >= ns["lap"] or (c.sc_early and ns["lap"] - cur <= 4) or c.wear >= 0.50))) and left > 2:
 			c.stops_done += 1
 			c.crew_out = true
 			return {"comp": _pick_smart(c, ns["comp"], left, tact) if want == "slick" else want, "tyres": true}
@@ -1692,7 +1773,7 @@ func pit_decision(c) -> Variant:
 	var pen_now: float = c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear)
 	var fresh = "H" if left > 7 else ("M" if left > 4 else "S")
 	var fresh_gap: float = float(COMP[fresh][0]) - float(COMP[c.comp][0])
-	if left >= 2 and ((pen_now - fresh_gap) * left * 0.75 > pit_loss() + 3.0 or c.wear >= 0.92):
+	if left >= 2 and ((pen_now - fresh_gap) * left * 0.75 > stop_cost() or c.wear >= 0.92):
 		if ns != null:
 			c.stops_done += 1
 		c.crew_out = true
@@ -2073,7 +2154,14 @@ func on_cross(c, t: float) -> void:
 				c.boxing = {"comp": c.comp, "tyres": false, "driver": false, "fuel": false, "forced": true}
 				c.pit_total = WPIT["lane"] * pit_scale()
 				event("🏴 %s 블랙·오렌지 플래그 — 헤드라이트 수리 지시" % name_of(c), "bad")
-		if rnd() < (1.0 - c.rel) * K["fail"] * (1.3 if c.pace == "attack" else 1.0) * (1.2 if night else 1.0):
+		var fault_esc: bool = c.fault != null and rnd() < float(c.fault["esc"])
+		var fp: float = fail_p(c)
+		if not fault_esc and c.fault == null and rnd() < fp * FAULT_SHARE:
+			_start_fault(c)
+		elif fault_esc or rnd() < fp * (1.0 - FAULT_SHARE):
+			if fault_esc:
+				event("%s %s 악화" % [name_of(c), c.fault["kind"]], "bad")
+				c.fault = null
 			if is_wec():
 				damage(c, "고장")
 				if c.dnf != "":
@@ -2162,6 +2250,12 @@ func apply_pit(c) -> void:
 				st.append("P%d %s%s" % [n, o.code, " 피트" if is_pitting(o) else (" 수리중" if o.boxing != null else (" OUT" if o.dnf != "" else ""))])
 			BLog.warn("손상 차 %s 피트 가는 동안 P%d→P%d (SC %s) | %s" % [name_of(c), c.limp_pos, now_p, sc_kind if sc else "-", ", ".join(st)])
 		c.limp_pos = 0
+	if c.fault != null and bool(c.fault["repair"]):
+		c.garage += float(c.fault["fix"])
+		event("%s %s 수리 (+%d초)" % [name_of(c), c.fault["kind"], int(round(c.fault["fix"]))])
+		if not c.pit_log.is_empty() and int(c.pit_log[-1]["lap"]) == c.lap + 1:
+			c.pit_log[-1]["fix"] = c.fault["kind"]
+		c.fault = null
 	if c.mine:
 		BLog.add("피트 %s%s 클래스 P%d 랩%d%s" % [name_of(c), " (내 차)" if c.mine else "", class_pos(c), c.lap + 1, " 수리 %.0f초" % c.garage if c.garage > 0.0 else ""])
 	c.pit_total += c.garage
@@ -3123,9 +3217,9 @@ func make_plans(c) -> void:
 	var sets: Dictionary = {"S": 9, "M": 9, "H": 9}
 	if c.tyre_sets != null:
 		sets = {"S": int(c.tyre_sets["S"]), "M": int(c.tyre_sets["M"]), "H": int(c.tyre_sets["H"])}
-	var cands: Array = ai_optimize(left, c.comp, c.wear, my_rates(c), pit_loss() + 3.0, c.used, sets, max_st)
+	var cands: Array = ai_optimize(left, c.comp, c.wear, my_rates(c), stop_cost(), c.used, sets, max_st)
 	if cands.is_empty():
-		cands = ai_optimize(left, c.comp, c.wear, my_rates(c), pit_loss() + 3.0, c.used, {"S": 9, "M": 9, "H": 9}, max_st)
+		cands = ai_optimize(left, c.comp, c.wear, my_rates(c), stop_cost(), c.used, {"S": 9, "M": 9, "H": 9}, max_st)
 	if cands.is_empty():
 		return
 	var a: Dictionary = cands[0]
@@ -3212,7 +3306,7 @@ func eval_plan(c, stops: Array) -> Dictionary:
 			warn.append("%s 스틴트 끝 마모 %d%% → 절벽 위험" % [TYRE_KO[comp], int(round(ew * 100))])
 		if String(seq[i]["comp"]) == "":
 			break
-		cost += pit_loss() + 3.0
+		cost += stop_cost()
 		prev = end_l
 		comp = seq[i]["comp"]
 		w0 = 0.0
@@ -3440,6 +3534,10 @@ func trigger_radio(c, kind: String) -> void:
 	elif kind == "MECH":
 		pr = {"title": "📻 [%s 긴급 무전] %s" % [who, c.mech_trouble], "msg": "“%s 수치가 위험해요! 리프트 앤 코스트로 식힐까요?”" % c.mech_trouble,
 			"opts": [{"label": "리프트 앤 코스트", "act": "LIFT"}, {"label": "페이스 세이브", "act": "SAVE"}, {"label": "무시하고 푸시", "act": "PUSH"}]}
+	elif kind == "FAULT" and c.fault != null:
+		var fl: int = laps - (c.lap + 1)
+		pr = {"title": "📻 [%s 긴급 무전] %s" % [who, c.fault["kind"]], "msg": "“랩당 %.1f초씩 잃어요 (남은 %d랩이면 약 %d초). 고치는 데 약 %d초예요.”" % [c.fault["dt"], fl, int(round(c.fault["dt"] * fl)), int(round(c.fault["fix"]))],
+			"opts": [{"label": "다음 피트 때 수리", "act": "FIX_NEXT"}, {"label": "지금 박스해서 수리", "act": "FIX_NOW"}, {"label": "고치지 말고 버티기", "act": "FIX_NO"}]}
 	if pr == null:
 		return
 	pr["slot"] = c.slot
@@ -3484,6 +3582,12 @@ func resolve_radio(idx: int) -> void:
 			c.pace = "attack"
 			c.focus = clampf(c.focus + 4.0, 30.0, 100.0)
 			say(c, "알겠어요! 끝까지 밀어붙입니다")
+		"FIX_NEXT", "FIX_NOW", "FIX_NO":
+			if c.fault != null:
+				var a: String = String(o["act"])
+				c.fault["repair"] = a != "FIX_NO"
+				c.fault["now"] = a == "FIX_NOW"
+				say(c, "카피, %s" % {"FIX_NEXT": "다음 피트 때 고칠게요", "FIX_NOW": "이번 랩에 들어가서 고칠게요", "FIX_NO": "고치지 않고 버틸게요"}[a])
 		_:
 			say(c, "카피, 지금 상태 그대로 갈게요")
 
@@ -3618,9 +3722,13 @@ func undercut_net(att, dfn) -> Variant:
 	if k < 0 or dfn.cross.size() <= k:
 		return null
 	var nc := "M"
+	var ns: Variant = next_stop(att)
 	if att.mine:
-		var ns: Variant = next_stop(att)
 		nc = att.pit_req if att.pit_req != "" else (String(ns["comp"]) if ns != null else "M")
+		if not SLICK.has(nc):
+			nc = "M"
+	elif ns != null:
+		nc = String(ns["comp"])
 		if not SLICK.has(nc):
 			nc = "M"
 	var aw: float = _seen_wear(att)
