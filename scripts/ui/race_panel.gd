@@ -366,7 +366,7 @@ func _build_pit(pg: VBoxContainer) -> void:
 		db.custom_minimum_size = Vector2(0, 54)
 		db.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		db.size_flags_stretch_ratio = 1.0
-		# 긴 줄("0랩 · 피로 0% · 의무 6랩 남음")이 버튼을 넓혀 패널이 화면 밖으로 밀리지 않게 줄바꿈
+		# 긴 줄("0랩 · 피로 0% · 최소 주행 6랩 남음")이 버튼을 넓혀 패널이 화면 밖으로 밀리지 않게 줄바꿈
 		db.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		db.clip_text = false
 		db.pressed.connect(_on_w_drv.bind(i))
@@ -770,7 +770,8 @@ func _refresh_pit(c) -> void:
 		var rec_why := ""
 		if rec_d != c.drv:
 			if sim.drv_short(c, rec_d) > 0:
-				rec_why = "(의무)"
+				# 정말 지금 바꿔야 할 때만 "의무" — 최소 주행이 남았어도 나중에 채워도 되면 "교대 차례"
+				rec_why = "(의무)" if sim.swap_due(c) else "(교대 차례)"
 			elif sim.night:
 				rec_why = "(야간)"
 			elif sim.wet > 0.2:
@@ -802,9 +803,9 @@ func _refresh_pit(c) -> void:
 				lines.append("%d랩·피로%d%%" % [laps_i, int(round(sim.fatigue(c, i) * 100))])
 				var short_i: int = sim.drv_short(c, i)
 				if short_i > 0:
-					lines.append("의무 %d랩 남음" % short_i)
+					lines.append("최소 주행 %d랩 남음" % short_i)
 				elif md_g != "" and gr == md_g:
-					lines.append("의무 충족")
+					lines.append("최소 주행 충족")
 				# 밤·비일 때만 그 조건에 맞는 능력치 (자동 교대·추천이 따지는 값)
 				var cond: PackedStringArray = []
 				if sim.night:

@@ -2248,20 +2248,9 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	# 하위 클래스 최소 주행(브론즈 등): 모자라면 늦지 않게 그 드라이버로 바꾸고, 채울 때까지 내리지 않는다
 	# (예전엔 순서대로만 돌려서 짧은 레이스에서 AI 가 거의 다 60초 페널티를 받았음)
 	# 르망의 드라이버별 최소 주행(각자 6시간 분량)도 같이: 다른 드라이버들이 채워야 할 랩이 남은 랩에 가까워지면 교대
-	var cur_short: int = drv_short(c, c.drv)
-	var oth_short := 0
-	for di in c.drivers.size():
-		if di != c.drv:
-			oth_short += drv_short(c, di)
-	# 남은 거리는 내 차 기준 (느린 클래스는 선두보다 랩을 덜 돈다 — 전체 남은 랩으로 보면 교대가 늦어짐)
-	# 모자란 랩이 6시간 구간 한도(max_win)를 넘으면 한 번에 못 채우고 쉬었다 다시 타야 하니 그만큼 일찍 시작한다
-	var span: float = float(oth_short + STINT * 2 + 2)
-	var lim_d: Dictionary = drive_limits()
-	if oth_short >= int(lim_d["max_win"]):
-		span += float(int(lim_d["win"]) - int(lim_d["max_win"]) + STINT)
-	if oth_short > 0 and laps_to_go(c) <= span:
+	if _oth_short_due(c):
 		driver = true
-	elif cur_short > 0:
+	elif drv_short(c, c.drv) > 0:
 		driver = must_swap(c)
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
@@ -2273,6 +2262,27 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	c.crew_out = true
 	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true, "fill": _auto_fill(c)}
 
+
+## 다른 드라이버들이 최소 주행을 채우려면 지금 교대해야 하나 (AI 교대 판단 · 화면 "추천(의무)" 공용)
+func _oth_short_due(c) -> bool:
+	var oth_short := 0
+	for di in c.drivers.size():
+		if di != c.drv:
+			oth_short += drv_short(c, di)
+	if oth_short <= 0:
+		return false
+	# 남은 거리는 내 차 기준 (느린 클래스는 선두보다 랩을 덜 돈다 — 전체 남은 랩으로 보면 교대가 늦어짐)
+	# 모자란 랩이 6시간 구간 한도(max_win)를 넘으면 한 번에 못 채우고 쉬었다 다시 타야 하니 그만큼 일찍 시작한다
+	var span: float = float(oth_short + STINT * 2 + 2)
+	var lim_d: Dictionary = drive_limits()
+	if oth_short >= int(lim_d["max_win"]):
+		span += float(int(lim_d["win"]) - int(lim_d["max_win"]) + STINT)
+	return laps_to_go(c) <= span
+
+
+## 지금 꼭 교대해야 하나: 지금 드라이버가 한도에 닿거나, 다른 드라이버 최소 주행을 채울 시간이 빠듯함
+func swap_due(c) -> bool:
+	return must_swap(c) or _oth_short_due(c)
 
 ## 새 타이어로 달릴 랩 수 어림: 남은 게 한 스틴트 남짓이면 끝까지, 아니면 타이어 교체 주기(더블 스틴트 등)
 func wec_tyre_run(c, left: int) -> int:
@@ -3331,7 +3341,8 @@ func next_driver(c) -> int:
 		if di == c.drv:
 			continue
 		var sh: int = drv_short(c, di)
-		if sh > bs:
+		# 모자란 랩이 같으면(르망 초반엔 다들 같음) 빠르고 덜 지친 드라이버
+		if sh > bs or (sh > 0 and sh == bs and _drv_score(c, di) > _drv_score(c, best)):
 			bs = sh
 			best = di
 	if best >= 0:
@@ -3349,13 +3360,7 @@ func next_driver(c) -> int:
 			var tot: int = int(c.drv_laps[di]) if di < c.drv_laps.size() else 0
 			if pass_i == 0 and (drive_in_window(c, di) + more > int(lim["max_win"]) or tot + more > int(lim["max_total"])):
 				continue
-			var dd: Dictionary = c.drivers[di]
-			var sc_d: float = float(dd.get("speed", 0.8)) - 0.05 * fatigue(c, di)
-			# 밤엔 실수 적은(안정성) 드라이버, 비가 오면 웻에 강한 드라이버를 더 쳐준다
-			if night:
-				sc_d += (float(dd.get("cons", 0.8)) - 0.8) * 0.3
-			if wet > 0.2:
-				sc_d += (float(dd.get("wet", 0.8)) - 0.8) * 0.5 * wet
+			var sc_d: float = _drv_score(c, di)
 			if sc_d > ps:
 				ps = sc_d
 				pick = di
@@ -3363,6 +3368,17 @@ func next_driver(c) -> int:
 			return pick
 	return (c.drv + 1) % n
 
+
+
+## 교대 후보 점수: 속도 − 피로. 밤엔 실수 적은(안정성) 드라이버, 비가 오면 웻에 강한 드라이버를 더 쳐준다
+func _drv_score(c, di: int) -> float:
+	var dd: Dictionary = c.drivers[di]
+	var sc_d: float = float(dd.get("speed", 0.8)) - 0.05 * fatigue(c, di)
+	if night:
+		sc_d += (float(dd.get("cons", 0.8)) - 0.8) * 0.3
+	if wet > 0.2:
+		sc_d += (float(dd.get("wet", 0.8)) - 0.8) * 0.5 * wet
+	return sc_d
 
 ## 드라이버 di 를 다음 스틴트에 태울 수 없는 이유 ("" = 가능): 6시간 구간·총 주행 한도
 func drv_block(c, di: int) -> String:

@@ -82,6 +82,16 @@ func _init() -> void:
 	lc.fuel = lm.TANK * 0.1
 	var fsave: float = lm.wec_stop_time(lc, true, false, true, 1.0) - lm.wec_stop_time(lc, true, false, true, 0.4)
 	lc.fuel = fuel0
+	# 수정 23: 출발 직후엔 최소 주행이 다 남아 있어도 '지금 꼭 교대'가 아님, 모자란 랩이 같으면 더 빠른 드라이버 추천
+	var due0: bool = lm.swap_due(lc)
+	var nd: int = lm.next_driver(lc)
+	var nd_ok := true
+	for di in lc.drivers.size():
+		if di != lc.drv and di != nd and lm.drv_short(lc, di) == lm.drv_short(lc, nd) and lm._drv_score(lc, di) > lm._drv_score(lc, nd):
+			nd_ok = false
+	print("   르망 출발 직후 교대 의무 %s · 추천 드라이버 동점 처리 %s" % [due0, nd_ok])
+	if due0 or not nd_ok:
+		fails += 1
 	print("   부분 급유(탱크 30%%분) 정차 절약 %.1f초" % fsave)
 	if fsave <= 0.0:
 		fails += 1
