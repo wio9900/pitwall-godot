@@ -6,46 +6,70 @@
  },
  "tyreWinSrc": "미쉐린 하이퍼카 2025~26: 소프트 0~15°C(2026 신형은 ~30°C), 미디엄 15~25°C(2026 신형은 더 넓음), 하드 25°C 이상. 실제 르망은 30°C 넘는 낮에도 미디엄을 써서 게임 창은 조금 넓게",
  "nightDrop": 14,
+ "tyreAlloc": {
+  "HY": {"6": 18, "8": 26, "10": 32, "24": 56},
+  "GT": {"6": 24, "8": 32, "10": 40}
+ },
+ "tyreAllocSrc": "2026 WEC 스포팅 규정 6.5.4 결승(예선 포함) 드라이 타이어 개수: 하이퍼카 6h 18 · 8h 26 · 10h 32(2024 FIA D09, 2026 그대로), 르망 56(FIA WEC 2026-06 미쉐린). LMGT3 2026 +6/+6/+8 → 24·32·40(Sportscar365). LMGT3 르망·LMP2·LMP3·4시간(아시안 르망)은 수치 미확인 → 예전 비율",
+ "stintsPerHour": 1.25,
+ "awdSrc": "LMH 앞바퀴 모터(토요타·페라리·푸조)는 BoP 로 정한 속도 이상에서만 사륜, 2022~ 비·맑음 같은 기준(토요타 190km/h — Motorsport.com·Sportscar365 2022). 차별 값은 해마다 BoP 로 바뀌어 게임은 190 하나로(shortcut). 서킷별 190km/h 이상 비율은 circuits_wec fast190(어림값). 애스턴 마틴 LMH 는 하이브리드 없음, LMDh 는 뒷바퀴 하이브리드",
+ "startHSrc": "circuits_wec startH = 출발 시각(현지). 밤 구간(night)이 있는 서킷은 일몰 − night[0]×레이스 시간으로 맞춤(압축 시간과 어긋나지 않게) — 실제 출발 시각과 1~2시간 다를 수 있음",
  "engines": {
   "Toyota H8909 3.5L V6 Twin-Turbo Hybrid": {
    "pwr": 0.91,
    "eff": 1.03,
-   "relMod": 0.01
+   "relMod": 0.01,
+   "reg": "LMH",
+   "awdKph": 190
   },
   "Ferrari F163 3.0L V6 Twin-Turbo Hybrid": {
    "pwr": 0.93,
    "eff": 1,
-   "relMod": 0
+   "relMod": 0,
+   "reg": "LMH",
+   "awdKph": 190
   },
   "Cadillac LMC55R 5.5L V8 NA Hybrid": {
    "pwr": 0.89,
    "eff": 0.98,
-   "relMod": 0.01
+   "relMod": 0.01,
+   "reg": "LMDh",
+   "awdKph": 0
   },
   "Peugeot X6 2.6L V6 Twin-Turbo Hybrid": {
    "pwr": 0.85,
    "eff": 1.01,
-   "relMod": -0.01
+   "relMod": -0.01,
+   "reg": "LMH",
+   "awdKph": 190
   },
   "BMW P66/3 4.0L V8 Twin-Turbo Hybrid": {
    "pwr": 0.88,
    "eff": 1,
-   "relMod": 0
+   "relMod": 0,
+   "reg": "LMDh",
+   "awdKph": 0
   },
   "Aston Martin RA 6.5L V12 NA": {
    "pwr": 0.9,
    "eff": 0.96,
-   "relMod": -0.01
+   "relMod": -0.01,
+   "reg": "LMH",
+   "awdKph": 0
   },
   "Alpine V634 3.4L V6 Turbo Hybrid": {
    "pwr": 0.86,
    "eff": 1,
-   "relMod": -0.01
+   "relMod": -0.01,
+   "reg": "LMDh",
+   "awdKph": 0
   },
   "Genesis GMR 3.2L V8 Twin-Turbo Hybrid": {
    "pwr": 0.87,
    "eff": 0.99,
-   "relMod": -0.01
+   "relMod": -0.01,
+   "reg": "LMDh",
+   "awdKph": 0
   }
  },
  "hy": [

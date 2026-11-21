@@ -22,6 +22,10 @@ const COMP := {"S": [-1.05, 0.048, 4.0], "M": [0.0, 0.032, 3.3], "H": [0.50, 0.0
 ## 미디엄은 F1 표와 같음 → LMGT3·LMP2(미디엄 한 종류) 결과는 그대로
 const WEC_COMP := {"S": [-0.25, 0.034, 3.6], "M": [0.0, 0.032, 3.3], "H": [0.30, 0.029, 3.0], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
 const WIN_BASE := 0.15 # 온도 창을 벗어나는 순간 타이어 온도 목표가 과열·저온 경계까지 이동
+const AWD_WET := 0.12   # 사륜 구간 비율 1 일 때 비 오는 날 그립 손해를 이만큼 덜 (르망 흠뻑 젖음 ≈ 랩당 0.8초)
+const HY_VMAX := 340.0  # 하이퍼카 최고 속도 km/h — 트랙 상대 속도(T.spd 1 = 최고)를 km/h 로 어림
+const DAY_AMP := 5.0   # 낮 동안 노면 온도 오르내림 (°C, 오후 최고 − 하루 평균 ≈ +2.5)
+const WET_COOL := 12.0 # 흠뻑 젖은 노면은 이만큼 차갑다 (°C, 젖음 비례 — 마르면 다시 데워짐)
 const WIN_K := 0.03    # 그 뒤 1°C 마다 더 (뜨거우면 과열·마모, 차가우면 그립·실수 — 기존 타이어 온도 식이 계산)
 const SLICK := {"S": true, "M": true, "H": true}
 const TYRE_KO := {"S": "소프트", "M": "미디엄", "H": "하드", "I": "인터", "W": "웻"}
@@ -174,7 +178,17 @@ func wec_fit_comp(cls: String, want: String) -> String:
 ## 레이스 동안 쓸 수 있는 새 드라이 세트 수 (출발 세트 제외)
 func wec_race_sets(cls: String) -> int:
 	var stints: int = int(ceil(float(laps) / STINT))
-	return maxi(1, int(ceil(stints * float(WEC_SET_RATIO.get(cls, 0.6))))) - 1
+	return maxi(1, int(ceil(stints * wec_set_ratio(cls)))) - 1
+
+
+## 스틴트당 새 드라이 세트 비율 (출발 세트 포함). 2026 규정 할당(data/wec.json tyreAlloc: 타이어 개수, 시간별)을
+## 실제 스틴트 수(시간 × stintsPerHour)로 나눠 압축된 레이스에 옮긴다. 표에 없는 클래스·시간은 예전 비율(WEC_SET_RATIO)
+func wec_set_ratio(cls: String) -> float:
+	var tab: Dictionary = DB.wec.get("tyreAlloc", {}).get(cls, {})
+	var hk: String = str(int(round(wec_hours())))
+	if tab.has(hk):
+		return float(tab[hk]) / 4.0 / (wec_hours() * float(DB.wec.get("stintsPerHour", 1.25)))
+	return float(WEC_SET_RATIO.get(cls, 0.6))
 
 
 ## WEC 드라이버 주행 시간 규정 (르망 규정 기준, 레이스 길이에 비례):
@@ -988,14 +1002,19 @@ func _init_tyre_press() -> void:
 	track_t = t0 + gauss(5.0)
 	psi_hot_opt = psi_min + press_rise("race", t0) + uni(-0.6, 0.8)
 	psi_eng_err = gauss(0.4)
-	track_now = track_temp_at(0.0)
+	track_now = track_temp_at(0.0) - WET_COOL * wet
 
 
-## 노면 온도 (°C), p = 레이스 진행(0~1). 밤이 있는 서킷은 해가 지면 nightDrop 만큼 식고 해질녘·새벽(진행 6% 구간)에 서서히 바뀐다
+## 노면 온도 (°C), p = 레이스 진행(0~1). WEC 는 낮에도 시각 따라(오후 2시 반 최고 · 아침 최저, ±DAY_AMP),
+## 밤이 있는 서킷은 해가 지면 nightDrop 만큼 식고 해질녘·새벽(진행 6% 구간)에 서서히 바뀐다. 비는 따로(track_now 에서 젖음만큼)
 func track_temp_at(p: float) -> float:
+	var day: float = track_t
+	if is_wec() and CIRC.has("startH"):
+		var h: float = float(CIRC["startH"]) + p * wec_hours()
+		day += DAY_AMP * (cos((h - 14.5) / 24.0 * TAU) - 0.5)
 	var nt = CIRC.get("night")
 	if nt == null:
-		return track_t
+		return day
 	var n0: float = float(nt[0])
 	var n1: float = float(nt[1])
 	var f := 1.0
@@ -1003,7 +1022,15 @@ func track_temp_at(p: float) -> float:
 		f = clampf((p - n0 + 0.03) / 0.06, 0.0, 1.0)
 	if n1 < 1.0:
 		f *= 1.0 - clampf((p - n1 + 0.03) / 0.06, 0.0, 1.0)
-	return track_t - float(CIRC.get("nightDrop", DB.wec.get("nightDrop", 14.0))) * f
+	return lerpf(day, track_t - float(CIRC.get("nightDrop", DB.wec.get("nightDrop", 14.0))), f)
+
+
+## 이 서킷에서 kph 이상으로 달리는 거리 비율 (0~1) — LMH 사륜이 작동하는 구간.
+## 서킷 데이터 fast190(190km/h 이상 비율)에서 속도 기준에 비례해 늘리고 줄임
+# shortcut: fast190 은 서킷 길이·최고 속도로 어림한 값(텔레메트리 아님), 트랙 그림의 상대 속도(T.spd)는 서킷마다 축척이 달라 못 씀
+func awd_share(kph: float) -> float:
+	var f: float = float(CIRC.get("fast190", 0.45))
+	return clampf(f * (HY_VMAX - kph) / (HY_VMAX - 190.0), 0.0, 1.0)
 
 
 ## 컴파운드 노면 온도 창 [낮음, 높음] °C (data/wec.json tyreWin — 미쉐린 하이퍼카)
@@ -1038,8 +1065,7 @@ func wec_pick_comp(c, n: int, noisy: bool = true) -> String:
 	if al.size() == 1:
 		return String(al[0])
 	n = maxi(1, n)
-	var p_mid: float = (float(leader_lap) + n * 0.5) / maxf(1.0, float(laps))
-	var temp: float = track_temp_at(p_mid) + (gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0)
+	var temp: float = run_temp(n) + (gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0)
 	var best := String(al[0])
 	var best_t := INF
 	for k in al:
@@ -1052,6 +1078,12 @@ func wec_pick_comp(c, n: int, noisy: bool = true) -> String:
 			best_t = t
 			best = String(k)
 	return best
+
+
+## 지금부터 n 랩 구간 가운데의 예상 노면 온도 (°C). 젖은 노면은 차가워서, 지금 젖음이 그때까지 마른다고 보고(랩당 ×0.85) 그만큼 뺀다
+func run_temp(n: int) -> float:
+	var p_mid: float = (float(leader_lap) + n * 0.5) / maxf(1.0, float(laps))
+	return track_temp_at(p_mid) - WET_COOL * wet * pow(0.85, n * 0.5)
 
 
 ## 컴파운드 k 로 노면 temp°C 에서 n 랩 달리는 시간 어림 (초, 기준 대비): 속도 + 마모 손해 + 절벽 + 온도 창 밖 손해
@@ -1229,7 +1261,9 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var att_on: bool = c.instr == "attack" and gap_ahead != null and gap_ahead < 1.0
 	var hold_on: bool = c.instr == "hold" and gap_ahead != null and gap_ahead < 1.5
 	var wp = weather_pen(c.comp, w)
-	t += (wp + w * 6.0 + w * (0.8 - c.wet) * 4.0) * sh * ws
+	# LMH 사륜(앞바퀴 모터): 젖은 노면에서 그 속도를 넘는 구간의 트랙션 손해가 줄어든다. 마른 노면은 BoP 로 같게
+	var grip_loss: float = (w * 6.0 + w * (0.8 - c.wet) * 4.0) * ((1.0 - AWD_WET * awd_share(c.awd_kph)) if c.awd_kph > 0.0 else 1.0)
+	t += (wp + grip_loss) * sh * ws
 	var dirty_f := 0.0 # 더티 에어 세기 0~1 (앞차 1초 안, 가까울수록 큼): 다운포스를 잃어 미끄러짐 → 타이어 온도·마모↑
 	if not is_wec():
 		if gap_ahead != null and gap_ahead < K["dirty"]:
@@ -2848,7 +2882,7 @@ func on_leader_lap() -> void:
 		event("노면 변화: 이제 %s 타이어가 맞아요" % ("슬릭" if nk == "slick" else TYRE_KO[nk]), "wet")
 	if wet > 0.85 and not sc and rnd() < 0.25:
 		deploy("SC")
-	track_now = track_temp_at(float(l) / maxf(1.0, float(laps)))
+	track_now = track_temp_at(float(l) / maxf(1.0, float(laps))) - WET_COOL * wet
 	if CIRC.has("night") and CIRC["night"] != null:
 		var prog = float(l) / laps
 		var n: bool = prog >= float(CIRC["night"][0]) and prog < float(CIRC["night"][1])
@@ -4076,6 +4110,7 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c.perf = float(t["perf"]) + (float(eng["pwr"]) - 0.88) * 0.25
 		c.eng_eff = float(eng["eff"])
 		c.rel = clampf(float(t["rel"]) + float(eng["relMod"]), 0.75, 0.98)
+		c.awd_kph = float(eng.get("awdKph", 0.0))
 		c.crew = float(t["crew"])
 		c.strategy = float(t["strategy"]) + DIFF_STRAT[difficulty]
 		c.drivers = e["crew"].duplicate(true)
@@ -4142,6 +4177,9 @@ func _finish_wec_car(c, stall_keys: Array) -> void:
 	if not c.mine and c.cls == "HY":
 		c.comp = wec_pick_comp(c, STINT * maxi(1, c.tyre_every)) # 출발 노면 온도로 (수정 24)
 	c.wec_sets = wec_race_sets(c.cls)
+	# 세트가 매 정차 새 타이어를 낄 만큼 있으면(2026 LMGT3 등) AI 는 더블 스틴트 대신 매번 교체
+	if not c.mine and c.cls != "HY" and c.wec_sets + 1 >= int(ceil(float(laps) / STINT)):
+		c.tyre_every = 1
 	apply_driver(c)
 	c.used = {c.comp: true}
 	var key: String = c.cls + ":" + c.team
@@ -4168,6 +4206,7 @@ func _build_wec_entries(entries: Array, opts: Dictionary, start_comps: Array) ->
 		c.color = Color(t["color"])
 		c.rim = Color(t.get("rim", "#ffffff"))
 		c.mine = bool(e.get("mine", false))
+		c.awd_kph = float(DB.wec["engines"].get(t.get("engine", ""), {}).get("awdKph", 0.0)) if c.cls == "HY" else 0.0
 		c.slot = k
 		c.perf = float(t["perf"])
 		c.eng_eff = float(t.get("eng_eff", 1.0))

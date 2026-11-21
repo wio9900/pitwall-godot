@@ -751,7 +751,9 @@ func _ai_comp(c, st: int, run_i: int, plan_left: int) -> Array:
 		if st >= 2:
 			key = "hp%d" % c.id
 			if not _q_soft_used.has("pick%d" % c.id):
-				_q_soft_used["pick%d" % c.id] = sim.wec_fit_comp(c.cls, "M") if sim.rnd() < 0.15 else wc
+				# 노면이 소프트 온도 창보다 뜨거우면 미디엄을 고르는 팀이 늘어난다 (1°C 마다 +8%, 수정 24 남은 것)
+				var hot_q: float = maxf(0.0, sim.win_off(c.cls, wc, sim.track_now))
+				_q_soft_used["pick%d" % c.id] = sim.wec_fit_comp(c.cls, "M") if sim.rnd() < 0.15 + 0.08 * hot_q else wc
 			wc = _q_soft_used["pick%d" % c.id]
 		var used_n: int = _q_soft_used.get(key, 0)
 		var wu: bool = used_n >= 1

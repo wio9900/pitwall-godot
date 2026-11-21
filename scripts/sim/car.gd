@@ -59,6 +59,7 @@ var aggr := 0.0
 var traits: Array = []   # 드라이버 특성 태그 (traits.gd)
 var def_ := 0.0
 var wet := 0.0
+var awd_kph := 0.0       # LMH 앞바퀴 모터: 이 속도(km/h) 이상에서만 사륜 (0 = 해당 없음, data/wec.json engines awdKph)
 var tyre_deg_rate := 1.0
 var fuel_burn_rate := 1.0
 

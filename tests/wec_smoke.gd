@@ -174,5 +174,26 @@ func _init() -> void:
 	print("   온도 창: 낮 %.0f°C → %s · 밤 %.0f°C → %s %s" % [t_day, pick_day, t_night, pick_night, "OK" if (win_ok and pick_day == "M" and pick_night == "S") else "실패"])
 	if not (win_ok and pick_day == "M" and pick_night == "S"):
 		fails += 1
+	# 타이어 할당(2026 규정 → 비율) · LMH 사륜 · 젖으면 노면이 식음
+	var aw = RaceSimS.new()
+	aw.new_race("spa", 0, 15, "dry", ["M", "M"], 77)
+	var awd_n := 0
+	var lmdh_n := 0
+	for o in aw.cars:
+		if o.cls == "HY":
+			if o.team.begins_with("Toyota") or o.team.begins_with("Ferrari") or o.team.begins_with("Peugeot") or o.team == "AF Corse":
+				awd_n += 1 if o.awd_kph > 0.0 else 0
+			elif o.awd_kph > 0.0:
+				lmdh_n += 1
+	var r_hy: float = aw.wec_set_ratio("HY")
+	var r_gt: float = aw.wec_set_ratio("GT")
+	var t_dry: float = aw.track_now
+	aw.wet = 0.8
+	aw.on_leader_lap()
+	var t_wet: float = aw.track_now
+	var al_ok: bool = absf(r_hy - 0.6) < 0.01 and absf(r_gt - 0.8) < 0.01 and awd_n >= 3 and lmdh_n == 0 and aw.awd_share(190.0) > 0.3 and t_wet < t_dry - 5.0
+	print("   할당 비율 HY %.2f · GT %.2f · 사륜 %d대(LMDh 사륜 %d) · 노면 마름 %.0f → 젖음 %.0f°C %s" % [r_hy, r_gt, awd_n, lmdh_n, t_dry, t_wet, "OK" if al_ok else "실패"])
+	if not al_ok:
+		fails += 1
 	print("WEC 테스트 %dms 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

@@ -691,8 +691,14 @@ func _render_grid() -> void:
 		if sim.is_wec():
 			var sal: Array = sim.wec_comps(c.cls)
 			sitems = []
+			# 출발 노면 온도로 컴파운드마다 창 안/밖 (첫 타이어로 달릴 구간 가운데)
+			var st_t: float = sim.run_temp(RS.STINT * maxi(1, c.tyre_every))
 			for k in sal:
-				sitems.append([k, "%s (새 세트)" % RS.TYRE_KO[k]])
+				var wo: float = sim.win_off(c.cls, k, st_t)
+				var wtx: String = "" if sal.size() < 2 else (" · 창 안" if wo == 0.0 else (" · 뜨거움 +%d°" % int(ceil(wo)) if wo > 0.0 else " · 차가움 %d°" % int(floor(wo))))
+				sitems.append([k, "%s (새 세트%s)" % [RS.TYRE_KO[k], wtx]])
+			if sal.size() > 1:
+				card.add_child(K.label("출발 노면 약 %d°C (첫 타이어 구간)" % int(round(st_t)), 13, K.DIM))
 		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
 		if not sim.is_wec() and not c.q3_locked and RS.SLICK.has(c.comp):
 			wk.start_pref[slot] = _set_seg(card, slot, c.comp, "새 것 먼저", String(wk.start_pref[slot]), _on_start_set.bind(slot))

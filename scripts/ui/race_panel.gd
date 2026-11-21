@@ -686,7 +686,7 @@ func _refresh_pit(c) -> void:
 		d["comp"] = (String(ns["comp"]) if ns != null else "M") if it == "slick" else it
 	# WEC 하이퍼카: 다음 타이어로 달릴 구간 가운데의 예상 노면 온도 → 컴파운드마다 온도 창 안/밖 (수정 24)
 	var run_n: int = sim.wec_tyre_run(c, int(sim.laps_to_go(c))) if wec else 0
-	var run_t: float = sim.track_temp_at((float(sim.leader_lap) + run_n * 0.5) / maxf(1.0, float(sim.laps))) if wec else 0.0
+	var run_t: float = sim.run_temp(run_n) if wec else 0.0
 	if wec:
 		var ck := "%d:%d" % [c.id, c.pits] # 피트를 마칠 때마다 다시 계산
 		if not _wec_comp_set.has(ck):
