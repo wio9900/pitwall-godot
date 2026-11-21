@@ -777,30 +777,53 @@ func _draw_track(T, night: bool) -> void:
 			_ci.draw_polyline(seg, inner.lerp(WET_TINT, 0.15 + lw * 0.45) if lw > 0.05 else inner, w * 0.62, true)
 	else:
 		_ci.draw_polyline(poly, inner, w * 0.62, true)
-	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차
-	var i := 0
-	while i < T.m:
-		if T.spd[i] <= 0.55:
-			var a: Vector2 = T.pts[i]
-			var b: Vector2 = T.pts[(i + 2) % T.m]
-			var c0: Vector2 = T.pts[(i - 2 + T.m) % T.m]
-			var hn := atan2(b.y - a.y, b.x - a.x)
-			var hp := atan2(a.y - c0.y, a.x - c0.x)
-			var side := -1.0 if wrapf(hn - hp, -PI, PI) > 0 else 1.0
-			var n: Vector2 = T.nrm[i] * (TRACK_W * 0.55 * side)
-			# 확대하면 실제 줄무늬 길이(약 1.2m, 트랙 폭 = 13m 기준)로 촘촘하게, 멀리선 화면에서 5px 보다 잘게 나누지 않음 (수정 29)
-			var pa: Vector2 = _X(a + n)
-			var pb: Vector2 = _X(b + n)
-			var n_phys: int = maxi(1, int(a.distance_to(b) * 13.0 / TRACK_W / 1.2))
-			var ns: int = clampi(mini(n_phys, int(pa.distance_to(pb) / 5.0)), 1, 16)
-			for k in ns:
-				var col := KERB_W if (i / 2 + k) % 2 == 1 else KERB_R
-				if ns > 1:
-					col = KERB_W if k % 2 == 1 else KERB_R
-				if night:
-					col = col.darkened(0.4)
-				_ci.draw_line(pa.lerp(pb, float(k) / ns), pa.lerp(pb, float(k + 1) / ns), col, maxf(2.0, w * 0.2))
-		i += 2
+	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차. 2점마다 한 칸: 0 = 없음, ±1 = 어느 쪽
+	var steps: int = T.m / 2
+	var ks: Array = []
+	for s in steps:
+		var ii: int = s * 2
+		if T.spd[ii] > 0.55:
+			ks.append(0)
+			continue
+		# 휘는 방향은 앞뒤 4점으로 봐서 칸마다 쪽이 뒤집히지 않게
+		var a0: Vector2 = T.pts[(ii - 4 + T.m) % T.m]
+		var a1: Vector2 = T.pts[ii]
+		var a2: Vector2 = T.pts[(ii + 4) % T.m]
+		var turn: float = wrapf(atan2(a2.y - a1.y, a2.x - a1.x) - atan2(a1.y - a0.y, a1.x - a0.x), -PI, PI)
+		ks.append(-1 if turn > 0 else 1)
+	# 같은 쪽 연석 사이의 짧은 빈칸(3칸 이하)·혼자 튀는 칸은 이어 붙임 (중간중간 비던 문제, 사용자 2026-11-21)
+	var src: Array = ks.duplicate()
+	for s in steps:
+		var back := 0
+		var fwd := 0
+		for d in range(1, 4):
+			if back == 0:
+				back = int(src[(s - d + steps) % steps])
+			if fwd == 0:
+				fwd = int(src[(s + d) % steps])
+		if back != 0 and back == fwd and int(src[s]) != back:
+			ks[s] = back
+	var stripe := 0
+	for s in steps:
+		var side: float = float(ks[s])
+		if side == 0.0:
+			continue
+		var ia: int = s * 2
+		var ib: int = (ia + 2) % T.m
+		var a: Vector2 = T.pts[ia]
+		var b: Vector2 = T.pts[ib]
+		# 양 끝을 각 점의 법선으로 밀어야 굽은 곳에서 이웃 칸과 이어진다
+		var pa: Vector2 = _X(a + T.nrm[ia] * (TRACK_W * 0.55 * side))
+		var pb: Vector2 = _X(b + T.nrm[ib] * (TRACK_W * 0.55 * side))
+		# 확대하면 실제 줄무늬 길이(약 1.2m, 트랙 폭 = 13m 기준)로 촘촘하게, 멀리선 화면에서 5px 보다 잘게 나누지 않음 (수정 29)
+		var n_phys: int = maxi(1, int(a.distance_to(b) * 13.0 / TRACK_W / 1.2))
+		var ns: int = clampi(mini(n_phys, int(pa.distance_to(pb) / 5.0)), 1, 16)
+		for k in ns:
+			var col := KERB_W if (stripe + k) % 2 == 1 else KERB_R # 칸이 바뀌어도 빨강·흰색이 이어서 번갈아
+			if night:
+				col = col.darkened(0.4)
+			_ci.draw_line(pa.lerp(pb, float(k) / ns), pa.lerp(pb, float(k + 1) / ns), col, maxf(2.0, w * 0.2))
+		stripe += ns
 	# DRS 구간
 	if sim.drs_on():
 		for z in T.drs:

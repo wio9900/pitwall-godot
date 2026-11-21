@@ -1016,11 +1016,13 @@ func _init_tyre_press() -> void:
 
 
 ## 노면 온도 (°C), p = 레이스 진행(0~1). WEC 는 낮에도 시각 따라(오후 2시 반 최고 · 아침 최저, ±DAY_AMP),
-## 서킷 현지 시각 "HH:MM" (출발 시각 startH 가 있는 WEC 만, 없으면 ""). 노면 온도(track_temp_at)와 같은 진행률 기준
+## 서킷 현지 시각 "HH:MM" (출발 시각 startH 가 있는 WEC 만, 없으면 ""). 시간제는 레이스 시계로 계속 흐름
+## (선두 랩 기준이면 르망은 한 랩 = 약 24분씩 뚝뚝 넘어감), 랩 수 레이스는 선두 랩 진행률
 func local_clock() -> String:
 	if not is_wec() or not CIRC.has("startH"):
 		return ""
-	var h: float = fposmod(float(CIRC["startH"]) + float(leader_lap) / maxf(1.0, float(laps)) * wec_hours(), 24.0)
+	var p: float = clampf(clock / time_limit, 0.0, 1.0) if (timed and time_limit > 0.0) else float(leader_lap) / maxf(1.0, float(laps))
+	var h: float = fposmod(float(CIRC["startH"]) + p * wec_hours(), 24.0)
 	return "%02d:%02d" % [int(h), int(fmod(h, 1.0) * 60.0)]
 
 
