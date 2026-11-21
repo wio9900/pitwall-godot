@@ -103,6 +103,22 @@ func _init() -> void:
 	pt.apply_pit(pc)
 	var held_ok: bool = pc.time_pen == 0.0 and pc.pen_served == 5.0 and float(pc.pit_log[-1]["pen_held"]) == 5.0 and pc.pit_total >= 35.0
 	print("   페널티 정차 해소 %s" % held_ok)
+	# 수정 31-1: 새 세트가 바닥나면 빼 둔 세트를 실제 마모로 다시 낀다 (예전: 늘 34% 로 무한 회복)
+	var rp = RaceSimS.new()
+	rp.new_race("lemans", 0, 60, "dry", ["M", "M"], 79)
+	rp.prepare_start()
+	var rc = rp.my_cars()[0]
+	rc.comp = "M"
+	rc.used = {"M": true}
+	rc.wec_sets = 0
+	rc.wear = 0.58
+	rc.boxing = {"comp": "S", "tyres": true, "driver": false, "fuel": true, "fill": 1.0}
+	rc.pit_total = 30.0
+	rp.apply_pit(rc)
+	var reuse_ok: bool = rc.comp == "M" and absf(rc.wear - 0.58) < 0.001 and rc.used_set_pen > 0.0 and Array(rc.wec_pool.get("M", [])).is_empty()
+	print("   세트 바닥 재장착: %s %.0f%% (안 쓴 S 요청 → 쓴 M, 34%% 고정 아님) %s" % [rc.comp, rc.wear * 100.0, reuse_ok])
+	if not reuse_ok:
+		fails += 1
 	# 현지 시각은 레이스 시계로 계속 흐름 (르망 16:00 출발, 시간의 절반 → 04:00)
 	var lk = RaceSimS.new()
 	lk.new_race("lemans", 0, 60, "dry", ["M", "M"], 78)

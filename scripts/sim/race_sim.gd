@@ -2567,13 +2567,15 @@ func apply_pit(c) -> void:
 	# 새 드라이 세트가 바닥났으면 쓰던 세트를 다시 낀다 → 한 번도 안 쓴 컴파운드의 "쓴 세트"는 없다 (수정 25)
 	if is_wec() and c.boxing != null and bool(c.boxing.get("tyres", false)) and SLICK.has(String(c.boxing["comp"])) and c.wec_sets <= 0:
 		c.boxing["reuse"] = true
-		if not c.used.has(c.boxing["comp"]):
+		# 다시 낄 수 있는 건 빼 둔 세트(wec_pool)와 지금 끼운 세트뿐
+		var want_k: String = String(c.boxing["comp"])
+		if want_k != c.comp and Array(c.wec_pool.get(want_k, [])).is_empty():
 			var alt := ""
-			if SLICK.has(c.comp) and c.used.has(c.comp):
+			if SLICK.has(c.comp):
 				alt = c.comp
 			else:
 				for k in ["M", "H", "S"]:
-					if c.used.has(k) and wec_comps(c.cls).has(k):
+					if not Array(c.wec_pool.get(k, [])).is_empty() and wec_comps(c.cls).has(k):
 						alt = k
 						break
 			if alt != "":
@@ -2645,6 +2647,11 @@ func apply_pit(c) -> void:
 	if not c.pit_log.is_empty() and int(c.pit_log[-1]["lap"]) == c.lap + 1:
 		c.pit_log[-1]["loss"] = snappedf(c.pit_total, 0.1) # 복기: 피트로 잃은 시간(레인+정차)
 	if d["tyres"]:
+		# WEC: 뺀 드라이 세트는 그 마모 그대로 보관 → 새 세트가 바닥나면 여기서 다시 낀다 (수정 31-1)
+		if is_wec() and SLICK.has(c.comp):
+			var pl0: Array = c.wec_pool.get(c.comp, [])
+			pl0.append({"w": c.wear, "h": 1})
+			c.wec_pool[c.comp] = pl0
 		c.comp = d["comp"]
 		c.used[c.comp] = true
 		c.wear = 0.0
@@ -2662,9 +2669,16 @@ func apply_pit(c) -> void:
 				if c.wec_sets > 0:
 					c.wec_sets -= 1
 				else:
-					c.wear = 0.34 # 새 세트가 없으면 이전에 쓴 세트를 다시 낀다
+					# 새 세트가 없으면 빼 둔 세트 중 가장 덜 닳은 것 (그 마모 + 열 사이클 손해). 예전엔 늘 34% 로 무한 회복되던 허점
+					var pool: Array = c.wec_pool.get(c.comp, [])
+					if pool.is_empty():
+						fit_used(c, null) # shortcut: 보관 세트가 없을 일은 없지만(apply_pit 이 쓴 컴파운드로 바꿈) 만약을 위해 옛 기본값
+					else:
+						var bi: int = least_worn(pool)
+						fit_used(c, pool[bi])
+						pool.remove_at(bi)
 					if c.mine:
-						say(c, "새 드라이 세트가 없어 쓰던 세트를 다시 끼웠어요")
+						say(c, "새 드라이 세트가 없어 쓰던 세트(마모 %d%%)를 다시 끼웠어요" % int(round(c.wear * 100.0)))
 		c.stint_laps = 0
 		c.stint_tyre = 0
 	elif not d.get("forced", false):
