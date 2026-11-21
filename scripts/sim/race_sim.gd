@@ -703,6 +703,7 @@ func _calc_sec_kinds() -> void:
 	var lo: float = avg.min()
 	var hi: float = avg.max()
 	sec_slow = []
+	_sw = {}
 	for v in avg:
 		sec_slow.append(clampf((hi - float(v)) / maxf(0.001, hi - lo), 0.0, 1.0))
 	var ss := 0.0
@@ -729,7 +730,7 @@ func setup_sec(c, sec: int, w: float) -> float:
 ## 연습용 섹터별 예상 시간 (새 미디엄 · 가벼운 연료 · 깨끗한 랩)
 func est_sectors(c) -> Array:
 	var out: Array = []
-	var dt: float = float(setup_extra(c)["dt"])
+	var dt: float = float(setup_extra(c, "q")["dt"])
 	for i in NS:
 		var sh: float = T.share[i]
 		out.append(float(CIRC["base"]) * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"]) + setup_sec(c, i, 0.0) + dt * sh)
@@ -741,12 +742,26 @@ func setup_pen(c, w: float) -> float:
 	return 0.15 * d * d * wsc()
 
 
-## 세부 셋업 (서스펜션·브레이크 밸런스·디퍼렌셜) — 슬라이더 값과 숨은 최적값의 거리로 랩타임이 정해진다.
-## 최적값은 서킷 성격(연석·저속 vs 고속, 트랙션 vs 직선) + 드라이버 성향 + 서킷·드라이버별 고정 편차.
-## 각 항목: 딱 맞으면 랩당 -0.09초, 범위의 30% 이상 벗어나면 손해(최대 +0.045초).
+## 세부 셋업 (서스펜션·브레이크 밸런스·디퍼렌셜) = 타협 (D②, 2026-11-21). 슬라이더를 x = -1~+1(범위 가운데 0)로 보고,
+## 항목마다 두 갈래 득실(SETUP_CH, x=+1 일 때 초/랩) × 서킷 비중(setup_w) → 서킷마다 다른 최적점.
+## 랩타임 = 항목마다 -0.09 + Q·(x - 최적)² (최대 +0.045) — 이득 크기는 예전(숨은 정답과의 거리)과 같다.
+## 마모(SETUP_WEAR)는 결승에서만 아파서 예선 최적(빠름)과 결승 최적(타이어)이 갈린다. 엔지니어 추천은 결승 쪽 타협안.
+## 드라이버 취향(숨은 선호)은 속도가 아니라 실수에만: 맞으면 실수↓. 서스펜션은 공기압과 엮인다(높은 공기압 = 더 단단한 스프링).
 const SETUP_RANGE := {"susp": [1.0, 10.0], "bbias": [52.0, 62.0], "diff": [20.0, 80.0]}
 const SETUP_KO := {"wing": "윙", "susp": "서스펜션", "bbias": "브레이크 밸런스", "diff": "디퍼렌셜"}
 const SETUP_K := 0.09
+const SETUP_Q := 0.25
+const SETUP_CH := {
+	"susp": [["fast", -0.40], ["kerb", 0.40]],   # 단단하게: 고속 코너 안정 / 연석·요철에서 튐
+	"bbias": [["brake", -0.40], ["slow", 0.40]], # 앞으로: 직선 끝 강한 브레이킹 안정 / 저속 코너에서 안 돌아감
+	"diff": [["trac", -0.40], ["fast", 0.40]],   # 잠그게: 저속 탈출 트랙션 / 고속 코너 진입·중간 회전 부족
+}
+const SETUP_WEAR := {"susp": 0.08, "bbias": 0.0, "diff": 0.06} # x = +1 이면 마모 +8% (단단할수록·잠글수록)
+const CH_KO := {"fast": "고속 코너", "kerb": "연석·요철", "brake": "브레이킹", "slow": "저속 코너", "trac": "탈출 트랙션"}
+const PSI_SUSP := 0.25 # 공기압이 최적보다 1칸 높으면 서스펜션 +0.25 만큼 단단한 느낌
+var _sw: Dictionary = {}
+var _sw_raw: Dictionary = {}
+const SETUP_RAW_MEAN := {"fast": 0.666, "kerb": 1.295, "brake": 0.918, "slow": 1.383, "trac": 1.339} # 전 서킷(F1·WEC 29곳) 평균 — 보통 서킷 = 가운데
 
 
 ## 서킷 성격 점수: bump(+ = 저속·연석 많음 / - = 고속·매끈), trac(+ = 탈출 트랙션 중요 / - = 고속 직선 위주)
@@ -764,48 +779,130 @@ func _h01(sv: String) -> float:
 	return float(h % 10000) / 10000.0
 
 
-## 숨은 최적값 (서킷·드라이버마다 고정)
-func setup_opt(c) -> Dictionary:
-	if not c.setup_opt.is_empty():
-		return c.setup_opt
-	var ct := circ_traits()
-	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
-	var tm: float = clampf((c.tyre_mgmt - 0.8) / 0.08, -1.0, 1.0)
-	var key: String = circ_key + "|" + c.name
+## 서킷 채널 비중 (항목마다 두 갈래 합 = 1): 공력 코너 wA · 연석 wC · 직선 wE · 섹터 속도로 본 저속 비율
+func setup_w() -> Dictionary:
+	if not _sw.is_empty() and _sw.get("circ", "") == circ_key:
+		return _sw
+	var sl := 0.5
+	if sec_slow.size() == NS:
+		sl = 0.0
+		for i in NS:
+			sl += float(T.share[i]) * float(sec_slow[i])
+	# 공력(wA)과 연석(wC)은 서킷끼리 같이 움직이는 편이라(모나코는 둘 다 큼) 섹터 속도로 고속/저속을 나눠 준다
+	var raw := {"fast": float(CIRC.get("wA", 0.045)) / 0.045 * (1.3 - sl), "kerb": float(CIRC.get("wC", 0.045)) / 0.045 * (0.7 + sl), "brake": float(CIRC.get("wE", 0.04)) / 0.045, "slow": (0.6 + sl) * 1.1}
+	var bump: float = circ_traits()["bump"] # 요철·연석 많은 시가지(모나코·싱가포르)는 부드럽게
+	raw["fast"] = float(raw["fast"]) * (1.0 - 0.3 * bump)
+	raw["kerb"] = float(raw["kerb"]) * (1.0 + 0.3 * bump)
+	raw["trac"] = (raw["slow"] + raw["kerb"]) * 0.5
+	_sw_raw = raw.duplicate()
+	for ch in SETUP_RAW_MEAN:
+		raw[ch] = float(raw[ch]) / float(SETUP_RAW_MEAN[ch]) # 서킷 전체 평균 = 1 → 보통 서킷은 가운데가 맞음
+	var out := {"circ": circ_key}
+	for k in SETUP_CH:
+		var a: Array = SETUP_CH[k][0]
+		var b: Array = SETUP_CH[k][1]
+		# 대비를 키운다(4제곱): 두 갈래 비중이 58:42 면 78:22 — 서킷 성격이 최적점을 분명히 움직이게
+		var pa: float = pow(maxf(0.01, float(raw[a[0]])), 4.0)
+		var pb: float = pow(maxf(0.01, float(raw[b[0]])), 4.0)
+		out[k] = {a[0]: pa / (pa + pb), b[0]: pb / (pa + pb)}
+	_sw = out
+	return out
+
+
+static func setup_x(k: String, v: float) -> float:
+	var r: Array = SETUP_RANGE[k]
+	return (v - (float(r[0]) + float(r[1])) * 0.5) / ((float(r[1]) - float(r[0])) * 0.5)
+
+
+static func setup_v(k: String, x: float) -> float:
+	var r: Array = SETUP_RANGE[k]
+	return clampf((float(r[0]) + float(r[1])) * 0.5 + x * (float(r[1]) - float(r[0])) * 0.5, float(r[0]), float(r[1]))
+
+
+## 서킷 채널로 정해지는 기울기 (초/랩 per x)
+func _setup_slope(k: String) -> float:
+	var w: Dictionary = setup_w()[k]
+	var l := 0.0
+	for ch in SETUP_CH[k]:
+		l += float(ch[1]) * float(w[ch[0]])
+	return l
+
+
+## 최적값 (슬라이더 단위). race = 결승 쪽 타협(마모 고려). 드라이버 감각 차이만큼 조금 치우침(서킷·드라이버마다 고정)
+func setup_opt(c, race: bool = false) -> Dictionary:
 	var o := {}
-	o["susp"] = clampf(5.5 - 3.0 * ct["bump"] + 0.6 * ag + (_h01(key + "s") - 0.5) * 2.4, 1.0, 10.0)
-	o["bbias"] = clampf(57.0 - 2.2 * ag + 0.8 * ct["bump"] + (_h01(key + "b") - 0.5) * 3.0, 52.0, 62.0)
-	o["diff"] = clampf(50.0 + 18.0 * ct["trac"] - 6.0 * tm + (_h01(key + "d") - 0.5) * 16.0, 20.0, 80.0)
-	c.setup_opt = o
+	for k in SETUP_RANGE:
+		var x: float = -_setup_slope(k) / (2.0 * SETUP_Q) + (_h01(circ_key + "|" + c.name + k) - 0.5) * 0.2
+		if race:
+			x -= float(SETUP_WEAR[k]) * 1.5 # 마모 +8% ≈ 스틴트 평균 랩당 약 0.1초어치
+		o[k] = setup_v(k, clampf(x, -0.9, 0.9))
 	return o
 
 
-## 항목별 정규화 오차 (값 - 최적) / 범위폭. 부호: + = 값이 최적보다 큼
-func setup_err(c) -> Dictionary:
+## 드라이버 취향 (x 단위, 숨은 값): 맞을수록 실수가 적다 — 속도와는 무관
+func setup_pref(c) -> Dictionary:
+	if c.setup_opt.has("pref") and c.setup_opt.get("who", "") == c.name:
+		return c.setup_opt["pref"]
+	var pr := {}
+	for k in SETUP_RANGE:
+		pr[k] = (_h01(c.name + "|pref|" + k) - 0.5) * 1.2
+	c.setup_opt = {"pref": pr, "who": c.name}
+	return pr
+
+
+## 항목별 효과 x (서스펜션은 공기압만큼 단단함이 더해짐). kind = 공기압 상황 ("q" 연습·예선 / "live" 레이스)
+func setup_xs(c, kind: String = "live") -> Dictionary:
+	var xs := {}
+	for k in SETUP_RANGE:
+		xs[k] = setup_x(k, float(c.get(k)))
+	xs["susp"] = float(xs["susp"]) + PSI_SUSP * press_u(c, kind)
+	return xs
+
+
+## 항목별 정규화 오차 (효과 x - 예선 최적 x) / 2 = 범위 대비. 부호: + = 값이 최적보다 큼 (드라이버 피드백용)
+func setup_err(c, kind: String = "live") -> Dictionary:
 	var o := setup_opt(c)
+	var xs := setup_xs(c, kind)
 	var out := {}
 	for k in SETUP_RANGE:
-		var r: Array = SETUP_RANGE[k]
-		out[k] = (float(c.get(k)) - float(o[k])) / (float(r[1]) - float(r[0]))
+		out[k] = (float(xs[k]) - setup_x(k, float(o[k]))) * 0.5
 	return out
 
 
 ## {dt: 초/랩, wear: 배율, err: 실수 배율}
-func setup_extra(c) -> Dictionary:
-	var e := setup_err(c)
+func setup_extra(c, kind: String = "live") -> Dictionary:
+	var o := setup_opt(c)
+	var xs := setup_xs(c, kind)
+	var pr := setup_pref(c)
 	var dt := 0.0
-	for k in e:
-		var q: float = clampf(1.0 - absf(float(e[k])) / 0.3, -0.5, 1.0)
-		dt -= SETUP_K * q
-	# 물리적 대가 (최적과 무관): 단단할수록·잠글수록 마모↑, 브레이크를 뒤로 보낼수록 잠김 실수↑
-	var wear: float = (1.0 + (c.susp - 5.5) * 0.01) * (1.0 + (c.diff - 50.0) * 0.0012)
-	var err: float = 1.0 + (57.0 - c.bbias) * 0.025
+	var wear := 1.0
+	var miss := 0.0
+	for k in SETUP_RANGE:
+		var x: float = xs[k]
+		var d: float = x - setup_x(k, float(o[k]))
+		dt += -SETUP_K + minf(SETUP_K * 1.5, SETUP_Q * d * d)
+		wear *= 1.0 + float(SETUP_WEAR[k]) * clampf(x, -1.0, 1.0)
+		miss += absf(clampf(x, -1.0, 1.0) - float(pr[k]))
+	# 브레이크를 뒤로 보낼수록 잠김 실수↑ (최적과 무관한 물리), 드라이버 취향에서 멀수록 실수↑
+	var err: float = (1.0 - 0.125 * setup_x("bbias", c.bbias)) * (0.88 + 0.3 * miss / 3.0)
 	return {"dt": dt * (1.0 - 0.5 * wet) * wsc(), "wear": wear, "err": maxf(0.7, err)}
 
 
+## 화면용: 지금 값이 범위 가운데보다 어디서 얻고 잃는지 [[채널 이름, 초/랩]…], 합계(한계 손해 포함), 마모 %
+func setup_channels(c, k: String) -> Dictionary:
+	var x: float = setup_x(k, float(c.get(k)))
+	var w: Dictionary = setup_w()[k]
+	var chs: Array = []
+	for ch in SETUP_CH[k]:
+		chs.append([CH_KO[ch[0]], x * float(ch[1]) * float(w[ch[0]]) * wsc()])
+	var o: float = setup_x(k, float(setup_opt(c)[k]))
+	var tot: float = (minf(SETUP_K * 1.5, SETUP_Q * (x - o) * (x - o)) - minf(SETUP_K * 1.5, SETUP_Q * o * o)) * wsc()
+	return {"ch": chs, "tot": tot, "wear": float(SETUP_WEAR[k]) * x * 100.0}
+
+
 ## 드라이버 피드백: 가장 많이 벗어난 항목의 방향을 말해 준다
-func setup_tip(c) -> String:
-	var e := setup_err(c)
+func setup_tip(c, kind: String = "live") -> String:
+	var e := setup_err(c, kind)
 	var worst := ""
 	var wv := 0.0
 	for k in e:
@@ -813,7 +910,7 @@ func setup_tip(c) -> String:
 			wv = float(e[k])
 			worst = k
 	if absf(wv) < 0.05:
-		return "세부 셋업은 거의 완벽해요"
+		return "세부 셋업은 거의 완벽해요" + _pref_tip(c)
 	var strong: bool = absf(wv) > 0.18
 	match worst:
 		"susp":
@@ -830,9 +927,24 @@ func setup_tip(c) -> String:
 			return "탈출에서 뒷바퀴가 헛돌아요. 디퍼렌셜을 %s 잠가주세요" % ("많이" if strong else "조금")
 
 
-## 엔지니어 실력(q 0~1)만큼 최적값 근처로 맞춘 셋업 (AI 팀, 주말 없이 바로 레이스할 때 내 차)
+## 드라이버 취향과 많이 다른 항목 한 마디 (속도는 그대로, 실수만 늘어남)
+func _pref_tip(c) -> String:
+	var pr := setup_pref(c)
+	var worst := ""
+	var wv := 0.0
+	for k in SETUP_RANGE:
+		var d: float = setup_x(k, float(c.get(k))) - float(pr[k])
+		if absf(d) > absf(wv):
+			wv = d
+			worst = k
+	if absf(wv) < 0.7:
+		return ""
+	return ". 그런데 %s가 제 스타일보다 %s 편이라 실수가 날 것 같아요" % [SETUP_KO[worst], "높은" if wv > 0.0 else "낮은"]
+
+
+## 엔지니어 실력(q 0~1)만큼 결승 쪽 타협안 근처로 맞춘 셋업 (AI 팀, 주말 없이 바로 레이스할 때 내 차)
 func engineer_setup(c, q: float) -> void:
-	var o := setup_opt(c)
+	var o := setup_opt(c, true)
 	var sd: float = 0.04 + 0.16 * (1.0 - clampf(q, 0.0, 1.0))
 	for k in SETUP_RANGE:
 		var r: Array = SETUP_RANGE[k]

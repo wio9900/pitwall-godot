@@ -116,6 +116,45 @@ func _init() -> void:
 	print("   공기압: 최소 %.1f · 노면 %.0f°C · 추천 예선 %.1f / 결승 %.1f · 최고로 넣으면 \"%s\" %s" % [su.psi_min, su.track_t, su.psi_rec("q"), su.psi_rec("race"), fb_hi, "OK" if psi_ok else "실패"])
 	if not psi_ok:
 		fails += 1
+	# 셋업 개편 (D②): 서킷마다 최적이 다름 · 결승 최적은 마모 쪽 · 공짜 방향 없음 · 취향은 실수만 · 낮은 등급 엔지니어는 틀릴 수 있음
+	var so_ok := true
+	var opt_by := {}
+	for ck in ["monaco", "silverstone", "monza"]:
+		var ss = RaceSimS.new()
+		ss.new_race(ck, 6, 15, "dry", ["M", "M"], 5)
+		var sc0 = ss.my_cars()[0]
+		opt_by[ck] = ss.setup_opt(sc0)["susp"]
+		var qo: Dictionary = ss.setup_opt(sc0)
+		var ro: Dictionary = ss.setup_opt(sc0, true)
+		so_ok = so_ok and float(ro["susp"]) < float(qo["susp"]) and float(ro["diff"]) < float(qo["diff"])
+		for k in RaceSimS.SETUP_RANGE:
+			sc0.set(k, RaceSimS.setup_v(k, 1.0))
+			var chs: Array = ss.setup_channels(sc0, k)["ch"]
+			so_ok = so_ok and float(chs[0][1]) < 0.0 and float(chs[1][1]) > 0.0
+		var pr: Dictionary = ss.setup_pref(sc0)
+		for k in pr:
+			sc0.set(k, RaceSimS.setup_v(k, float(pr[k])))
+		var e_near: float = ss.setup_extra(sc0, "q")["err"]
+		for k in pr:
+			sc0.set(k, RaceSimS.setup_v(k, -1.0 if float(pr[k]) > 0.0 else 1.0))
+		sc0.bbias = RaceSimS.setup_v("bbias", float(pr["bbias"]))
+		var e_far: float = ss.setup_extra(sc0, "q")["err"]
+		so_ok = so_ok and e_far > e_near
+	so_ok = so_ok and float(opt_by["monaco"]) < float(opt_by["silverstone"])
+	var wrong := {"S": 0, "D": 0}
+	for g in [["S", 0.95], ["D", 0.05]]:
+		for sd in 40:
+			var se = RaceSimS.new()
+			se.new_race("bahrain", 6, 15, "dry", ["M", "M"], 900 + sd)
+			var we = WeekendS.new()
+			we.setup(se, 0, float(g[1]))
+			for k in ["susp", "bbias", "diff"]:
+				if we.bands[0][k].get("wrong", false):
+					wrong[g[0]] += 1
+	so_ok = so_ok and int(wrong["S"]) == 0 and int(wrong["D"]) > 20 and int(wrong["D"]) < 80
+	print("   셋업 타협: 서스펜션 최적 모나코 %.1f < 실버스톤 %.1f · 몬자 %.1f · 틀린 추천 S급 %d / D급 %d (120칸 중) %s" % [float(opt_by["monaco"]), float(opt_by["silverstone"]), float(opt_by["monza"]), int(wrong["S"]), int(wrong["D"]), "OK" if so_ok else "실패"])
+	if not so_ok:
+		fails += 1
 	var ok15: bool = wu.used_n(0, "M") == 1 and int(m_set["h"]) == 3 and absf(float(c0.wear) - float(m_set["w"])) < 0.001 \
 		and float(m_set["w"]) > lw * 7.0 and absf(one_run - 0.45) < 0.01 and more > one_run and absf(c0.used_set_pen - RaceSimS.HEAT_PEN * 2.0) < 0.001
 	print("   쓴 세트 마모: M 세트 %.0f%% (달군 %d) → 출발 마모 %.0f%% · 열 사이클 +%.2f초/랩 · 예선 손해 런1 %.2f / 숏런 세트 %.2f %s" % [float(m_set["w"]) * 100.0, int(m_set["h"]), c0.wear * 100.0, c0.used_set_pen, one_run, more, "OK" if ok15 else "실패"])

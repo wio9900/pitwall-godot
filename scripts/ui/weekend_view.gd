@@ -239,7 +239,7 @@ func _render_practice() -> void:
 	eb.disabled = not ed
 	card.add_child(eb)
 	var dx = K.rtl(12)
-	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 정답은 띠 안 어딘가에 있어요 — 가운데가 정답은 아니에요. 테스트를 달릴수록 띠가 좁아지고, 드라이버 피드백이 방향을 알려줘요. 항목마다 딱 맞으면 랩당 약 0.09초 빨라져요. 서스펜션을 단단하게·디퍼렌셜을 잠글수록 타이어 마모가 늘고, 브레이크를 뒤로 보낼수록 실수가 늘어요.[/color]"
+	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 엔지니어 추천은 결승까지 생각한 '안전한 타협안'이라 예선만 보면 조금 느릴 수 있고, 등급이 낮으면 틀린 곳을 가리킬 때도 있어요(테스트를 달릴수록 바로잡혀요). 세부 셋업은 정답 하나가 아니라 타협이에요 — 슬라이더 아래 숫자가 고속·저속·연석·브레이킹 중 어디서 얻고 잃는지 보여줘요(엔지니어 계산이라 등급만큼 부정확). 서킷마다 맞는 곳이 다르고, 단단하게·잠글수록 빠를 수 있지만 타이어 마모가 늘어 결승에서 아파요. 드라이버마다 취향이 있어서 취향과 멀면 속도는 같아도 실수가 늘어요(드라이버가 말해줘요). 공기압을 높이면 서스펜션도 더 단단해진 것처럼 느껴져요. 드라이버 피드백은 늘 맞는 방향을 알려줘요.[/color]"
 	card.add_child(dx)
 	var left: int = wk.practice_left[sel]
 	# 연습 타이어: 쓴 세트가 있으면 그걸로, 없으면 새 세트를 하나 열어요
@@ -754,7 +754,17 @@ func _setup_label(c, key: String) -> String:
 	var ls: String = SET_FMT[key] % (int(lh[0]) if key == "diff" else float(lh[0]))
 	var hs: String = SET_FMT[key] % (int(lh[1]) if key == "diff" else float(lh[1]))
 	var extra: String = (" · " + _wing_desc(v)) if key == "wing" else ""
-	return "[b]%s[/b] %s%s   [color=#ffc53d]추천 %s ~ %s[/color]" % [RS.SETUP_KO[key], vs, extra, ls, hs]
+	var t: String = "[b]%s[/b] %s%s   [color=#ffc53d]추천 %s ~ %s[/color]" % [RS.SETUP_KO[key], vs, extra, ls, hs]
+	if RS.SETUP_RANGE.has(key):
+		# 가운데 대비 어디서 얻고 잃는지 (엔지니어 계산 — 등급만큼 부정확). 초록 = 빨라짐, 빨강 = 느려짐
+		var sv: Dictionary = wk.setup_view(c.slot, key)
+		var parts: PackedStringArray = []
+		for ch in sv["ch"]:
+			parts.append("%s [color=%s]%+.2f[/color]" % [ch[0], "#22c55e" if float(ch[1]) < -0.005 else ("#ef4444" if float(ch[1]) > 0.005 else "#8b98a5"), float(ch[1]) + 0.0]) # + 0.0: -0.00 대신 +0.00
+		var wr: float = sv["wear"]
+		parts.append("마모 [color=%s]%+.0f%%[/color]" % ["#ef4444" if wr > 0.5 else ("#22c55e" if wr < -0.5 else "#8b98a5"), wr])
+		t += "\n[color=#8b98a5]가운데 대비 초/랩:[/color] %s · [color=#8b98a5]엔지니어 계산 합계[/color] %+.2f" % [" · ".join(parts), float(sv["tot"]) + 0.0]
+	return t
 
 
 func _setup_slider(card: VBoxContainer, c, key: String, ed: bool) -> void:
@@ -836,8 +846,8 @@ func _update_live_feedback() -> void:
 
 
 func _eng_grade() -> String:
-	var q: float = wk.eng_q
-	return "엔지니어 S급" if q >= 0.9 else ("A급" if q >= 0.65 else ("B급" if q >= 0.4 else "C급"))
+	var g: String = wk.eng_grade()
+	return "엔지니어 %s급 · 정확도 %s" % [g, {"S": "아주 높음", "A": "높음", "B": "보통", "C": "낮음", "D": "매우 낮음"}[g]]
 
 
 func _on_engineer() -> void:

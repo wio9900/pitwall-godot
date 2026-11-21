@@ -200,10 +200,20 @@ func _span(key: String) -> Array:
 func _opt(c, key: String) -> float:
 	if key == "psi":
 		return sim.psi_rec("q")
-	return sim.wing_opt(0.0, c) if key == "wing" else float(sim.setup_opt(c)[key])
+	return sim.wing_opt(0.0, c) if key == "wing" else float(sim.setup_opt(c, true)[key]) # 세부 셋업 = 결승 쪽 안전한 타협안
 
 
-## 엔지니어 실력이 좋을수록 좁고 정확한 범위. 정답은 범위 안 어딘가 (가운데가 정답은 아님)
+## 엔지니어 등급: S ≥0.9 · A ≥0.65 · B ≥0.4 · C ≥0.2 · D. 세부 셋업 추천이 정답을 벗어날 확률 (S·A 0 · B 10% · C 25% · D 40%)
+func eng_grade() -> String:
+	return "S" if eng_q >= 0.9 else ("A" if eng_q >= 0.65 else ("B" if eng_q >= 0.4 else ("C" if eng_q >= 0.2 else "D")))
+
+
+const ENG_MISS := {"S": 0.0, "A": 0.0, "B": 0.10, "C": 0.25, "D": 0.40}
+
+
+## 엔지니어 실력이 좋을수록 좁고 정확한 범위. 정답은 범위 안 어딘가 (가운데가 정답은 아님).
+## 세부 셋업(서스펜션·브레이크·디퍼렌셜)은 엔지니어마다 치우침(팀별 고정)이 있고, 낮은 등급은 범위 밖을 가리킬 수 있다(wrong).
+## nz = 득실 막대 숫자 오차 (엔지니어 계산이 정확하지 않음)
 func _make_band(c) -> Dictionary:
 	var b := {}
 	for key in ["wing", "susp", "bbias", "diff", "psi"]:
@@ -211,8 +221,35 @@ func _make_band(c) -> Dictionary:
 		var span: float = float(r[1]) - float(r[0])
 		var hw: float = (0.08 + 0.22 * (1.0 - eng_q)) * span
 		var ctr: float = _opt(c, key) + sim.uni(-0.6, 0.6) * hw
-		b[key] = {"c": ctr, "hw": hw}
+		var bd := {"c": ctr, "hw": hw}
+		if RS.SETUP_RANGE.has(key):
+			# shortcut: 치우침은 팀 이름으로 고정 (커리어 수석 엔지니어가 바뀌어도 같음) — 엔지니어 이름이 주말에 넘어오면 그걸로
+			var lean: float = (sim._h01(c.team + "|eng|" + key) - 0.5) * hw
+			bd["c"] = _opt(c, key) + clampf(sim.uni(-0.5, 0.5) * hw + lean, -0.8 * hw, 0.8 * hw)
+			if sim.rnd() < float(ENG_MISS[eng_grade()]):
+				bd["c"] = _opt(c, key) + (1.0 if sim.rnd() < 0.5 else -1.0) * hw * sim.uni(1.15, 1.5)
+				bd["wrong"] = true
+			bd["nz"] = sim.gauss(0.08 + 0.45 * (1.0 - eng_q))
+			bd["laps"] = 0
+		b[key] = bd
 	return b
+
+
+## 화면용 세부 셋업 득실 (엔지니어 계산 — 등급만큼 오차): {ch: [[이름, 초]…], tot: 엔지니어가 보는 합계, wear: %, grade}
+func setup_view(slot: int, key: String) -> Dictionary:
+	var c = my_cars()[slot]
+	var bd: Dictionary = bands[slot][key]
+	var v: Dictionary = sim.setup_channels(c, key)
+	var k: float = 1.0 + float(bd.get("nz", 0.0))
+	var chs: Array = []
+	for ch in v["ch"]:
+		chs.append([ch[0], float(ch[1]) * k])
+	# 합계는 엔지니어가 생각하는 최적(추천 띠 가운데) 기준 → 엔지니어가 틀리면 합계도 틀린다
+	var x: float = RS.setup_x(key, float(c.get(key)))
+	var xc: float = RS.setup_x(key, float(bd["c"]))
+	var q: float = RS.SETUP_Q
+	var tot: float = (minf(RS.SETUP_K * 1.5, q * (x - xc) * (x - xc)) - minf(RS.SETUP_K * 1.5, q * xc * xc)) * sim.wsc()
+	return {"ch": chs, "tot": tot, "wear": float(v["wear"]), "grade": eng_grade()}
 
 
 func band_lohi(slot: int, key: String) -> Array:
@@ -232,8 +269,13 @@ func _refine_band(slot: int, laps_run: int) -> void:
 		var o := _opt(c, key)
 		bd["hw"] = maxf(0.03 * span, float(bd["hw"]) * k)
 		bd["c"] = o + (float(bd["c"]) - o) * k
-		# 범위가 정답을 벗어나지 않게
-		if absf(float(bd["c"]) - o) > float(bd["hw"]) * 0.8:
+		if bd.has("nz"):
+			bd["nz"] = float(bd["nz"]) * k
+			bd["laps"] = int(bd["laps"]) + laps_run
+			if bd.get("wrong", false) and int(bd["laps"]) >= 6: # 테스트를 충분히 달리면 틀린 추천도 바로잡힌다
+				bd["wrong"] = false
+		# 범위가 정답을 벗어나지 않게 (틀린 엔지니어는 테스트 6랩 전까지 그대로)
+		if not bd.get("wrong", false) and absf(float(bd["c"]) - o) > float(bd["hw"]) * 0.8:
 			bd["c"] = o + signf(float(bd["c"]) - o) * float(bd["hw"]) * 0.8
 
 
@@ -285,7 +327,7 @@ func feedback(c, kind: String = "q") -> String:
 		b = "타이어가 잘 안 데워지고 미끄러워요, 공기압이 너무 낮아요"
 	elif pu <= -0.4:
 		b = "타이어 데워지는 게 조금 느리고 살짝 미끄러워요"
-	var tip: String = sim.setup_tip(c)
+	var tip: String = sim.setup_tip(c, kind)
 	return a + (". " + b if b != "" else "") + (". " + tip if tip != "" else "")
 
 
@@ -361,7 +403,7 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 	var ws: float = sim.wsc()
 	var pu: float = sim.press_u(c, "race" if kind == "long" else "q") # 롱런 = 결승처럼 많이 오름, 테스트 = 예선처럼 조금
 	var pf: Array = RS.press_fx(pu)
-	var wmult: float = float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c)["wear"])
+	var wmult: float = float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c, "race" if kind == "long" else "q")["wear"])
 	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * wmult
 	var st: Variant = last_set
 	if st != null:
@@ -369,7 +411,7 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 		st["h"] = int(st["h"]) + 1
 	var res: Array = []
 	for i in n:
-		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c)["dt"])
+		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c, "race" if kind == "long" else "q")["dt"])
 		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * sim.fuel_k()) * ws + sim.gauss(0.25)
 		if pu > 0.0 and wear > 0.5:
 			t += 0.3 * pu # 공기압이 높으면 런 후반 과열
@@ -498,7 +540,7 @@ func q_lap(c, push: String, traffic: Variant, stage: int, comp: String, used_set
 	for s in NS:
 		var sh: float = sim.T.share[s]
 		var t: float = float(CIRC["base"]) * sh * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"]) * spd)
-		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c)["dt"]) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
+		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c, "q")["dt"]) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
 		t += sim.gauss(0.10 * sqrt(sh) * sqrt(ws))
 		if sim.rnd() < trf_risk * sh * 1.6:
 			var loss: float = sim.uni(0.22, 0.68)
