@@ -262,9 +262,11 @@ func _render_practice() -> void:
 	h.get_child(0).disabled = anim != null or left < 3
 	h.get_child(1).disabled = anim != null or left < 5
 	var info = K.rtl(14)
-	info.text = "남은 연습 [b]%d랩[/b] · %s\n마모율 추정 (오차 ±%d%%%s): [color=#ef4444]S[/color] %s · [color=#facc15]M[/color] %s · H %s" % [
-		left, _sets_txt(sel), int(round(float(wk.wear_est["err"]) * 100.0)), (", 롱런 %d회" % int(wk.wear_est["runs"])) if int(wk.wear_est["runs"]) > 0 else ", 미측정",
-		wk.est_range_text("S"), wk.est_range_text("M"), wk.est_range_text("H")]
+	var wl: PackedStringArray = []
+	for k in wk.dry_comps(c):
+		var rn: int = int(wk.wear_est["runs"].get(k, 0))
+		wl.append("[color=%s]%s[/color] %s [color=#8b98a5](±%d%%%s)[/color]" % [RS.TYRE_HEX[k], k, wk.est_range_text(k), int(round(wk.wear_err(k) * 100.0)), (" · 롱런 %d회" % rn) if rn > 0 else " · 미측정"])
+	info.text = "남은 연습 [b]%d랩[/b] · %s\n마모율 추정 — 롱런을 달린 컴파운드만 정확해져요 (결승 전략 계획이 이 값을 써요)\n%s\n[color=#8b98a5]셋업 테스트 = 예선 쪽 정보(윙·공기압 범위가 빨리 좁혀짐, 예선 환산 기록) · 롱런 = 결승 쪽 정보(마모·세부 셋업 범위, 연료 보정 평균)[/color]" % [left, _sets_txt(sel), "  ·  ".join(wl)]
 	card.add_child(info)
 	_update_live_feedback()
 	# 기록
@@ -276,7 +278,8 @@ func _render_practice() -> void:
 		var t := ""
 		for r in wk.practice_runs:
 			var col := "#a855f7" if r["best"] == best else "#e6edf3"
-			t += "%s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], "%.1fpsi" % float(r.get("psi", 0.0)), r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
+			var extra: String = ("연료 보정 %s" % K.fmt_lap(r["fc_avg"])) if r["kind"] == "long" and r.has("fc_avg") else (("예선 환산 %s" % K.fmt_lap(r["q_est"])) if r.has("q_est") else "")
+			t += "%s %s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  %s  마모 %.1f%%/랩\n" % [r["code"], r["comp"], r["wing"], "%.1fpsi" % float(r.get("psi", 0.0)), r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), extra, r["wear_lap"]]
 		var rr = K.rtl(14)
 		rr.text = t
 		tc.add_child(rr)
@@ -299,11 +302,36 @@ func _render_practice() -> void:
 			var hr = K.rtl(14)
 			hr.text = HUB.report(sim, sim.est_sectors(cc), sim.est_sectors(ref), ref.code)
 			hc.add_child(hr)
+	_rival_card()
 	var b2 = K.hbox(6)
 	_side.add_child(b2)
 	b2.add_child(K.btn("⚡ 엔지니어에게 맡기기 (자동)", 15, _on_auto_practice))
 	b2.add_child(K.btn("셋업 확정 · 예선으로 ▶", 17, _on_to_quali))
 	_side.add_child(K.btn("◀ 뒤로", 14, _on_back))
+
+
+## 다른 팀 연습 기록표: 숏런(한 랩)·롱런(5랩 평균) 순위. 남의 연료량은 모른다 → 숫자를 그대로 믿으면 안 됨
+func _rival_card() -> void:
+	var tc = K.card(_side, "📋 다른 팀 연습 기록 (연료량 모름)")
+	var t := ""
+	var ranks: PackedStringArray = []
+	for kind in ["s", "l"]:
+		var tb: Array = wk.practice_table(kind)
+		var rows: PackedStringArray = []
+		for i in tb.size():
+			var x: Dictionary = tb[i]
+			if x["mine"]:
+				ranks.append("%s %s %d위" % [x["code"], "숏런" if kind == "s" else "롱런", i + 1])
+			if i < 6 or x["mine"]:
+				var col: String = "#f59e0b" if x["mine"] else "#e6edf3"
+				rows.append("[color=%s]%d. %s[/color] [color=%s]%s[/color] %s" % [col, i + 1, x["code"], RS.TYRE_HEX[x["comp"]], x["comp"], K.fmt_lap(x["t"])])
+		t += "[b]%s[/b]  %s\n" % ["숏런 최고" if kind == "s" else "롱런 평균", "  ".join(rows)]
+	if not ranks.is_empty():
+		t += "[color=#f59e0b]%s[/color]\n" % " · ".join(ranks)
+	t += "[color=#8b98a5]남의 차가 연료를 얼마나 실었는지는 몰라요. 숏런에도 연료를 많이 싣고 숨기는 팀이 있어요 — 숏런은 빠른데 롱런이 처지면 예선형, 반대면 결승형 차예요.[/color]"
+	var rr = K.rtl(13)
+	rr.text = t
+	tc.add_child(rr)
 
 
 func _on_pcomp(v) -> void:
@@ -1019,7 +1047,7 @@ func _plan_editor(card: VBoxContainer, c) -> void:
 	t += "\n예상 손실 [b]%.1f초[/b] · 최적 대비 %s" % [float(ev["cost"]), ("[color=#22c55e]%+.1f초[/color]" % diff) if diff <= 1.0 else ("[color=#f59e0b]%+.1f초[/color]" % diff)]
 	for w in ev["warn"]:
 		t += "\n[color=#ef4444]⚠ %s[/color]" % w
-	t += "\n[color=#8b98a5]마모는 연습에서 잰 추정치 기준이에요 (오차 ±%d%%). 레이스 중 '피트' 탭에서 A·B를 바꾸거나 자동 피트를 켤 수 있어요.[/color]" % int(round(float(wk.wear_est["err"]) * 100.0))
+	t += "\n[color=#8b98a5]마모는 연습 롱런으로 잰 추정치 기준이에요 (S ±%d%% · M ±%d%% · H ±%d%%, 롱런 안 한 컴파운드는 '보통 타이어'로 가정). 레이스 중 '피트' 탭에서 A·B를 바꾸거나 자동 피트를 켤 수 있어요.[/color]" % [int(round(wk.wear_err("S") * 100.0)), int(round(wk.wear_err("M") * 100.0)), int(round(wk.wear_err("H") * 100.0))]
 	var r = K.rtl(13)
 	r.text = t
 	card.add_child(r)

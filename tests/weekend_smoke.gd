@@ -49,7 +49,7 @@ func _init() -> void:
 			var mtxt = ""
 			for c in mine:
 				mtxt += "%s 그리드P%d→%s 세트%s pen%.2f / " % [c.code, c.grid + 1, "DNF" if c.dnf != "" else "완주", c.tyre_sets, c.used_set_pen]
-			print("%-8s #%d | 완주=%s 폴=%s 우승=%s | 롱런 %.2f 오차±%d%% 연습남음%s | %s" % [key, n, ok, pole.code, res[0]["car"].code, r0.get("best", 0.0), int(wk.wear_est["err"] * 100), wk.practice_left, mtxt])
+			print("%-8s #%d | 완주=%s 폴=%s 우승=%s | 롱런 %.2f 오차±%d%% 연습남음%s | %s" % [key, n, ok, pole.code, res[0]["car"].code, r0.get("best", 0.0), int(wk.wear_err("M") * 100), wk.practice_left, mtxt])
 	# WEC 예선: Q1 뒤 내 클래스 상위 8대만 하이퍼폴 (작업목록 #9), 이상 감지 기록(⚠)이 없어야 함
 	for key in ["spa", "lemans"]:
 		var ws = RaceSimS.new()
@@ -159,6 +159,23 @@ func _init() -> void:
 		and float(m_set["w"]) > lw * 7.0 and absf(one_run - 0.45) < 0.01 and more > one_run and absf(c0.used_set_pen - RaceSimS.HEAT_PEN * 2.0) < 0.001
 	print("   쓴 세트 마모: M 세트 %.0f%% (달군 %d) → 출발 마모 %.0f%% · 열 사이클 +%.2f초/랩 · 예선 손해 런1 %.2f / 숏런 세트 %.2f %s" % [float(m_set["w"]) * 100.0, int(m_set["h"]), c0.wear * 100.0, c0.used_set_pen, one_run, more, "OK" if ok15 else "실패"])
 	if not ok15:
+		fails += 1
+	# D③ 숏런·롱런: 롱런 달린 컴파운드만 정확해짐 → 결승 계획(plan_mult)에 반영 · 다른 팀 기록표 · 연료 보정 · 예선 환산
+	var tm: float = float(su.true_mult["M"])
+	var lr: Dictionary = wu.practice_runs[2] # 맨 처음 런 = M 롱런
+	var ts: Array = wu.practice_table("s")
+	var tl: Array = wu.practice_table("l")
+	var has_me := func(tb: Array) -> bool:
+		for x in tb:
+			if x["mine"]:
+				return true
+		return false
+	var d3_ok: bool = absf(wu.wear_err("M") - 0.175) < 0.001 and absf(wu.wear_err("S") - 0.35) < 0.001 \
+		and su.plan_mult.has("M") and not su.plan_mult.has("S") and absf(float(su.plan_mult["M"]) - tm) < absf(1.0 - tm) + 1e-6 \
+		and wu.rivals.size() >= 15 and has_me.call(ts) and has_me.call(tl) and ts.size() == wu.rivals.size() + 1 \
+		and float(lr["fc_avg"]) < float(lr["avg"]) and wu.practice_runs[0].has("q_est")
+	print("   숏런·롱런: 마모 오차 M ±%d%% · S ±%d%% · 계획 배율 M %.3f (실제 %.3f) · 기록표 숏런 %d대 · 롱런 평균 %.2f → 연료 보정 %.2f %s" % [int(wu.wear_err("M") * 100), int(wu.wear_err("S") * 100), float(su.plan_mult.get("M", 1.0)), tm, ts.size(), float(lr["avg"]), float(lr["fc_avg"]), "OK" if d3_ok else "실패"])
+	if not d3_ok:
 		fails += 1
 	print("주말 테스트 실패 %d" % fails)
 	quit(1 if fails > 0 else 0)

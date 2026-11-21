@@ -82,6 +82,7 @@ const DIFF_STRAT := [-0.12, 0.0, 0.05, 0.09]
 const DIFF_KO := ["쉬움", "보통", "어려움", "전설"]
 var difficulty: int = 1
 var true_mult: Dictionary = {"S": 1.0, "M": 1.0, "H": 1.0}
+var plan_mult: Dictionary = {}  # 내 팀이 연습 롱런으로 알아낸 컴파운드별 마모 배율 추정 (없으면 1.0 = 모름, weekend 가 채움)
 
 # 레이스 상태
 var clock := 0.0
@@ -294,6 +295,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	time_up = false
 	my_team = my_team_
 	true_mult = {"S": uni(0.88, 1.14), "M": uni(0.88, 1.14), "H": uni(0.88, 1.14)}
+	plan_mult = {}
 	if opts.has("true_mult"):
 		true_mult = opts["true_mult"]
 	cars.clear()
@@ -3368,7 +3370,7 @@ func prepare_start() -> void:
 func my_rates(c) -> Dictionary:
 	var out := {}
 	for k in SLICK:
-		out[k] = float(COMP[k][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85 * c.tyre_deg_rate
+		out[k] = float(COMP[k][1]) * float(plan_mult.get(k, 1.0)) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85 * c.tyre_deg_rate
 	var done_laps: int = c.lap - c.stint_start_lap
 	if done_laps >= 3 and SLICK.has(c.comp):
 		var obs: float = (c.wear - c.stint_start_wear) / float(done_laps)

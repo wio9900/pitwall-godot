@@ -37,7 +37,8 @@ const ALLOC_F3 := {"S": 0, "M": 4, "H": 0}
 const QLEN_SINGLE := 30.0   # F2·F3 예선: 탈락 없는 30분 단일 세션
 const ALLOC_WEC := {"S": 2, "M": 3, "H": 2}  # WEC 결승은 별도 레이스 할당(race_sim wec_sets)을 쓴다
 var setups: Array = []       # 내 차별 셋업 [{wing, press, fuel_load}]
-var wear_est := {}           # {err, runs, bias}
+var wear_est := {}           # {err: {S,M,H}, runs: {S,M,H}} — 컴파운드마다 따로: 롱런을 달린 컴파운드만 정확해진다
+var rivals: Array = []       # 다른 팀 연습 기록 [{id, code, team, cls, s_best, s_comp, l_avg, l_comp}] (연료량은 모름)
 var practice_left: Array = [PRACTICE_LAPS, PRACTICE_LAPS]
 var practice_runs: Array = []
 var last_feedback: Array = ["", ""]  # 차별 마지막 드라이버 멘트
@@ -111,10 +112,9 @@ func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 		bands.append(_make_band(c))
 		c.psi = sim.psi_snap(float(bands[c.slot]["psi"]["c"])) # 연습·예선 기본 = 엔지니어 추천 (짧은 런 기준)
 		setups.append({"wing": c.wing, "psi": c.psi, "fuel_load": c.fuel_load})
-	var bias := {}
-	for k in ["S", "M", "H"]:
-		bias[k] = sim.uni(-0.24, 0.24)
-	wear_est = {"err": 0.35, "runs": 0, "bias": bias}
+	wear_est = {"err": {"S": WEAR_ERR0, "M": WEAR_ERR0, "H": WEAR_ERR0}, "runs": {"S": 0, "M": 0, "H": 0}}
+	sim.plan_mult = {}
+	_make_rivals()
 	var lp = maxi(3, PRACTICE_LAPS - obligation_laps)
 	practice_left = [lp, lp]
 	practice_runs = []
@@ -258,11 +258,16 @@ func band_lohi(slot: int, key: String) -> Array:
 	return [maxf(float(r[0]), float(bd["c"]) - float(bd["hw"])), minf(float(r[1]), float(bd["c"]) + float(bd["hw"]))]
 
 
-## 테스트 주행 데이터가 쌓이면 범위가 좁아지고 정답 쪽으로 다가간다
-func _refine_band(slot: int, laps_run: int) -> void:
+## 테스트 주행 데이터가 쌓이면 범위가 좁아지고 정답 쪽으로 다가간다.
+## 숏런(한 랩 느낌) = 윙·공기압이 빨리, 롱런(타이어가 어떻게 닳나) = 세부 셋업(마모 대가)이 빨리 좁혀진다
+const ONE_LAP_KEYS := ["wing", "psi"]
+
+
+func _refine_band(slot: int, laps_run: int, kind: String = "short") -> void:
 	var c = my_cars()[slot]
-	var k: float = pow(0.9, laps_run / 3.0)
 	for key in bands[slot]:
+		var fast: bool = ONE_LAP_KEYS.has(key) == (kind != "long")
+		var k: float = pow(0.9 if fast else 0.95, laps_run / 3.0)
 		var bd: Dictionary = bands[slot][key]
 		var r: Array = _span(key)
 		var span: float = float(r[1]) - float(r[0])
@@ -291,14 +296,27 @@ func engineer_apply(slot: int) -> void:
 
 
 # ═════════ 타이어 마모 추정 (연습 롱런으로 오차가 줄어든다) ═════════
+## 모를 땐 '보통 타이어'(배율 1.0)로 보고, 그 컴파운드로 롱런할 때마다 실제 배율 쪽으로 다가가며 오차가 절반.
+## 실제 배율은 0.88~1.14 라 늘 범위 안. 이 추정이 결승 전략 계획(sim.plan_mult → my_rates)에 그대로 쓰인다.
+const WEAR_ERR0 := 0.35
+
+
+func wear_err(comp: String) -> float:
+	return float(wear_est["err"].get(comp, WEAR_ERR0))
+
+
+func est_mult(comp: String) -> float:
+	var know: float = 1.0 - wear_err(comp) / WEAR_ERR0
+	return lerpf(1.0, float(sim.true_mult.get(comp, 1.0)), know)
+
+
 func est_wear_rate(comp: String) -> float:
-	var tv: float = sim.true_wear_rate(comp)
-	return maxf(0.010, tv * (1.0 + float(wear_est["bias"][comp]) * (float(wear_est["err"]) / 0.35)))
+	return maxf(0.010, float(RS.COMP[comp][1]) * est_mult(comp) * float(sim.rules.get("wear_mult", 1.0)))
 
 
 func est_range_text(comp: String) -> String:
 	var est := est_wear_rate(comp)
-	var err: float = wear_est["err"]
+	var err: float = wear_err(comp)
 	var lo := maxf(0.008, est * (1.0 - err))
 	var hi := est * (1.0 + err)
 	# 화면에는 '한 바퀴 마모 %' 로 보여준다 (서킷 마모·레이스 길이 반영)
@@ -397,41 +415,31 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 		comp = sim.wec_fit_comp(c.cls, comp)
 	if take_set_mode(slot, comp, "auto_used" if set_mode == "auto" else set_mode, idx) == "":
 		return {}
-	var wear := 0.0
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
-	var CIRC: Dictionary = sim.CIRC
-	var ws: float = sim.wsc()
-	var pu: float = sim.press_u(c, "race" if kind == "long" else "q") # 롱런 = 결승처럼 많이 오름, 테스트 = 예선처럼 조금
-	var pf: Array = RS.press_fx(pu)
-	var wmult: float = float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c, "race" if kind == "long" else "q")["wear"])
-	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * wmult
+	var run := _run_laps(c, kind, comp, fuel, n, func(): return sim.gauss(0.25))
+	var res: Array = run["laps"]
 	var st: Variant = last_set
 	if st != null:
-		st["w"] = float(st["w"]) + sim.set_lap_wear(comp, wmult) * n # 이 런이 세트에 남긴 마모 (결승 랩 단위)
+		st["w"] = float(st["w"]) + sim.set_lap_wear(comp, float(run["wmult"])) * n # 이 런이 세트에 남긴 마모 (결승 랩 단위)
 		st["h"] = int(st["h"]) + 1
-	var res: Array = []
-	for i in n:
-		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c, "race" if kind == "long" else "q")["dt"])
-		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * sim.fuel_k()) * ws + sim.gauss(0.25)
-		if pu > 0.0 and wear > 0.5:
-			t += 0.3 * pu # 공기압이 높으면 런 후반 과열
-		res.append(t)
-		wear += wr
-		fuel -= RS.FPL
 	var best: float = res.min()
 	var tot := 0.0
 	for x in res:
 		tot += x
 	practice_left[slot] -= n
-	_refine_band(slot, n)
+	_refine_band(slot, n, kind)
 	if kind == "long":
-		wear_est["runs"] = int(wear_est["runs"]) + 1
-		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "psi": c.psi, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
+		wear_est["runs"][comp] = int(wear_est["runs"].get(comp, 0)) + 1
+		wear_est["err"][comp] = snappedf(wear_err(comp) * 0.5, 0.001)
+		sim.plan_mult[comp] = est_mult(comp) # 결승 전략 계획이 이 추정을 쓴다
+	var wr: float = float(run["wr"])
+	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "fc_avg": (tot - float(run["fuel_t"])) / n, "q_est": best + q_equiv(comp, float(run["fuel_t"]) / n), "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "psi": c.psi, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
 	practice_runs.push_front(r)
 	var fb := "%s: %s" % [c.name, feedback(c, "race" if kind == "long" else "q")]
 	if kind == "long":
-		fb += " (마모 추정 오차 ±%d%%로 축소)" % int(round(float(wear_est["err"]) * 100.0))
+		fb += " (%s 마모 추정 오차 ±%d%%로 축소 · 연료 보정 평균 %s)" % [RS.TYRE_KO[comp], int(round(wear_err(comp) * 100.0)), _fmt(float(r["fc_avg"]))]
+	else:
+		fb += " (예선 환산 %s)" % _fmt(float(r["q_est"]))
 	last_feedback[slot] = fb
 	setup_dirty[slot] = false
 	var ran := 0
@@ -440,6 +448,92 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 			ran += (pr["laps"] as Array).size()
 	fb_lap[slot] = ran
 	return r
+
+
+## 연습 런 랩타임 (내 차·AI 공용). noise = 랩마다 더할 잡음 함수.
+## 돌려주는 값: laps(초 배열) · wr(랩당 마모) · wmult(마모 배율) · fuel_t(연료 무게로 잃은 초 합계 — 연료 보정용)
+func _run_laps(c, kind: String, comp: String, fuel: float, n: int, noise: Callable) -> Dictionary:
+	var rk: String = "race" if kind == "long" else "q" # 롱런 = 결승처럼 많이 오름, 테스트 = 예선처럼 조금
+	var CIRC: Dictionary = sim.CIRC
+	var ws: float = sim.wsc()
+	var pu: float = sim.press_u(c, rk)
+	var pf: Array = RS.press_fx(pu)
+	var sx: Dictionary = sim.setup_extra(c, rk)
+	var wmult: float = float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sx["wear"])
+	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * wmult
+	var base: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sx["dt"])
+	var wear := 0.0
+	var fuel_t := 0.0
+	var res: Array = []
+	for i in n:
+		var ft: float = fuel * sim.fuel_k() * ws
+		var t: float = base + (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear)) * ws + ft + float(noise.call())
+		if pu > 0.0 and wear > 0.5:
+			t += 0.3 * pu # 공기압이 높으면 런 후반 과열
+		res.append(t)
+		fuel_t += ft
+		wear += wr
+		fuel -= RS.FPL
+	return {"laps": res, "wr": wr, "wmult": wmult, "fuel_t": fuel_t}
+
+
+## 숏런 최고 랩 → 예선 환산: 연료 빼고, 가장 무른 컴파운드로 바꾼 만큼 (예선 랩과 같은 QCOMP)
+func q_equiv(comp: String, fuel_lap: float) -> float:
+	var ws: float = sim.wsc()
+	var soft: String = "S"
+	for k in ["S", "M", "H"]:
+		if sim.is_wec() and not sim.wec_comps(main_cls()).has(k):
+			continue
+		soft = k
+		break
+	return (float(QCOMP[soft]) - float(QCOMP.get(comp, 0.0))) * ws - fuel_lap
+
+
+## 다른 팀 연습 기록 (금요일 데이터): AI 도 숏런(가장 무른 타이어)·롱런(가운데 타이어)을 달린다.
+## 연료를 얼마나 실었는지는 모른다 — 팀마다 다르고, 일부 팀은 숏런에도 연료를 많이 싣는다(샌드배깅).
+## 레이스 난수와 따로 (별도 rng) → 이 표 때문에 결승 결과가 바뀌지 않는다
+func _make_rivals() -> void:
+	rivals = []
+	var r := RandomNumberGenerator.new()
+	r.seed = hash("%s|%d" % [sim.circ_key, sim.rng.seed])
+	var noise := func(): return r.randfn(0.0, 0.25)
+	for c in sim.cars:
+		if c.mine:
+			continue
+		var comps: Array = sim.wec_comps(c.cls) if sim.is_wec() else dry_comps(c)
+		if comps.is_empty():
+			continue
+		var sc: String = comps[0]
+		var lc: String = comps[comps.size() / 2]
+		var bag: bool = absi(hash(c.team)) % 4 == 0 # 샌드배깅 팀: 숏런에도 연료를 넉넉히
+		var sf: float = RS.FPL * (r.randf_range(4.0, 8.0) if bag else r.randf_range(1.0, 3.0))
+		var lf: float = STINT * RS.FPL * r.randf_range(0.7, 1.8)
+		var s: Array = _run_laps(c, "short", sc, sf, 3, noise)["laps"]
+		var l: Array = _run_laps(c, "long", lc, lf, 5, noise)["laps"]
+		var lt := 0.0
+		for x in l:
+			lt += x
+		rivals.append({"id": c.id, "code": c.code, "team": c.team, "cls": c.cls, "s_best": s.min(), "s_comp": sc, "l_avg": lt / l.size(), "l_comp": lc})
+
+
+## 연습 기록표: 내 차(가장 빠른 숏런·롱런)를 넣어 클래스 안에서 순위. kind = "s" / "l"
+## 돌려주는 값: [{code, t, comp, mine}] 빠른 순
+func practice_table(kind: String) -> Array:
+	var cls: String = main_cls()
+	var out: Array = []
+	for x in rivals:
+		if x["cls"] == cls:
+			out.append({"code": x["code"], "t": float(x[kind + "_best" if kind == "s" else kind + "_avg"]), "comp": x[kind + "_comp"], "mine": false})
+	var mine := {}
+	for pr in practice_runs:
+		if (kind == "s") != (pr["kind"] == "short"):
+			continue
+		var t: float = float(pr["best"] if kind == "s" else pr["avg"])
+		if not mine.has(pr["code"]) or t < float(mine[pr["code"]]["t"]):
+			mine[pr["code"]] = {"code": pr["code"], "t": t, "comp": pr["comp"], "mine": true}
+	out.append_array(mine.values())
+	out.sort_custom(func(a, b): return float(a["t"]) < float(b["t"]))
+	return out
 
 
 ## 남은 연습을 자동으로: 롱런 1회 + 셋업 테스트
