@@ -1,0 +1,26 @@
+{
+	"_note": "트랙 위 차 그림 (수정 18). 클래스 → 팀 이름 → assets/cars/<파일>.png. 여기 없는 팀·클래스는 코드 그림. len_m = 실제 길이(m), 화면 크기 비율에 씀",
+	"len_m": {"F1": 5.6, "HY": 5.1},
+	"F1": {
+		"Red Bull Racing": "f1_redbull",
+		"Ferrari": "f1_ferrari",
+		"McLaren": "f1_mclaren",
+		"Mercedes": "f1_mercedes",
+		"Aston Martin": "f1_aston",
+		"Alpine": "f1_alpine",
+		"Racing Bulls": "f1_racingbulls",
+		"Haas": "f1_haas",
+		"Cadillac F1": "f1_cadillac"
+	},
+	"HY": {
+		"Toyota Gazoo Racing": "hy_toyota",
+		"Ferrari": "hy_ferrari",
+		"AF Corse": "hy_ferrari",
+		"Cadillac Hertz Team JOTA": "hy_cadillac",
+		"Peugeot TotalEnergies": "hy_peugeot",
+		"BMW Team WRT": "hy_bmw",
+		"Aston Martin THOR Team": "hy_aston",
+		"Alpine Endurance Team": "hy_alpine",
+		"Genesis Magma Racing": "hy_genesis"
+	}
+}

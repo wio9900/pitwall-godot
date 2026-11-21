@@ -1,0 +1,288 @@
+{
+ "_comment": "가상 인물 이름 생성용 (국적별 이니셜·성). 실제 특정 인물을 가리키지 않음",
+ "nat": {
+  "kr": {
+   "ko": "한국",
+   "init": "JMSHYKDW",
+   "last": [
+    "Kang",
+    "Yoon",
+    "Han",
+    "Shin",
+    "Jang",
+    "Lim",
+    "Seo",
+    "Hwang",
+    "Oh",
+    "Kwon",
+    "Ryu",
+    "Baek",
+    "Moon",
+    "Song",
+    "Jeon",
+    "Nam",
+    "Ahn",
+    "Cha"
+   ]
+  },
+  "jp": {
+   "ko": "일본",
+   "init": "KTHRSYDM",
+   "last": [
+    "Okabe",
+    "Kimura",
+    "Hayashi",
+    "Morita",
+    "Ishida",
+    "Fujita",
+    "Kondo",
+    "Nishimura",
+    "Aoki",
+    "Sakai",
+    "Endo",
+    "Takeda",
+    "Kubo",
+    "Matsuda",
+    "Yoshida",
+    "Ueda"
+   ]
+  },
+  "gb": {
+   "ko": "영국",
+   "init": "JTOHGLCWS",
+   "last": [
+    "Ashworth",
+    "Pembridge",
+    "Calloway",
+    "Whitfield",
+    "Harwood",
+    "Linton",
+    "Fairbrook",
+    "Stanmore",
+    "Kendrick",
+    "Holloway",
+    "Brampton",
+    "Tilbury",
+    "Marsden",
+    "Rowley",
+    "Hatcher",
+    "Ellwood"
+   ]
+  },
+  "it": {
+   "ko": "이탈리아",
+   "init": "MLAGFDRS",
+   "last": [
+    "Ferraro",
+    "Conti",
+    "Moretti",
+    "Galli",
+    "Bellini",
+    "Rinaldi",
+    "Caruso",
+    "Fabbri",
+    "Marino",
+    "Lombardi",
+    "Serra",
+    "Vitale",
+    "Santoro",
+    "Pellegrini",
+    "Monti",
+    "Grasso"
+   ]
+  },
+  "de": {
+   "ko": "독일",
+   "init": "LMJFNTPK",
+   "last": [
+    "Brandt",
+    "Kessler",
+    "Vogel",
+    "Hartmann",
+    "Lorenz",
+    "Engel",
+    "Winkler",
+    "Busch",
+    "Kraft",
+    "Seidel",
+    "Frank",
+    "Ludwig",
+    "Baumann",
+    "Jung",
+    "Albrecht",
+    "Sauer"
+   ]
+  },
+  "fr": {
+   "ko": "프랑스",
+   "init": "TLMAPJNC",
+   "last": [
+    "Garnier",
+    "Leroux",
+    "Fontaine",
+    "Rousseau",
+    "Chevalier",
+    "Marchand",
+    "Perrin",
+    "Blanchard",
+    "Gauthier",
+    "Lemoine",
+    "Barbier",
+    "Renaud",
+    "Colin",
+    "Aubert",
+    "Mercier",
+    "Fabre"
+   ]
+  },
+  "es": {
+   "ko": "스페인",
+   "init": "PAJMDCRL",
+   "last": [
+    "Navarro",
+    "Ortega",
+    "Delgado",
+    "Castro",
+    "Romero",
+    "Iglesias",
+    "Moreno",
+    "Vidal",
+    "Serrano",
+    "Cabrera",
+    "Prieto",
+    "Molina",
+    "Herrera",
+    "Campos",
+    "Fuentes"
+   ]
+  },
+  "br": {
+   "ko": "브라질",
+   "init": "GLPRMFTV",
+   "last": [
+    "Barbosa",
+    "Teixeira",
+    "Monteiro",
+    "Cardoso",
+    "Pinheiro",
+    "Ribeiro",
+    "Farias",
+    "Moura",
+    "Azevedo",
+    "Correia",
+    "Nogueira",
+    "Lacerda",
+    "Tavares",
+    "Peixoto"
+   ]
+  },
+  "nl": {
+   "ko": "네덜란드",
+   "init": "JSTDMLRB",
+   "last": [
+    "van Dijkman",
+    "Meijer",
+    "Bosman",
+    "Visser",
+    "de Graaf",
+    "Kuipers",
+    "Vermeer",
+    "Brouwer",
+    "van Leeuwen",
+    "Dekker",
+    "Hendriks",
+    "Mulder",
+    "Prins",
+    "Smits"
+   ]
+  },
+  "us": {
+   "ko": "미국",
+   "init": "CJTBKLRD",
+   "last": [
+    "Walker",
+    "Holbrook",
+    "Carver",
+    "Prescott",
+    "Dalton",
+    "Whitman",
+    "Harlan",
+    "Bradley",
+    "Sutton",
+    "Garrison",
+    "Hale",
+    "Mercer",
+    "Bowman",
+    "Keller"
+   ]
+  },
+  "au": {
+   "ko": "호주",
+   "init": "JMLBTCNO",
+   "last": [
+    "Fairley",
+    "Langdon",
+    "Crowther",
+    "Ashby",
+    "Tremayne",
+    "Kilmore",
+    "Bramwell",
+    "Dunleavy",
+    "Hargrave",
+    "Pritchard",
+    "Wakefield",
+    "Coburn"
+   ]
+  },
+  "cn": {
+   "ko": "중국",
+   "init": "ZYLWHXQ",
+   "last": [
+    "Zhao",
+    "Liang",
+    "Wei",
+    "Huang",
+    "Tang",
+    "Feng",
+    "Guo",
+    "Hu",
+    "Lu",
+    "Xu",
+    "Deng",
+    "Pan"
+   ]
+  }
+ },
+ "region_nat": {
+  "uk": [
+   "gb",
+   "au",
+   "nl"
+  ],
+  "italy": [
+   "it",
+   "es",
+   "br"
+  ],
+  "germany": [
+   "de",
+   "nl",
+   "fr"
+  ],
+  "japan": [
+   "jp",
+   "kr",
+   "cn"
+  ],
+  "usa": [
+   "us",
+   "br",
+   "au"
+  ],
+  "france": [
+   "fr",
+   "es",
+   "it"
+  ]
+ }
+}

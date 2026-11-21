@@ -14,11 +14,13 @@ const WeekendViewS = preload("res://scripts/ui/weekend_view.gd")
 const SeasonViewS = preload("res://scripts/ui/season_view.gd")
 const HT = preload("res://scripts/ui/help_text.gd")
 const RacePanelS = preload("res://scripts/ui/race_panel.gd")
+const StandS = preload("res://scripts/ui/standings.gd")
 const TrackArtS = preload("res://scripts/ui/track_art.gd")
 const DebriefS = preload("res://scripts/ui/debrief.gd")
 const RivalS = preload("res://scripts/ui/rival_card.gd")
 const ST = preload("res://scripts/ui/settings.gd")
 const SettingsViewS = preload("res://scripts/ui/settings_view.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const RaceSaveS = preload("res://scripts/sim/race_save.gd")
 const RecS = preload("res://scripts/sim/records.gd")
 const RecordsViewS = preload("res://scripts/ui/records_view.gd")
@@ -36,7 +38,7 @@ const RED := Color("#e10600")
 const GOOD := Color("#22c55e")
 const BAD := Color("#ef4444")
 const SPEEDS := [0, 1, 2, 5, 10, 15]
-const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "GT": "LMGT3"}
+const CLS_KO := {"HY": "HYPERCAR", "P2": "LMP2", "P3": "LMP3", "GT": "LMGT3"}
 
 var sim: Variant = null
 var speed_x := 4
@@ -113,7 +115,7 @@ var race_panel            # 내 차 지시판 (race_panel.gd)
 var info_label: RichTextLabel
 var gap_mode := 0         # 순위표: 0 앞차 간격 / 1 선두와 차이 / 2 직전 랩타임
 var gap_btn: Button
-var tower: RichTextLabel
+var tower   # 상세 순위 (standings.gd, 직접 그린 표)
 var radio: RichTextLabel
 var result_box: Control
 var result_text: RichTextLabel
@@ -133,7 +135,12 @@ var land_left: VBoxContainer
 var land_right: VBoxContainer
 var ttower                 # 중계식 순위 띠 (timing_tower.gd)
 var port_track: HBoxContainer
-var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로
+var landscape := -1 # -1 = 아직 배치 전, 0 = 세로, 1 = 가로, 2 = 정사각형에 가까운 화면 (폴드 펼친 화면)
+var sq_box: VBoxContainer       # 정사각형 배치: 위 = 순위 띠 + 서킷, 아래 = 지시판 | 상세 순위·무전
+var sq_track: HBoxContainer
+var sq_bottom: HBoxContainer
+var sq_right: ScrollContainer
+var sq_rv: VBoxContainer
 var result_panel: PanelContainer
 # 출발 신호
 var starting := false
@@ -162,6 +169,8 @@ func _ready() -> void:
 	hq_view.go_weekend.connect(_start_weekend_career)
 	hq_view.go_menu.connect(_show_menu)
 	hq_view.go_season.connect(_open_season)
+	hq_view.go_resume.connect(_resume_race)
+	hq_view.go_invite.connect(_start_invite)
 	wk_view = WeekendViewS.new()
 	wk_view.visible = false
 	add_child(wk_view)
@@ -192,8 +201,10 @@ func _on_resize() -> void:
 	# 세로 화면(폴드 외부 화면 등)에서는 기준 해상도를 720×1280 으로 바꿔 글씨·버튼이 화면 폭에 맞게 커지도록
 	var win := get_window()
 	var ws: Vector2i = win.size
-	var want := 1 if ws.x > ws.y * 1.05 else 0
-	var base := Vector2i(1280, 720) if want == 1 else Vector2i(720, 1280)
+	var ratio: float = float(ws.x) / maxf(1.0, float(ws.y))
+	# 가로세로 비율이 1에 가까우면(폴드 펼친 화면) 전용 배치. 아주 넓거나 길면 기존 가로/세로
+	var want := 2 if (ratio >= 0.8 and ratio <= 1.25) else (1 if ratio > 1.05 else 0)
+	var base := Vector2i(1280, 720) if want == 1 else (Vector2i(1120, 1120) if want == 2 else Vector2i(720, 1280))
 	var scl: float = 1.0 / clampf(float(ST.get_v("ui_scale")), 0.8, 1.3)
 	base = Vector2i(int(base.x * scl), int(base.y * scl))
 	if win.content_scale_size != base:
@@ -215,7 +226,7 @@ func _menu_layout() -> void:
 	var home: bool = menu_page == "home"
 	menu_cols.vertical = landscape == 0 or home
 	menu_cols.alignment = BoxContainer.ALIGNMENT_CENTER if home else BoxContainer.ALIGNMENT_BEGIN
-	var col_w: float = 720.0 if home else (1200.0 if landscape == 1 else 820.0)
+	var col_w: float = 720.0 if home else (1200.0 if landscape >= 1 else 820.0)
 	var side = maxf(24.0, (vs.x - col_w) / 2.0)
 	menu_box.add_theme_constant_override("margin_left", int(side))
 	menu_box.add_theme_constant_override("margin_right", int(side))
@@ -231,6 +242,26 @@ func _apply_layout() -> void:
 	# 지시판과 순위·무전은 항상 스크롤 영역 안 (화면이 작아도 끌어서 다 볼 수 있게)
 	_move(panels_box, race_lower)
 	_move(tabs, race_lower)
+	sq_box.visible = false
+	if landscape == 2:
+		# 정사각형: 위쪽 = 순위 띠 + 서킷(넓게), 아래 = 왼쪽 지시판 | 오른쪽 상세 순위·무전 (스크롤 거의 없이 한 화면)
+		_move(hud_top, sq_box)
+		sq_box.move_child(hud_top, 0)
+		_move(ttower, sq_track)
+		_move(race_view, sq_track)
+		ttower.custom_minimum_size = Vector2(190, 0)
+		race_view.custom_minimum_size = Vector2(0, 0)
+		race_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_move(race_scroll, sq_bottom)
+		sq_bottom.move_child(race_scroll, 0)
+		_move(tabs, sq_rv)
+		tabs.custom_minimum_size = Vector2(0, 300)
+		tabs.visible = true
+		land_box.visible = false
+		port_box.visible = false
+		sq_box.visible = true
+		return
+	tabs.visible = race_panel.tab == "laps"
 	if landscape == 1:
 		# 왼쪽 끝: 순위 띠 / 가운데: 상단 바 + 트랙 / 오른쪽: 내 차 지시 + 상세 순위·무전
 		_move(ttower, land_box)
@@ -487,11 +518,7 @@ func _build_menu() -> void:
 	opt_weather = OptionButton.new()
 	for w in ["자동 (서킷 강우 확률)", "맑음", "비"]:
 		opt_weather.add_item(w)
-	opt_diff = OptionButton.new()
-	for dn in RaceSimS.DIFF_KO:
-		opt_diff.add_item(dn)
-	opt_diff.select(1)
-	var rows = [["서킷", opt_circuit], ["내 팀", opt_team], ["레이스 길이", opt_laps], ["날씨", opt_weather], ["난이도", opt_diff]]
+	var rows = [["서킷", opt_circuit], ["내 팀", opt_team], ["레이스 길이", opt_laps], ["날씨", opt_weather]]
 	opt_start.clear()
 	for k in 2:
 		var o = OptionButton.new()
@@ -593,8 +620,9 @@ func _fill_laps() -> void:
 	opt_laps.clear()
 	if qseries == "wec":
 		var lo: Dictionary = DB.circuits[quick_keys[maxi(0, opt_circuit.selected)]]["lapsOpt"]
-		opt_laps.add_item("짧게 %d랩" % int(lo["short"]))
-		opt_laps.add_item("표준 %d랩" % int(lo["std"]))
+		# 시간제: 정해진 시간이 지나면 체커 (세이프티카·비가 많으면 랩 수가 줄어요)
+		opt_laps.add_item("짧게 · 시간제 약 %d랩" % int(lo["short"]))
+		opt_laps.add_item("표준 · 시간제 약 %d랩" % int(lo["std"]))
 		opt_laps.select(0 if prev < 0 or prev > 1 else prev)
 	else:
 		for n in [10, 15, 20]:
@@ -678,16 +706,81 @@ func _autosave() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		_autosave()
+		BLog.save()
 
 
 ## 레이스 중 나가기: 저장하고 메뉴(커리어는 본부)로. 메뉴의 "이어하기"로 돌아올 수 있다
+## 일시정지 창: 레이스를 멈추고 '계속하기 / 저장하고 나가기'
+var pause_box: Control
+var _pause_prev := 0
+
+
+func _open_pause() -> void:
+	if sim == null:
+		return
+	if pause_box == null:
+		pause_box = Control.new()
+		pause_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.mouse_filter = Control.MOUSE_FILTER_STOP
+		pause_box.add_to_group("modal")
+		add_child(pause_box)
+		var dim = ColorRect.new()
+		dim.color = Color(0, 0, 0, 0.65)
+		dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.add_child(dim)
+		var cc = CenterContainer.new()
+		cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pause_box.add_child(cc)
+		var pc = PanelContainer.new()
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = KitS.PANEL
+		sb.border_color = KitS.RED
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(20)
+		pc.add_theme_stylebox_override("panel", sb)
+		pc.custom_minimum_size = Vector2(420, 0)
+		cc.add_child(pc)
+		var v = KitS.vbox(12)
+		pc.add_child(v)
+		var t = KitS.label("⏸ 일시정지", 26, Color.WHITE)
+		t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(t)
+		var b1 = _btn("▶ 계속하기", 20)
+		b1.custom_minimum_size = Vector2(0, 56)
+		b1.pressed.connect(_close_pause)
+		v.add_child(b1)
+		var b2 = _btn("⚙ 설정", 17)
+		b2.pressed.connect(func(): _open_settings())
+		v.add_child(b2)
+		var b3 = _btn("💾 저장하고 나가기", 17)
+		b3.pressed.connect(func():
+			pause_box.visible = false
+			_exit_race())
+		v.add_child(b3)
+		var note = KitS.label("메인 메뉴로 나가요. 다시 들어오면 이 랩부터 바로 이어져요 (커리어는 레이스를 끝내야 본부로 갈 수 있어요)", 13, KitS.DIM)
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(note)
+	_pause_prev = speed_x if speed_x > 0 else int(ST.get_v("speed"))
+	_set_speed(0)
+	pause_box.visible = true
+	move_child(pause_box, get_child_count() - 1)
+
+
+func _close_pause() -> void:
+	if pause_box != null:
+		pause_box.visible = false
+	if sim != null:
+		_set_speed(_pause_prev if _pause_prev > 0 else 1)
+
+
+## 저장하고 나가기: 커리어도 본부가 아니라 메인 메뉴로. 다시 들어오면 '레이스 이어하기'로 경기 화면에 바로
+## (본부를 거치면 레이스를 새로 하거나 결과를 바꾸는 우회로가 생김)
 func _exit_race() -> void:
 	_autosave()
 	sim = null
-	if mode == "career" and career != null:
-		_open_hq()
-	else:
-		_show_menu()
+	_show_menu()
 
 
 func _resume_race() -> void:
@@ -830,23 +923,23 @@ func _render_career_menu() -> void:
 			sw2.add_child(_swatch(col, new_opts["rim"] == col, _on_new_rim.bind(col)))
 		c1.add_child(KitS.label("출발 리그", 14, DIM))
 		if new_series == "wec":
-			KitS.seg(c1, [["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
-			c1.add_child(KitS.label("하이퍼카 패키지 (승격 후 사용)", 14, DIM))
+			KitS.seg(c1, [["0", "아시안 르망 LMP3 (4부)"], ["1", "LMGT3 (3부)"], ["2", "LMP2 (2부)"], ["3", "Hypercar (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
+			c1.add_child(KitS.label("아시안 르망(LMP3)에서 우승하면 르망 24시 초청 경기 기회!", 13, DIM))
+			c1.add_child(KitS.label("하이퍼카 패키지 (하위 클래스는 공통 엔진 · 하이퍼카 승격 후 사용)", 14, DIM))
 			var pk_items: Array = []
-			for pk in CareerS.WEC_PKGS:
-				pk_items.append([pk, String(CareerS.WEC_PKGS[pk]).split(" ")[0]])
-			KitS.seg(c1, pk_items, new_opts["engine"], _on_new_engine, 14)
+			var pk_all: Dictionary = CareerS.wec_pkgs()
+			for pk in pk_all:
+				pk_items.append([pk, String(pk_all[pk]).split(" ")[0].replace("Aston", "Aston M.")])
+			# 8개라 두 줄로
+			KitS.seg(c1, pk_items.slice(0, 4), new_opts["engine"], _on_new_engine, 14)
+			KitS.seg(c1, pk_items.slice(4), new_opts["engine"], _on_new_engine, 14)
 		else:
 			KitS.seg(c1, [["1", "F3 (3부)"], ["2", "F2 (2부)"], ["3", "F1 (1부)"]], str(new_opts["tier"]), _on_new_tier, 15)
 			c1.add_child(KitS.label("파워유닛 (F1 승격 후 사용)", 14, DIM))
-			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"]], new_opts["engine"], _on_new_engine, 14)
-		c1.add_child(KitS.label("본부 지역", 14, DIM))
-		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"], ["japan", "일본(타이어)"]], new_opts["region"], _on_new_region, 14)
-	c1.add_child(KitS.label("난이도 (HQ에서 언제든 변경)", 14, DIM))
-	var d_items: Array = []
-	for di in RaceSimS.DIFF_KO.size():
-		d_items.append([str(di), RaceSimS.DIFF_KO[di]])
-	KitS.seg(c1, d_items, str(new_opts["difficulty"]), _on_new_diff, 15)
+			KitS.seg(c1, [["Mercedes", "Mercedes"], ["Ferrari", "Ferrari"], ["Red Bull Ford", "RB Ford"], ["Honda", "Honda"], ["Audi", "Audi"]], new_opts["engine"], _on_new_engine, 14)
+		c1.add_child(KitS.label("본부 지역 (한 번 정하면 바꿀 수 없어요)", 14, DIM))
+		KitS.seg(c1, [["uk", "영국(공력)"], ["italy", "이탈리아(엔진)"], ["germany", "독일(섀시)"]], new_opts["region"], _on_new_region, 14)
+		KitS.seg(c1, [["japan", "일본(섀시)"], ["usa", "미국(엔진)"], ["france", "프랑스(섀시)"]], new_opts["region"], _on_new_region, 14)
 	var info = KitS.rtl(15)
 	info.text = "[b]커리어 모드[/b]\n[color=#8b98a5]시즌 17라운드. 레이스마다 연습·예선·결승을 치르고, 사이사이 본부(HQ)에서 개발·설비·인력·스폰서를 운영해요.\n\n• [b]코스트캡[/b] 안에서 R&D와 설비에 투자하세요. 넘기면 벌금과 제재.\n• [b]스폰서[/b]는 시즌 전 제안 중 카테고리마다 하나를 골라요. 안정형·성과연동형·단기 고액은 성과 조항과 홍보 의무가 달라요.\n• 레이스 전에 [b]미션을 약속[/b]하면 보너스, 실패하면 평판 하락.\n• 신규 팀은 F3부터 시작해 승격을 노려요 (오너가 5시즌 동안 자본 지원).[/color]"
 	career_right.add_child(info)
@@ -916,6 +1009,8 @@ func _on_new_team(i: int) -> void:
 
 func _on_new_series(v) -> void:
 	new_series = v
+	if new_series != "wec" and int(new_opts["tier"]) < 1:
+		new_opts["tier"] = 1 # F1 쪽엔 4부(아시안 르망)가 없다
 	new_team = 0 if v == "wec" else 6
 	new_opts["engine"] = "Ferrari F163 3.0L V6 Twin-Turbo Hybrid" if v == "wec" else "Mercedes"
 	_render_career_menu()
@@ -977,6 +1072,7 @@ func _new_career() -> void:
 		nm = "Korea GP Racing"
 	new_opts["name"] = nm
 	new_opts["series"] = new_series
+	new_opts["difficulty"] = clampi(int(ST.get_v("difficulty")), 0, 3)
 	career.new_career(new_entry, new_team, new_opts)
 	career.save_slot = new_slot
 	career.save()
@@ -987,6 +1083,7 @@ func _new_career() -> void:
 func _continue_career(sl: int = 1) -> void:
 	career = CareerS.new()
 	if career.load_save(sl):
+		career.hq["difficulty"] = clampi(int(ST.get_v("difficulty")), 0, 3) # 난이도는 설정(⚙) 값을 따른다
 		mode = "career"
 		_open_hq()
 
@@ -1002,6 +1099,10 @@ func _open_settings() -> void:
 
 func _apply_settings() -> void:
 	ST.apply_audio()
+	# 난이도는 설정 한 곳에서: 진행 중인 커리어에도 바로 반영
+	if career != null and career.hq.get("difficulty", 1) != int(ST.get_v("difficulty")):
+		career.hq["difficulty"] = int(ST.get_v("difficulty"))
+		career.save()
 	if sim != null:
 		sim.prompts_enabled = bool(ST.get_v("prompts"))
 	_on_resize()
@@ -1026,6 +1127,13 @@ func _open_season() -> void:
 
 
 func _open_hq() -> void:
+	# 이 커리어의 레이스가 중간 저장돼 있으면 본부 대신 그 레이스로 (끝내기 전엔 본부에 못 들어감)
+	var rs: Dictionary = RaceSaveS.peek()
+	if career != null and not rs.is_empty() and rs.get("mode", "") == "career" and int(rs.get("slot", 0)) == career.save_slot:
+		_resume_race()
+		if sim != null and race_box.visible:
+			return
+		# 저장이 깨져서 못 이어가면 본부로 (화면이 비지 않게)
 	_show_only(hq_view)
 	hq_view.open(career)
 
@@ -1038,7 +1146,7 @@ func _read_quick_settings() -> void:
 		"laps": _quick_laps(),
 		"wx": ["auto", "dry", "rain"][opt_weather.selected],
 		"start": [["S", "M", "H"][opt_start[0].selected], ["S", "M", "H"][opt_start[1].selected]],
-		"diff": maxi(0, opt_diff.selected),
+		"diff": clampi(int(ST.get_v("difficulty")), 0, 3), # 난이도는 설정(⚙)에서
 	}
 
 
@@ -1055,6 +1163,11 @@ func _start_weekend_quick() -> void:
 
 
 func _start_weekend_career() -> void:
+	# 이 커리어의 레이스가 중간 저장돼 있으면 주말을 새로 시작하지 않고 이어서 (다시 하기로 결과 바꾸기 방지)
+	var rs: Dictionary = RaceSaveS.peek()
+	if career != null and not rs.is_empty() and rs.get("mode", "") == "career" and int(rs.get("slot", 0)) == career.save_slot:
+		_resume_race()
+		return
 	mode = "career"
 	career.resolve_event_default()
 	sim = RaceSimS.new()
@@ -1064,6 +1177,12 @@ func _start_weekend_career() -> void:
 	wk.setup(sim, career.duty_laps(), career.eng_quality())
 	_show_only(wk_view)
 	wk_view.open(sim, wk)
+
+
+## 아시안 르망 챔피언 보상: 르망 24시 초청 경기 (LMP2 초청 엔트리 · 포인트 없음)
+func _start_invite() -> void:
+	if career != null and career.start_invite():
+		_start_weekend_career()
 
 
 func _weekend_back() -> void:
@@ -1090,6 +1209,8 @@ func _begin_race() -> void:
 		_launch_race()
 		return
 	sprint_mode = false
+	if sim.rules.get("no_pits", false):
+		sim.event("의무 피트 없음 · 타이어 마모가 적어 한 세트로 완주 (비가 올 때만 피트)")
 	sim.prepare_start()
 	_launch_race()
 
@@ -1161,6 +1282,29 @@ func _build_race_ui() -> void:
 	land_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	land_box.add_theme_constant_override("separation", 10)
 	root.add_child(land_box)
+	sq_box = VBoxContainer.new()
+	sq_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sq_box.add_theme_constant_override("separation", 8)
+	sq_box.visible = false
+	root.add_child(sq_box)
+	sq_track = HBoxContainer.new()
+	sq_track.add_theme_constant_override("separation", 6)
+	sq_track.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sq_track.size_flags_stretch_ratio = 1.1
+	sq_box.add_child(sq_track)
+	sq_bottom = HBoxContainer.new()
+	sq_bottom.add_theme_constant_override("separation", 10)
+	sq_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sq_box.add_child(sq_bottom)
+	sq_right = ScrollContainer.new()
+	sq_right.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sq_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sq_right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	KitS.drag_scroll(sq_right)
+	sq_rv = VBoxContainer.new()
+	sq_rv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sq_right.add_child(sq_rv)
+	sq_bottom.add_child(sq_right)
 	# 중계식 순위 띠: 가로 화면에선 맨 왼쪽 기둥, 세로 화면에선 서킷 왼쪽
 	ttower = TowerS.new()
 	ttower.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1217,10 +1361,10 @@ func _build_race_ui() -> void:
 	gear2.custom_minimum_size = Vector2(40, 0)
 	gear2.pressed.connect(_open_settings)
 	sp.add_child(gear2)
-	var exitb = _btn("⏏", 16)
+	var exitb = _btn("⏸", 16)
 	exitb.custom_minimum_size = Vector2(40, 0)
-	exitb.tooltip_text = "저장하고 나가기 (메뉴에서 이어하기)"
-	exitb.pressed.connect(_exit_race)
+	exitb.tooltip_text = "일시정지 (계속하기 / 저장하고 나가기)"
+	exitb.pressed.connect(_open_pause)
 	sp.add_child(exitb)
 	# 트랙
 	sfx = SfxS.new()
@@ -1258,12 +1402,9 @@ func _build_race_ui() -> void:
 	gap_btn.pressed.connect(_on_gap_mode)
 	tw.add_child(gap_btn)
 	_gap_text()
-	tower = _rtl(false)
-	tower.meta_underlined = false
-	tower.meta_clicked.connect(_on_tower_click)
-	tower.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	KitS.drag_scroll(tower)
-	_small_text(tower, 16)
+	tower = StandS.new()
+	tower.car_clicked.connect(func(id): _on_tower_click(str(id)))
+	tower.head_clicked.connect(_on_gap_mode)
 	tw.add_child(tower)
 	radio = _rtl(false)
 	radio.name = "무전"
@@ -1354,10 +1495,11 @@ func _on_wec_box(comp: String, slot: int) -> void:
 	if c == null:
 		return
 	var drv: bool = bool(race_panel.draft[slot]["driver"]) if slot < race_panel.draft.size() else true
+	var fill: float = float(race_panel.draft[slot].get("fill", 1.0)) if slot < race_panel.draft.size() else 1.0
 	if comp == "keep":
-		sim.request_pit_wec(c, c.comp, false, true, drv)
+		sim.request_pit_wec(c, c.comp, false, fill > 0.0, drv, -1, fill)
 	else:
-		sim.request_pit_wec(c, comp, true, true, drv)
+		sim.request_pit_wec(c, comp, true, fill > 0.0, drv, -1, fill)
 	_refresh_ui()
 
 
@@ -1407,11 +1549,15 @@ func _update_fps(delta: float) -> void:
 	if _fps_t < 0.5:
 		return
 	_fps_t = 0.0
+	# 처리 = 최근 1초 중 가장 느린 프레임의 스크립트·UI 시간(Godot 가 최대값으로 줌), 그리기 = 화면 렌더 CPU / GPU 시간
+	var vp_rid: RID = get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp_rid, true)
 	var proc_ms: float = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
 	var sim_ms: float = (float(_sim_us) / 1000.0 / float(_sim_n)) if _sim_n > 0 else 0.0
 	_sim_us = 0
 	_sim_n = 0
-	fps_label.text = "FPS %d · 처리 %.1fms · 시뮬 %.2fms · 노드 %d" % [Engine.get_frames_per_second(), proc_ms, sim_ms, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+	var fps: float = Engine.get_frames_per_second()
+	fps_label.text = "FPS %d/상한 %d · 프레임 %.1fms · 처리 최대 %.1fms · 그리기 CPU %.1f GPU %.1fms · 시뮬 %.2fms" % [fps, Engine.max_fps, 1000.0 / maxf(1.0, fps), proc_ms, RenderingServer.viewport_get_measured_render_time_cpu(vp_rid), RenderingServer.viewport_get_measured_render_time_gpu(vp_rid), sim_ms]
 
 
 ## 성능·배터리: 레이스 화면만 60fps, 나머지는 30fps. 배터리 절약이면 30/20fps + 안티에일리어싱 끔
@@ -1520,17 +1666,34 @@ func _refresh_ui() -> void:
 	elif mode == "career" and career != null and career.race_format() == "f3":
 		fmt_tag = _chip("F3", "#a855f7", "#ffffff") + " "
 	if not starting:
-		top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
+		if sim.timed and not sim.finishing:
+			# 시간제: 남은 시간이 주인공, 총 랩은 예상치(~)
+			top_label.text = "[font_size=28][b]⏱ %s[/b][/font_size][color=#8b98a5] 남음 · L%d/~%d[/color]   %s%s" % [sim.time_left_txt(), lap_now, sim.laps, fmt_tag, chips]
+		else:
+			top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
 	# 날씨 줄: 서킷 · 노면 · 강수 확률 · 수막 · 그립 · 예보
 	# 짧게: 서킷 · 노면(젖었을 때만 수막) · 그립 · 비 예보 (자세한 건 피트 탭 기상 레이더)
-	var fc_txt := ""
-	if sim.fc != null and sim.leader_lap < int(sim.fc["hi"]):
-		fc_txt = "   🌦 비 예보 [b]L%d–%d[/b] (%d%%)" % [int(sim.fc["lo"]), int(sim.fc["hi"]), int(sim.fc["p"])]
-	elif sim.fc == null:
-		fc_txt = "   ☀ 비 예보 없음"
+	# 예보 = 내 팀 레이더 (팀 전략 능력만큼 오차, 랩마다 갱신)
+	var mcs: Array = sim.my_cars()
+	var fwin: Variant = sim.fc_window(mcs[0] if not mcs.is_empty() else null)
+	var fc_txt := "   ☀ 비 예보 없음"
+	if fwin != null:
+		fc_txt = "   🌦 비 예보 [b]L%d–%d[/b] (%d%%)" % [int(fwin["lo"]), int(fwin["hi"]), int(fwin["p"])]
 	var surf: String = ("☀ " + sim.surface_ko()) if sim.wet < 0.05 else ("🌧 %s %.1fmm" % [sim.surface_ko(), sim.wet_mm(sim.wet)])
-	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
-		sim.CIRC["name"], surf, int(round(sim.track_evo * 100)), fc_txt]
+	if sim.wet >= 0.05 and sim.sec_wet.size() == sim.NS:
+		var dry: PackedStringArray = []
+		for s in sim.NS:
+			if sim.sec_w(s) < 0.1:
+				dry.append("S%d" % (s + 1))
+		if not dry.is_empty() and dry.size() < sim.NS:
+			surf += " (마름 %s)" % "·".join(dry)
+	# 노면 온도(타이어 온도 창 판단 근거) · 현지 시각(낮밤이 바뀌는 WEC)
+	var clk: String = sim.local_clock()
+	var tmp_txt: String = "   노면 [color=#e6edf3]%d°C[/color]" % int(round(sim.track_now))
+	if clk != "":
+		tmp_txt += "   %s [color=#e6edf3]%s[/color]" % ["🌙" if sim.night else "🕒", clk]
+	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]%s   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
+		sim.CIRC["name"], surf, tmp_txt, int(round(sim.track_evo * 100)), fc_txt]
 	race_panel.refresh()
 	rival.refresh()
 	_fit_tabs()
@@ -1558,62 +1721,27 @@ func _wec_gaps(c) -> String:
 	return t
 
 
-func _refresh_tower(ord: Array, leader) -> void:
-	if sim.is_wec():
-		_refresh_tower_wec(ord)
-		return
-	var s = "[table=5]"
-	s += _tower_head()
-	var pos = 0
-	var prev: Variant = null
-	for c in ord:
-		pos += 1
-		var name_col = "#ffc53d" if c.mine else "#e6edf3"
-		var gap = ""
-		if c.dnf != "":
-			gap = "[color=#ef4444]DNF[/color]"
-		elif gap_mode == 2:
-			gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
-			if c.id == sim.fastest_id:
-				gap = "[color=#a855f7]%s[/color]" % gap
-		elif c == leader:
-			gap = "[color=#a855f7]◆[/color] 선두"
-		elif gap_mode == 0 and prev != null:
-			gap = sim.gap_to(c, prev)
-		else:
-			gap = sim.gap_to(c, leader)
-		if c.time_pen > 0.0 and c.dnf == "":
-			gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
-		if c.boxing != null or c.pit_phase == 2:
-			gap += " [color=#ffc53d]PIT[/color]"
-		elif c.crew_out and c.dnf == "":
-			gap += " [bgcolor=#ef4444][color=#ffffff] CREW [/color][/bgcolor]"
-		elif c.drs and not sim.sc:
-			gap += " [color=#22c55e]DRS[/color]"
-		prev = c
-		# 라이벌 타이어 마모는 숨기고 스틴트 나이만 공개 (관측 가능한 정보)
-		var tyre = "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
-		if c.mine:
-			tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-		s += _tower_row(pos, c, "[color=%s][b]%s[/b][/color] [color=#8b98a5]%s[/color]" % [name_col, c.code, _short_team(c.team)], gap, tyre)
-	s += "[/table]"
-	if tower.text != s:
-		tower.text = s
+func _refresh_tower(_ord: Array, _leader) -> void:
+	tower.sim = sim
+	tower.refresh(gap_mode)
 
 
 ## 지시판 탭이 바뀌면: 랩타임 탭에서만 상세 순위·무전 (다른 탭에선 그 공간을 비워 둔다)
 func _on_panel_tab(t: String) -> void:
+	race_view.ghost_on = t == "pit" or t == "strat" # 피트·전략 탭: 트랙에 '박스 시 복귀 자리' 표시
 	if tabs != null:
-		tabs.visible = t == "laps"
+		tabs.visible = t == "laps" or landscape == 2 # 정사각형 화면은 오른쪽 칸에 늘 보인다
 		_refresh_ui()
 
 
-## 가로 화면: 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)
+## 순위·무전이 지시판 아래 남은 높이를 꽉 채우도록 (아래가 비지 않게)
 func _fit_tabs() -> void:
-	if landscape != 1 or race_scroll == null:
+	if race_scroll == null or not tabs.visible:
 		return
-	var h: float = race_scroll.size.y - panels_box.size.y - 12.0
-	var want: float = maxf(330.0, h)
+	# 가로·세로: 지시판 아래 남은 높이를 꽉 채운다 (줄이 더 많으면 표 높이만큼 늘어나 스크롤)
+	# 정사각형: 오른쪽 칸 높이를 꽉 채운다
+	var h: float = (sq_right.size.y - 4.0) if landscape == 2 else (race_scroll.size.y - panels_box.size.y - 12.0)
+	var want: float = maxf(300.0, h)
 	if absf(tabs.custom_minimum_size.y - want) > 2.0:
 		tabs.custom_minimum_size = Vector2(0, want)
 
@@ -1622,67 +1750,6 @@ func _short_team(n: String) -> String:
 	for w in [" Racing", " Team", " Endurance", " TotalEnergies", " Hertz", " Gazoo", " THOR", " JOTA", " WRT", " Competition", " Autosports", " Oreca", " LMP2"]:
 		n = n.replace(w, "")
 	return n
-
-
-## 순위표 머리줄 · 한 줄 (열 너비: 이름이 넓게, 나머지는 내용만큼)
-func _tower_head() -> String:
-	var g: String = ["앞차 간격", "선두와 차이", "직전 랩"][gap_mode]
-	return "[cell padding=4,2,4,4][color=#6b7280]P[/color][/cell][cell expand=4 padding=4,2,4,4][color=#6b7280]팀 · 드라이버[/color][/cell][cell expand=2 padding=4,2,4,4][color=#6b7280]%s[/color][/cell][cell expand=1 padding=4,2,4,4][color=#6b7280]타이어[/color][/cell][cell padding=4,2,4,4][color=#6b7280]피트[/color][/cell]" % g
-
-
-func _tower_row(pos: int, c, name_txt: String, gap: String, tyre: String) -> String:
-	# 중계 화면처럼 줄마다 번갈아 바탕색, 내 차 줄은 호박색 바탕
-	var pc: String = "#ffc53d" if c.mine else "#ffffff"
-	var bg: String = "#2a2410" if c.mine else ("#181b22" if pos % 2 == 1 else "#111319")
-	var cl: String = "[cell bg=%s padding=4,3,4,3]" % bg
-	var cx: String = "[cell bg=%s padding=4,3,4,3 expand=%%d]" % bg
-	return (cl + "[color=%s][b]%d[/b][/color][/cell]" + (cx % 4) + "[url=%d][color=%s]▌[/color] %s[/url][/cell]" + (cx % 2) + "%s[/cell]" + (cx % 1) + "%s[/cell]" + cl + "[color=#9aa1ad]%d[/color][/cell]") % [pc, pos, c.id, _hex(c.color), name_txt, gap, tyre, c.pits]
-
-
-func _refresh_tower_wec(ord: Array) -> void:
-	var s = "[table=5]"
-	s += _tower_head()
-	var present := {}
-	for c in ord:
-		present[c.cls] = true
-	for cls in ["HY", "P2", "GT"]:
-		if not present.has(cls):
-			continue
-		# 클래스 이름은 이름 칸에 (첫 칸에 두면 순위 칸이 넓어져 줄이 벌어진다)
-		s += "[cell bg=#e10600][/cell][cell bg=#e10600 expand=4 padding=4,2,4,2][color=#ffffff][b]%s[/b][/color][/cell][cell bg=#e10600 expand=2][/cell][cell bg=#e10600 expand=1][/cell][cell bg=#e10600][/cell]" % CLS_KO.get(cls, cls)
-		var lead: Variant = null
-		var prev: Variant = null
-		var pos := 0
-		for c in ord:
-			if c.cls != cls:
-				continue
-			pos += 1
-			if lead == null:
-				lead = c
-			var gap := ""
-			if c.dnf != "":
-				gap = "[color=#ef4444]DNF[/color]"
-			elif gap_mode == 2:
-				gap = KitS.fmt_lap(c.last_lap_t) if c.last_lap_t > 0.0 else "-"
-			elif c == lead:
-				gap = "[color=#a855f7]◆[/color] 선두"
-			elif gap_mode == 0 and prev != null:
-				gap = sim.gap_to(c, prev)
-			else:
-				gap = sim.gap_to(c, lead)
-			if c.time_pen > 0.0 and c.dnf == "":
-				gap += " [color=#ef4444]+%ds[/color]" % int(c.time_pen)
-			if c.boxing != null or c.pit_phase == 2:
-				gap += " [color=#ffc53d]PIT[/color]"
-			prev = c
-			var tyre := "%s [color=#8b98a5]%dL[/color]" % [_tyre_bb(c.comp), c.stint_laps]
-			if c.mine:
-				tyre = "%s [color=#8b98a5]%d%%[/color]" % [_tyre_bb(c.comp), int(round(c.wear * 100))]
-			var nm: String = "[color=%s]%s #%d[/color] [color=#8b98a5]%s[/color]" % ["#ffc53d" if c.mine else "#e6edf3", _short_team(c.team), c.slot + 1, c.code]
-			s += _tower_row(pos, c, nm, gap, tyre)
-	s += "[/table]"
-	if tower.text != s:
-		tower.text = s
 
 
 func _refresh_radio() -> void:
@@ -1807,6 +1874,13 @@ func _show_result() -> void:
 		for ru in runs:
 			parts.append(_tyre_bb(ru[0]) + ("[color=#8b98a5]×%d[/color]" % ru[1] if ru[1] > 1 else ""))
 		strat = " ".join(parts)
+		# 새 세트가 없어 쓰던 세트를 다시 낀 횟수 (S×9 가 새 세트 9개로 보이지 않게)
+		var reuse_n := 0
+		for pl in c.pit_log:
+			if bool(pl.get("reuse", false)):
+				reuse_n += 1
+		if reuse_n > 0:
+			strat += " [color=#8b98a5](재장착 %d)[/color]" % reuse_n
 		var pen = (" [color=#ef4444]+%ds[/color]" % int(c.penalty)) if c.penalty > 0 else ""
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			r["pos"], _hex(c.color), name_col, (_short_team(c.team) + " #%d" % (c.slot + 1)) if sim.is_wec() else c.code, c.code if sim.is_wec() else c.team, r["gap"], pen, strat, r["points"]]
@@ -1815,6 +1889,7 @@ func _show_result() -> void:
 		var fc = sim.cars.filter(func(x): return x.id == sim.fastest_id)
 		if not fc.is_empty():
 			s += "\n[color=#a855f7]최고 랩[/color] %s %.3f초" % [fc[0].code, sim.fastest_t]
+	s += _pen_dnf_summary()
 	btn_again.visible = mode != "career"
 	btn_menu.visible = mode != "career"
 	btn_hq.visible = mode == "career" and not sprint_mode
@@ -1832,6 +1907,10 @@ func _show_result() -> void:
 		if sprint_mode:
 			var sp: Dictionary = career.after_sprint(sim)
 			s = "[b][color=#ffc53d]스프린트[/color][/b] 내 팀 [b]%d점[/b] (상위 8위까지 10-8-6-5-4-3-2-1). 상금·스폰서 정산은 피처 레이스 뒤에 해요.\n\n" % sp["total"] + s
+		elif career.in_invite():
+			var iv: Dictionary = career.after_invite(sim)
+			s = "[b][color=#ffc53d]%s[/color][/b]\n[color=#8b98a5]초청 경기라 시즌 포인트·라운드에는 들어가지 않아요.[/color]\n\n" % iv["text"] + s
+			season_pending = false
 		else:
 			var ec: Dictionary = career.after_race(sim)
 			s = _career_summary(ec) + "\n" + s
@@ -1839,3 +1918,24 @@ func _show_result() -> void:
 	btn_hq.text = "시즌 결산 ▶" if season_pending else "본부(HQ)로 ▶"
 	result_text.text = rec_note + s
 	result_box.visible = true
+
+
+## 결과 화면 아래: 모든 차의 페널티 사유 · 리타이어 사유
+func _pen_dnf_summary() -> String:
+	var pen_t := ""
+	var dnf_t := ""
+	for c in sim.order():
+		var nm: String = (c.label + " " + c.code) if sim.is_wec() else "%s (%s)" % [c.code, c.team]
+		if not c.pen_log.is_empty():
+			var parts: PackedStringArray = []
+			for p in c.pen_log:
+				parts.append("L%d %s +%d초" % [int(p["lap"]), p["why"], int(p["secs"])])
+			pen_t += "%s%s[/color]  %s\n" % ["[color=#ffc53d]" if c.mine else "[color=#e6edf3]", nm, " · ".join(parts)]
+		if c.dnf != "":
+			dnf_t += "%s%s[/color]  %s\n" % ["[color=#ffc53d]" if c.mine else "[color=#e6edf3]", nm, c.dnf_detail if c.dnf_detail != "" else c.dnf]
+	var out := ""
+	if pen_t != "":
+		out += "\n\n[b]🟨 페널티[/b]\n[font_size=14]" + pen_t + "[/font_size]"
+	if dnf_t != "":
+		out += "\n[b]🔧 리타이어[/b]\n[font_size=14]" + dnf_t + "[/font_size]"
+	return out

@@ -160,7 +160,7 @@ func refresh() -> void:
 	for r in ls["drivers"]:
 		i += 1
 		var col2 := "#ffc53d" if r["mine"] else "#e6edf3"
-		t2 += "%s P%-2d [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [b]%d[/b]%s\n" % [_medal(i), i, r["color"], col2, r["name"], _short(String(r["team"])), int(r["pts"]), (" · %d승" % int(r["wins"])) if int(r["wins"]) > 0 else ""]
+		t2 += "%s P%-2d [color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [b]%d[/b]%s\n" % [_medal(i), i, r["color"], col2, r["name"], (String(r["crew"]) if r.has("crew") else _short(String(r["team"]))), int(r["pts"]), (" · %d승" % int(r["wins"])) if int(r["wins"]) > 0 else ""]
 	_txt(c2, t2 if t2 != "" else "[color=#8b98a5]기록 없음[/color]", 14)
 	# 시즌 정산 알림
 	var notes: Array = ls.get("notes", [])

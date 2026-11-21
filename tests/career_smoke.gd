@@ -119,7 +119,7 @@ func _drive(sim) -> void:
 
 func _init() -> void:
 	var fails = 0
-	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["create", 0, {"tier": 2, "name": "Test F2"}, "신규 F2"], ["select", 3, {"series": "wec"}, "WEC Peugeot"], ["create", 0, {"tier": 1, "name": "Test WEC", "series": "wec"}, "WEC 신규 LMGT3"]]
+	var scenarios = [["select", 6, {}, "Williams"], ["create", 0, {"tier": 1, "name": "Test GP"}, "신규 F3"], ["create", 0, {"tier": 2, "name": "Test F2"}, "신규 F2"], ["select", 3, {"series": "wec"}, "WEC Peugeot"], ["create", 0, {"tier": 1, "name": "Test WEC", "series": "wec"}, "WEC 신규 LMGT3"], ["create", 0, {"tier": 0, "name": "Test ALMS", "series": "wec"}, "WEC 신규 ALMS"]]
 	for sc in scenarios:
 		var cr = CareerS.new()
 		cr.new_career(sc[0], sc[1], sc[2], 4242)
@@ -140,6 +140,15 @@ func _init() -> void:
 				sc[3], int(lg["season"]), int(lg["tier"]), int(lg["rank"]), float(lg["cash"]), float(lg["spent"]), float(lg["cap"]), int(cr.hq["pop"] * 100),
 				ld["spon"], ld["pay"], ld["prize"], ld["mission"], ld["ops"], ld["salary"], ld["repair"], ld["rnd"], ld["fac"], ld["staff"], cr.hq["contracts"].size(), cr.hq["dev"], cr.hq["base"]])
 		print("  %d시즌 %dms · 뉴스: %s" % [seasons, Time.get_ticks_msec() - t0, cr.hq["news"].slice(0, 3)])
+		# 평판 변화는 커리어 뉴스에 이유와 함께 남는다
+		var pop_news := 0
+		for nw in cr.hq["news"]:
+			if String(nw).find("평판") >= 0:
+				pop_news += 1
+		print("  평판 뉴스 %d줄 (최근 30줄 중) 예: %s" % [pop_news, str(cr.hq["news"].filter(func(x): return String(x).find("평판") >= 0).slice(0, 3))])
+		if pop_news == 0:
+			fails += 1
+			print("  !! 평판 변화가 뉴스에 없음")
 		# 저장·불러오기
 		var cr2 = CareerS.new()
 		if not cr2.load_save() or int(cr2.hq["race_count"]) != int(cr.hq["race_count"]):
@@ -147,6 +156,57 @@ func _init() -> void:
 			fails += 1
 		if float(cr.hq["cash"]) != float(cr.hq["cash"]):
 			fails += 1
+	# 파워유닛 마일리지: F1 한 시즌 돌면 부품이 닳고, 할당 초과 교체는 그리드 강등
+	var cp = CareerS.new()
+	cp.new_career("select", 6, {}, 6161)
+	for r in 8:
+		_run_race(cp)
+	var w0: float = float(cp.pu_part(0, "gb")["wear"])
+	var used: int = cp.pu_used(0, "gb")
+	for i in 4:
+		cp.pu_replace(1, "ers")
+	var gl: Array = cp.hq.get("next_mods", {}).get("grid_pen", [0, 0])
+	# 재고 부품 다시 장착 (강등 없음) · AI 도 같은 규칙으로 부품을 쓴다
+	var ok_mount: bool = cp.pu_mount(0, "gb", 0) == (float(cp.pu_state(0)["gb"]["pool"][0]["wear"]) < 1.0)
+	var ai_used := 0
+	for key in cp.hq.get("ai_pu", {}):
+		ai_used += int(cp.hq["ai_pu"][key]["gb"]["n"])
+	print("  AI 기어박스 평균 %.1f개 · 재고 장착 %s" % [float(ai_used) / maxf(1.0, cp.hq.get("ai_pu", {}).size()), "OK" if ok_mount else "실패"])
+	if ai_used == 0 or not ok_mount:
+		print("  ! 부품 재고 이상")
+		fails += 1
+	print("파워유닛: 8경기 후 #1 기어박스 %d개째 · 수명 %d%% · #2 ERS 4번 교체 → 그리드 강등 %d" % [used, int(w0 * 100), int(gl[1])])
+	if used < 2 or int(gl[1]) < 10:
+		print("  ! 파워유닛 마일리지 이상")
+		fails += 1
+	# 아시안 르망 챔피언 보상: 르망 초청 경기 (포인트·라운드 그대로, LMP2 로 달리고 끝나면 원래 리그로)
+	var ci = CareerS.new()
+	ci.new_career("create", 0, {"tier": 0, "name": "Invite", "series": "wec"}, 5151)
+	if ci.cal_len() != 6 or ci.my_class() != "P3" or ci.next_circuit() != "sepang_wec":
+		print("  ! 아시안 르망 리그 설정 이상: %d경기 %s %s" % [ci.cal_len(), ci.my_class(), ci.next_circuit()])
+		fails += 1
+	# 스펙 리그: 내 차도 엔진 패키지 연비·신뢰성 보정 없음 (AI 와 같음)
+	ci.hq["engine_supplier"] = "Toyota H8909 3.5L V6 Twin-Turbo Hybrid"
+	ci.my_team_dict()["engine"] = ci.hq["engine_supplier"]
+	for en in ci.race_opts()["wec_entries"]:
+		if en["mine"] and float(en["team"].get("eng_eff", 1.0)) != 1.0:
+			print("  ! 스펙 리그 내 차에 엔진 연비 보정 %.2f" % float(en["team"]["eng_eff"]))
+			fails += 1
+	ci.hq["lemans_invite"] = true
+	var rc0: int = int(ci.hq["race_count"])
+	ci.start_invite()
+	if ci.next_circuit() != "lemans" or ci.my_class() != "P2":
+		print("  ! 초청 경기 설정 이상")
+		fails += 1
+	var isim = RaceSimS.new()
+	isim.new_race(ci.next_circuit(), ci.race_my_index(), ci.race_laps(), "auto", ["M", "M"], 0, ci.race_opts())
+	isim.prepare_start()
+	_drive(isim)
+	var iv: Dictionary = ci.after_invite(isim)
+	print("르망 초청 경기: %s" % iv["text"])
+	if int(ci.hq["race_count"]) != rc0 or ci.in_invite() or ci.hq["lemans_invite"] or ci.my_class() != "P3":
+		print("  ! 초청 경기 정산 이상")
+		fails += 1
 	CareerS.delete_save()
 	print("F2 스프린트 %d회: 내 팀 %d점, 전체 피트 %.1f회/경기 · F3 %d경기: 전체 피트 %.1f회/경기" % [sprint_n, sprint_pts, sprint_stops / maxf(1.0, sprint_n), f3_n, f3_stops / maxf(1.0, f3_n)])
 	print("커리어 이벤트 발생: %s" % events)

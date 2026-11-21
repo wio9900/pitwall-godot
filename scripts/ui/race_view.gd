@@ -20,11 +20,17 @@ const LABEL := Color("#7d8796")
 const TRACK_W := 11.0 # 트랙 폭 (트랙 좌표 단위)
 const BANNER_H := 34.0 # 화면 아래 안내 띠 높이
 const SPC := 20       # 서킷 제어점 하나당 샘플 수 (track.gd 와 같게)
+const CAR_U_PER_M := 14.4 / 5.6 # 차 그림 길이: 코드 F1(윙 끝~노즈 14.4) = 실제 5.6m
+const TRACK_REAL_M := 13.0 # TRACK_W 가 나타내는 실제 트랙 폭 (르망·F1 서킷 약 12~15m)
+const DB = preload("res://scripts/data/game_db.gd")
+const K = preload("res://scripts/ui/kit.gd")
+const OTHER_LABEL_SCALE := 2.6 # 확대 추적 때 다른 차 이름표를 띄울 최소 차 배율
 
 var sim: Variant = null
 var follow_slot := -1        # -1 = 전체 화면, 0/1 = 내 차 추적
 var speed_hint := 4.0        # 화면 배속 (빠를수록 위치 보정을 빠르게 → 끊김 방지)
 var sel_slot := 0            # 강조 링을 굵게 그릴 내 차
+var ghost_on := false        # 피트·전략 탭: 선택한 내 차의 '지금 박스하면 복귀할 자리'를 반투명으로
 var lights := -1             # 출발 신호: -1 숨김, 0~5 점등 개수
 var lights_out_t := -10.0    # 소등 시각(실시간) — GO! 표시용
 var banner_text := ""
@@ -33,12 +39,14 @@ var banner_t := -10.0
 ## 연습·예선 화면용: 차 한 대만 그린다 {car, dist(트랙 거리)}. null 이면 레이스 모드.
 var solo: Variant = null
 var _fcls := ""   # 자세히 그릴 클래스 (WEC 에서 내 차 클래스)
+var _tex := {}    # 팀 그림 캐시 "클래스|팀" → Texture2D 또는 null
 
 var _cam_center := Vector2.ZERO
 var _cam_zoom := 1.0
 var _s := 1.0
 var _off := Vector2.ZERO
 var _now := 0.0
+var _fin_ms := {}      # car id → 체커 받은 시각(실제 ms), 쿨다운 랩 연출용
 var _smooth := {}      # car id → {p, a, d(트랙 위 거리), lat(옆으로 비킨 정도)}
 # 두 손가락 확대·이동 (PC 는 마우스 휠)
 var user_zoom := 1.0
@@ -72,36 +80,64 @@ var _sc_t := -10.0
 var _win_t := -10.0
 var _win_rank := 0
 var _confetti: Array = []
-# 성능: 트랙·배경(정적)은 아래 층에 그려 두고, 카메라·밤·비·DRS 가 바뀔 때만 다시 그린다.
+# 성능: 트랙·배경(정적)은 SubViewport 에 한 번 그려 그림(텍스처)으로 두고, 카메라·밤·비·DRS 가 바뀔 때만 다시 그린다.
+# (예전엔 그리기 명령만 저장해서 르망 기준 삼각형 약 3.8만 개를 GPU 가 매 프레임 다시 그림 → 폰 30fps, 수정 22)
 # 차·연출(동적)만 매 프레임 그린다. 그리기 함수는 _ci 가 가리키는 층에 그린다.
 var _ci: CanvasItem
 var _layer: Layer
+var _vp: SubViewport
+var _img: TextureRect
 var _static_key := ""
+# 그림을 그릴 때의 카메라(_st_off·_st_s)와 화면 밖 여백(_st_m). 카메라가 움직이면 그림을 옮기고 늘이기만 하고,
+# 여백을 벗어나거나 확대가 3% 넘게 바뀌면 다시 그린다 (추적 카메라도 매 프레임 다시 그리지 않게)
+var _st_off := Vector2.ZERO
+var _st_s := 1.0
+var _st_m := Vector2.ZERO
+var _area := Vector2.ZERO  # 정적 층 그리는 영역 (화면 + 여백 2배)
+const STATIC_MARGIN := 0.25
 
 
 class Layer extends Control:
 	var host
 
 	func _draw() -> void:
+		var o: Vector2 = host._off
+		var sc: float = host._s
+		host._off = host._st_off + host._st_m
+		host._s = host._st_s
 		host._ci = self
 		host._draw_static()
 		host._ci = host
+		host._off = o
+		host._s = sc
 
 
 func _init() -> void:
 	_ci = self
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS # 256px 차 그림을 작게 줄여도 자글거리지 않게
 	_layer = Layer.new()
 	_layer.host = self
-	_layer.show_behind_parent = true
 	_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_layer)
+	_vp = SubViewport.new()
+	_vp.disable_3d = true
+	_vp.transparent_bg = false
+	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_vp.add_child(_layer)
+	add_child(_vp)
+	_img = TextureRect.new()
+	_img.show_behind_parent = true
+	_img.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_img.stretch_mode = TextureRect.STRETCH_SCALE
+	_img.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR # 뷰포트 그림엔 밉맵이 없음
+	add_child(_img)
 
 
 func reset() -> void:
 	_deco_key = ""
 	_static_key = ""
 	_smooth.clear()
+	_fin_ms.clear()
 	_pit_seen.clear()
 	_popups.clear()
 	_last_pos.clear()
@@ -174,16 +210,17 @@ func _update_camera(delta: float) -> void:
 # ═════════ 차량 위치: 실제 순서보다 앞서 그리지 않고, 부드럽게 보간 ═════════
 func _update_cars(delta: float) -> void:
 	var T = sim.T
-	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px)
-	var gap_d: float = maxf(T.L * 0.0045, 15.0 * _car_scale(false) / maxf(_s, 0.01))
-	var last_by_cls := {} # 클래스별로 앞차보다 앞서 그리지 않기
+	# 화면에서 차가 겹치지 않을 만큼의 최소 간격 (차 길이 ≈ 15px). 트랙 길이 비례로 두면 르망 같은 긴 서킷에서
+	# 대열이 실제보다 2~3배 늘어나 뒤 클래스와 겹쳐 보여서, 확대했을 땐 실제 차 크기(트랙 폭의 0.6 ≈ 8m) 기준
+	var gap_d: float = maxf(TRACK_W * 0.6, 15.0 * _car_scale(false) / maxf(_s, 0.01))
+	var last_by_cls := {} # 클래스별 공식 순서 (그리는 순서 정할 때)
 	var targets := {}
 	for c in sim.order_ui():
 		if c.dnf != "":
 			continue
 		if not c.started:
 			# 출발 전 그리드: 화면에서 겹치지 않는 간격 + 좌우 엇갈림
-			var gap: float = maxf(T.L * 0.0035, 13.0 * _car_scale(false) / maxf(_s, 0.01))
+			var gap: float = maxf(TRACK_W * 0.55, 13.0 * _car_scale(false) / maxf(_s, 0.01))
 			var gd: float = -(floor(c.grid / 2.0) + 1.0) * gap * 1.25 - float(c.grid % 2) * gap * 0.55
 			var dv = gd
 			if c.start_t > 0.0:
@@ -192,16 +229,53 @@ func _update_cars(delta: float) -> void:
 			var lat: float = TRACK_W * 0.22 * (1.0 if c.grid % 2 == 0 else -1.0)
 			targets[c.id] = [T.point_at_dist(dv) + Vector2(-sin(ha), cos(ha)) * lat, ha]
 			continue
-		if c.finished or sim.is_pitting(c):
-			var pa: Array = sim.car_pos_angle(c)
-			targets[c.id] = [pa[0], pa[1]]
+		if c.finished:
+			# 체커 후: 천천히 한 바퀴(쿨다운) 돌아 피트 입구로 → 피트레인으로 들어가 사라진다
+			if not _fin_ms.has(c.id):
+				_fin_ms[c.id] = Time.get_ticks_msec()
+			var el: float = (Time.get_ticks_msec() - int(_fin_ms[c.id])) / 1000.0
+			var entry_d: float = fposmod(float(T.cum[T.pit_in]), T.L)
+			const COOL_S := 22.0
+			const LANE_S := 3.0
+			if el < COOL_S:
+				var cd: float = entry_d * (el / COOL_S)
+				var ha2: float = T.head_at_dist(cd)
+				targets[c.id] = [T.point_at_dist(cd) + Vector2(-sin(ha2), cos(ha2)) * TRACK_W * 0.25, ha2]
+			elif el < COOL_S + LANE_S:
+				var pl: Array = T.pit_lane_point(sim._lane_u(0.35 * ((el - COOL_S) / LANE_S), sim._stall_u(c.stall_idx)))
+				targets[c.id] = [pl[0], pl[1]]
 			continue
-		var dist: float = sim.car_dist(c)
-		var last_d: Variant = last_by_cls.get(c.cls)
-		if last_d != null and last_d - dist < T.L * 0.5:
-			dist = minf(dist, last_d - gap_d)
-		last_by_cls[c.cls] = dist
-		targets[c.id] = {"d": dist, "cls": c.cls}
+		var dist: float = 0.0
+		if sim.is_pitting(c):
+			var pa: Array = sim.car_pos_angle(c)
+			if pa.size() < 3:
+				targets[c.id] = [pa[0], pa[1]]
+				continue
+			# 피트 출구를 나와 본 트랙에 오른 차: 바로 앞차를 넘어 그리지 않는다 (SC 대열 사이에 끼었다 뒤로 밀리던 것)
+			dist = float(pa[2])
+		else:
+			dist = sim.car_dist(c)
+		targets[c.id] = {"d": dist, "raw": dist, "cls": c.cls}
+		if not last_by_cls.has(c.cls):
+			last_by_cls[c.cls] = []
+		last_by_cls[c.cls].append(c.id) # 클래스 안 공식 순서
+	# 그리는 순서: 자리(실제 거리 순)는 클래스끼리 섞일 수 있지만, 같은 클래스 안에서는 공식 순서대로 채운다
+	# → 클래스가 달라도 같은 바퀴 안에서는 앞차보다 앞서 그리지 않고 겹치지 않게 벌린다 (예전: 클래스별로만 벌려서
+	# 르망 출발 때 하이퍼카 대열이 늘어나 뒤 클래스 GT 가 그 안에 끼어 보임). 반 바퀴 넘게 차이(추월·랩다운)면 따로 그림
+	var slots: Array = targets.keys().filter(func(id): return targets[id] is Dictionary)
+	slots.sort_custom(func(a, b): return float(targets[a]["d"]) > float(targets[b]["d"]))
+	var take := {}
+	var prev_d := INF
+	for sid in slots:
+		var cl: String = targets[sid]["cls"]
+		var ti: int = int(take.get(cl, 0))
+		take[cl] = ti + 1
+		var tg_c: Dictionary = targets[last_by_cls[cl][ti]]
+		var dd: float = float(tg_c["d"])
+		if prev_d - dd < T.L * 0.5:
+			dd = minf(dd, prev_d - gap_d)
+		tg_c["d"] = dd
+		prev_d = dd
 	# 멀티 클래스: 느린 클래스 차가 빠른 클래스 차와 겹치면 옆으로 비켜 달린다 (르망에서 겹쳐 보이던 것)
 	var lat_want := {}
 	if sim.is_wec():
@@ -228,6 +302,7 @@ func _update_cars(delta: float) -> void:
 	var ka = clampf(delta * 14.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
 	# 트랙 위 차는 '거리'로 부드럽게 따라간다: 화면 좌표로 섞으면 코너를 가로지르고, 섹터 경계에서 툭툭 튀어 보인다
 	var kd = 1.0 - exp(-delta * 9.0 * maxf(1.0, sqrt(sp)))
+	var kv = 1.0 - exp(-delta * 4.0) # 그림 속도 변화 부드럽게 (약 0.08초)
 	var snap_d: float = 40.0 * maxf(1.0, sp / 2.0)
 	var snap_dist: float = T.L * 0.08
 	for id in targets:
@@ -236,11 +311,21 @@ func _update_cars(delta: float) -> void:
 			var td: float = float(tg["d"])
 			var lw: float = float(lat_want.get(id, 0.0))
 			var s: Variant = _smooth.get(id)
+			var raw: float = float(tg["raw"])
 			if s == null or not s.has("d") or absf(wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5)) > snap_dist:
-				s = {"d": td, "lat": lw}
+				s = {"d": td, "lat": lw, "raw": raw, "v": 0.0}
 				_smooth[id] = s
 			else:
-				s["d"] = float(s["d"]) + wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5) * kd
+				# 그림 속도는 실제 속도(이번 프레임 실제 거리 변화)의 0.5~1.6배 안에서만, 부드럽게 바뀐다:
+				# 겹침 방지 목표가 순위 바뀔 때 툭 바뀌어도 멈칫·뒤로 가기·튀어나가기 없이 따라감 (수정 22)
+				var step: float = wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5) * kd
+				var rs: float = raw - float(s["raw"])
+				if rs > 0.0:
+					step = clampf(step, rs * 0.5, rs * 1.6)
+					step = lerpf(float(s["v"]), step, kv)
+				s["v"] = step
+				s["raw"] = raw
+				s["d"] = float(s["d"]) + step
 				s["lat"] = lerpf(float(s["lat"]), lw, clampf(delta * 4.0, 0.0, 1.0))
 			var ha: float = T.head_at_dist(float(s["d"]))
 			s["p"] = T.point_at_dist(float(s["d"])) + Vector2(-sin(ha), cos(ha)) * float(s["lat"])
@@ -403,16 +488,38 @@ func _process(delta: float) -> void:
 func _refresh_static() -> void:
 	var key := ""
 	if sim != null and sim.T != null:
-		key = "%s|%.2f|%.1f|%.1f|%s|%d|%d|%s" % [sim.circ_key, _s, _off.x, _off.y, sim.night, int(sim.wet * 20.0), int(sim.drs_on()), size]
-	if key != _static_key:
+		key = "%s|%s|%s|%d|%s|%d|%d" % [sim.circ_key, sim.night, _wx_key(), int(sim.drs_on()), size, get_viewport().msaa_2d, follow_slot]
+	var k: float = _s / maxf(_st_s, 0.000001)
+	var pos: Vector2 = _off - (_st_off + _st_m) * k
+	var full: Vector2 = (size + _st_m * 2.0) * k
+	var covers: bool = pos.x <= 0.5 and pos.y <= 0.5 and pos.x + full.x >= size.x - 0.5 and pos.y + full.y >= size.y - 0.5
+	if key != _static_key or absf(k - 1.0) > 0.03 or not covers:
 		_static_key = key
+		_st_off = _off
+		_st_s = _s
+		# 여백은 카메라가 움직이는 때만 (전체 보기는 화면 크기 그대로 → 메모리 절약)
+		_st_m = size * STATIC_MARGIN if (follow_slot >= 0 or user_zoom > 1.01) else Vector2.ZERO
+		_area = size + _st_m * 2.0
+		# 화면 실제 픽셀 크기로 그려야 흐리지 않다 (창 크기에 맞춰 늘리는 canvas_items 배율)
+		var px: float = get_global_transform_with_canvas().get_scale().x
+		_vp.size = Vector2i(maxi(1, int(ceil(_area.x * px))), maxi(1, int(ceil(_area.y * px))))
+		_vp.canvas_transform = Transform2D.IDENTITY.scaled(Vector2(px, px))
+		_vp.msaa_2d = get_viewport().msaa_2d
+		_layer.size = _area
 		_layer.queue_redraw()
+		_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+		if _img.texture == null:
+			_img.texture = _vp.get_texture()
+		pos = -_st_m
+		full = _area
+	_img.position = pos
+	_img.size = full
 
 
 ## 정적 층: 배경·격자·서킷·연석·DRS·지명
 func _draw_static() -> void:
 	var night: bool = sim != null and sim.night
-	_ci.draw_rect(Rect2(Vector2.ZERO, size), BG_NIGHT if night else BG)
+	_ci.draw_rect(Rect2(Vector2.ZERO, _area), BG_NIGHT if night else BG)
 	if sim == null or sim.T == null:
 		return
 	var T = sim.T
@@ -437,7 +544,10 @@ func _draw() -> void:
 			_draw_car(_X(T.point_at_dist(d)), T.head_at_dist(d), solo["car"], night)
 		# 라이브 예선: 트랙 위 여러 대 [[car, dist], …]
 		for e in solo.get("list", []):
-			_draw_car(_X(T.point_at_dist(float(e[1]))), T.head_at_dist(float(e[1])), e[0], night)
+			if e.size() >= 3:
+				_draw_car(_X(e[1]), float(e[2]), e[0], night) # 피트레인 위 (위치·방향 직접)
+			else:
+				_draw_car(_X(T.point_at_dist(float(e[1]))), T.head_at_dist(float(e[1])), e[0], night)
 		return
 	var wet: float = sim.wet
 	if wet > 0.2:
@@ -452,6 +562,9 @@ func _draw() -> void:
 			_draw_car(_X(sp["p"]), sp["a"], c, night)
 	_draw_crews()
 	_draw_flashes()
+	if ghost_on:
+		_draw_ghost(font)
+	_draw_other_labels(font)
 	_draw_my_labels(font)
 	_draw_safety_car(font)
 	_draw_popups(font)
@@ -470,12 +583,12 @@ func _draw_backdrop() -> void:
 	var step := 48.0
 	var col := Color(1, 1, 1, 0.018)
 	var x := fposmod(_off.x, step)
-	while x < size.x:
-		_ci.draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
+	while x < _area.x:
+		_ci.draw_line(Vector2(x, 0), Vector2(x, _area.y), col, 1.0)
 		x += step
 	var y := fposmod(_off.y, step)
-	while y < size.y:
-		_ci.draw_line(Vector2(0, y), Vector2(size.x, y), col, 1.0)
+	while y < _area.y:
+		_ci.draw_line(Vector2(0, y), Vector2(_area.x, y), col, 1.0)
 		y += step
 
 
@@ -652,25 +765,65 @@ func _draw_track(T, night: bool) -> void:
 	_ci.draw_polyline(poly, EDGE.darkened(0.55 if night else 0.15), w + maxf(2.0, w * 0.14), true)
 	_ci.draw_polyline(poly, Color("#262c36") if night else ASPHALT, w, true)
 	var inner: Color = Color("#171c24") if night else ASPHALT_IN
-	if sim.wet > 0.05:
-		inner = inner.lerp(WET_TINT, 0.15 + sim.wet * 0.45)
-	_ci.draw_polyline(poly, inner, w * 0.62, true)
-	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차
-	var i := 0
-	while i < T.m:
-		if T.spd[i] <= 0.55:
-			var a: Vector2 = T.pts[i]
-			var b: Vector2 = T.pts[(i + 2) % T.m]
-			var c0: Vector2 = T.pts[(i - 2 + T.m) % T.m]
-			var hn := atan2(b.y - a.y, b.x - a.x)
-			var hp := atan2(a.y - c0.y, a.x - c0.x)
-			var side := -1.0 if wrapf(hn - hp, -PI, PI) > 0 else 1.0
-			var n: Vector2 = T.nrm[i] * (TRACK_W * 0.55 * side)
-			var col := KERB_W if (i / 2) % 2 == 1 else KERB_R
+	if sim.wet > 0.05 and sim.sec_wet.size() == sim.NS:
+		# 섹터마다 노면 색: 아스팔트 = 라인 밖, 안쪽 띠 = 레이싱 라인 (마를 때 라인이 먼저 어두워짐)
+		var asph: Color = Color("#262c36") if night else ASPHALT
+		for sx in sim.NS:
+			var seg: PackedVector2Array = _sec_poly(sx)
+			var ow: float = float(sim.off_wet[sx])
+			var lw: float = sim.sec_w(sx)
+			if ow > 0.05:
+				_ci.draw_polyline(seg, asph.lerp(WET_TINT, 0.08 + ow * 0.3), w, true)
+			_ci.draw_polyline(seg, inner.lerp(WET_TINT, 0.15 + lw * 0.45) if lw > 0.05 else inner, w * 0.62, true)
+	else:
+		_ci.draw_polyline(poly, inner, w * 0.62, true)
+	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차. 2점마다 한 칸: 0 = 없음, ±1 = 어느 쪽
+	var steps: int = T.m / 2
+	var ks: Array = []
+	for s in steps:
+		var ii: int = s * 2
+		if T.spd[ii] > 0.55:
+			ks.append(0)
+			continue
+		# 휘는 방향은 앞뒤 4점으로 봐서 칸마다 쪽이 뒤집히지 않게
+		var a0: Vector2 = T.pts[(ii - 4 + T.m) % T.m]
+		var a1: Vector2 = T.pts[ii]
+		var a2: Vector2 = T.pts[(ii + 4) % T.m]
+		var turn: float = wrapf(atan2(a2.y - a1.y, a2.x - a1.x) - atan2(a1.y - a0.y, a1.x - a0.x), -PI, PI)
+		ks.append(-1 if turn > 0 else 1)
+	# 같은 쪽 연석 사이의 짧은 빈칸(3칸 이하)·혼자 튀는 칸은 이어 붙임 (중간중간 비던 문제, 사용자 2026-11-21)
+	var src: Array = ks.duplicate()
+	for s in steps:
+		var back := 0
+		var fwd := 0
+		for d in range(1, 4):
+			if back == 0:
+				back = int(src[(s - d + steps) % steps])
+			if fwd == 0:
+				fwd = int(src[(s + d) % steps])
+		if back != 0 and back == fwd and int(src[s]) != back:
+			ks[s] = back
+	var stripe := 0
+	for s in steps:
+		var side: float = float(ks[s])
+		if side == 0.0:
+			continue
+		var ia: int = s * 2
+		var ib: int = (ia + 2) % T.m
+		var a: Vector2 = T.pts[ia]
+		var b: Vector2 = T.pts[ib]
+		# 양 끝을 각 점의 법선으로 밀어야 굽은 곳에서 이웃 칸과 이어진다
+		var pa: Vector2 = _X(a + T.nrm[ia] * (TRACK_W * 0.55 * side))
+		var pb: Vector2 = _X(b + T.nrm[ib] * (TRACK_W * 0.55 * side))
+		# 확대하면 실제 줄무늬 길이(약 1.2m, 트랙 폭 = 13m 기준)로 촘촘하게, 멀리선 화면에서 5px 보다 잘게 나누지 않음 (수정 29)
+		var n_phys: int = maxi(1, int(a.distance_to(b) * 13.0 / TRACK_W / 1.2))
+		var ns: int = clampi(mini(n_phys, int(pa.distance_to(pb) / 5.0)), 1, 16)
+		for k in ns:
+			var col := KERB_W if (stripe + k) % 2 == 1 else KERB_R # 칸이 바뀌어도 빨강·흰색이 이어서 번갈아
 			if night:
 				col = col.darkened(0.4)
-			_ci.draw_line(_X(a + n), _X(b + n), col, maxf(2.0, w * 0.2))
-		i += 2
+			_ci.draw_line(pa.lerp(pb, float(k) / ns), pa.lerp(pb, float(k + 1) / ns), col, maxf(2.0, w * 0.2))
+		stripe += ns
 	# DRS 구간
 	if sim.drs_on():
 		for z in T.drs:
@@ -758,7 +911,7 @@ func _draw_labels(T, font, night: bool) -> void:
 		var n: Vector2 = T.nrm[si]
 		var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
 		var o: float = -float(T.inward) * 34.0
-		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, size.y - 4))
+		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, _area.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, _area.y - 4))
 		for step in 5:
 			var hit := false
 			for r in placed:
@@ -769,7 +922,7 @@ func _draw_labels(T, font, night: bool) -> void:
 				break
 			var k := 1.25 + step * 0.28
 			var dy := 13.0 if step % 2 == 0 else -13.0
-			lp = Vector2(clampf(p.x + n.x * o * k - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o * k + dy, 14, size.y - 4))
+			lp = Vector2(clampf(p.x + n.x * o * k - tsz.x / 2, 4, _area.x - tsz.x - 4), clampf(p.y + n.y * o * k + dy, 14, _area.y - 4))
 		placed.append(Vector3(lp.x + tsz.x / 2, lp.y, tsz.x))
 		var anchor := lp + Vector2(tsz.x / 2, -4)
 		if anchor.distance_to(p) > 26:
@@ -783,9 +936,11 @@ func _draw_labels(T, font, night: bool) -> void:
 
 
 func _car_scale(is_mine: bool) -> float:
-	# 화면 크기에 맞춘 차 크기, 추적 카메라로 확대하면 조금 더 커진다
-	var base := clampf(minf(size.x, size.y) / 520.0, 0.9, 2.0)
-	return base * (1.15 if is_mine else 0.98) * clampf(sqrt(_cam_zoom), 1.0, 1.7)
+	# 수정 19: 차 크기 = max(전체 화면용 최소 크기, 실제 비율 크기)
+	# 최소 = 화면 짧은 변 기준 (고해상도 폰 상한 없음), 실제 = 트랙 폭(약 13m) 대비 차 길이 → 확대하면 차도 같이 커짐
+	var base := maxf(minf(size.x, size.y) / 520.0, 0.9)
+	var real: float = TRACK_W * _s / (TRACK_REAL_M * CAR_U_PER_M)
+	return maxf(base, real) * (1.15 if is_mine else 0.98)
 
 
 ## WEC: 내가 플레이하는 클래스만 자세한 모델, 다른 클래스는 간단한 모델 (그리기 부하 ↓)
@@ -800,7 +955,8 @@ func _focus_cls() -> String:
 
 func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	var sc := _car_scale(c.mine)
-	if _fcls != "" and c.cls != _fcls and not c.mine:
+	var tex: Texture2D = _car_tex(c)
+	if tex == null and _fcls != "" and c.cls != _fcls and not c.mine:
 		_draw_car_simple(pos, ang, c, sc * 0.92, night)
 		return
 	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
@@ -808,13 +964,15 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 		var beam := Color(1, 0.97, 0.78, 0.38)
 		var fade := Color(1, 0.97, 0.78, 0.0)
 		_ci.draw_polygon(PackedVector2Array([Vector2(4, -2), Vector2(28, -9), Vector2(28, 9), Vector2(4, 2)]), PackedColorArray([beam, fade, fade, beam]))
+	if tex != null:
+		_draw_car_tex(c, tex)
+		_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
+		return
 	# 그림자
 	_ci.draw_colored_polygon(_car_body(Vector2(0.8, 1.1)), Color(0, 0, 0, 0.35))
-	# 내 차 강조 링 · DRS 오라
+	# 내 차: 얇은 테두리 (DRS 는 리어 윙 색으로 — 큰 원 대신)
 	if c.mine:
-		_ellipse(Vector2.ZERO, Vector2(9.5, 6.2), AMBER, 2.0 if c.slot == sel_slot else 1.3)
-	if c.drs and not sim.sc:
-		_ellipse(Vector2(-1, 0), Vector2(10.5, 6.8), GREEN, 1.4)
+		_mine_outline(Rect2(-7.2, -5.0, 14.4, 10.0), c)
 	if c.cls != "F1":
 		_draw_wec_body(c)
 		_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
@@ -831,7 +989,7 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_ci.draw_rect(Rect2(-4.6, -4.7, 1.2, 1.3), tcol)
 	_ci.draw_rect(Rect2(-4.6, 3.4, 1.2, 1.3), tcol)
 	# 리어·프런트 윙
-	_ci.draw_rect(Rect2(-7.2, -4.2, 1.6, 8.4), c.rim)
+	_ci.draw_rect(Rect2(-7.2, -4.2, 1.6, 8.4), GREEN if c.drs and not sim.sc else c.rim)
 	_ci.draw_rect(Rect2(5.8, -4.4, 1.4, 8.8), c.rim)
 	# 바디 (노즈 + 사이드포드)
 	_ci.draw_colored_polygon(_car_body(Vector2.ZERO), c.color)
@@ -842,10 +1000,50 @@ func _draw_car(pos: Vector2, ang: float, c, night: bool) -> void:
 	_ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
+## 그림 차 뒷바퀴 타이어 색 점 위치 (차 길이 L·폭 W 대비 비율, 앞 = +x)
+const TYRE_DOT := {
+	"F1": Vector2(-0.33, 0.42),
+	"HY": Vector2(-0.31, 0.39),
+}
+
+
+## 팀 그림 (수정 18, data/car_art.json): 실제 길이 비율로 그림자 → 그림 → 타이어 색 점 → DRS 열리면 리어 윙 초록 → 내 차 테두리
+func _draw_car_tex(c, tex: Texture2D) -> void:
+	var L: float = CAR_U_PER_M * float(DB.car_art["len_m"].get(c.cls, 5.0))
+	var W: float = L * tex.get_height() / tex.get_width()
+	var r := Rect2(-L * 0.5, -W * 0.5, L, W)
+	_ci.draw_texture_rect(tex, Rect2(r.position + Vector2(0.8, 1.1), r.size), false, Color(0, 0, 0, 0.35))
+	_ci.draw_texture_rect(tex, r, false)
+	var dot: Vector2 = TYRE_DOT.get(c.cls, Vector2(-0.33, 0.42))
+	var tcol: Color = Color(sim.TYRE_HEX.get(c.comp, "#e6edf3"))
+	if sim.night:
+		tcol = tcol.lightened(0.2)
+	var dr: float = L * 0.035
+	_ci.draw_circle(Vector2(L * dot.x, -W * dot.y), dr, tcol)
+	_ci.draw_circle(Vector2(L * dot.x, W * dot.y), dr, tcol)
+	if c.drs and not sim.sc:
+		_ci.draw_rect(Rect2(r.position.x, -W * 0.4, L * 0.07, W * 0.8), Color(GREEN, 0.9))
+	if c.mine:
+		_mine_outline(r, c)
+
+
+func _mine_outline(r: Rect2, c) -> void:
+	_round_rect_line(r.grow(0.7), 2.2, AMBER, 1.0 if c.slot == sel_slot else 0.6)
+
+
+## 팀 그림 찾기 (클래스·팀마다 한 번만 불러옴, 없으면 null → 코드 그림)
+func _car_tex(c) -> Texture2D:
+	var k: String = c.cls + "|" + c.team
+	if not _tex.has(k):
+		var f: String = DB.car_art.get(c.cls, {}).get(c.team, "")
+		_tex[k] = load("res://assets/cars/%s.png" % f) if f != "" else null
+	return _tex[k]
+
+
 ## 간단 모델: 클래스별 실루엣 크기만 다른 둥근 사각형 + 앞쪽 표시 (그리기 3번)
 func _draw_car_simple(pos: Vector2, ang: float, c, sc: float, night: bool) -> void:
 	_ci.draw_set_transform(pos, ang, Vector2(sc, sc))
-	var sz: Vector2 = {"HY": Vector2(13.0, 8.0), "P2": Vector2(12.0, 7.2), "GT": Vector2(10.2, 6.6)}.get(c.cls, Vector2(11.0, 7.0))
+	var sz: Vector2 = {"HY": Vector2(13.0, 8.0), "P2": Vector2(12.0, 7.2), "P3": Vector2(11.2, 6.8), "GT": Vector2(10.2, 6.6)}.get(c.cls, Vector2(11.0, 7.0))
 	var r := Rect2(-sz.x * 0.5, -sz.y * 0.5, sz.x, sz.y)
 	_ci.draw_rect(r, c.color.darkened(0.15))
 	_ci.draw_rect(Rect2(r.position.x + sz.x * 0.62, -sz.y * 0.3, sz.x * 0.2, sz.y * 0.6), Color(1, 1, 1, 0.55) if night else Color("#0f172a"))
@@ -854,8 +1052,19 @@ func _draw_car_simple(pos: Vector2, ang: float, c, sc: float, night: bool) -> vo
 
 
 ## WEC 하이퍼카(풀 카울 + 눈물방울 캐노피 + 샤크핀) / LMP2(좁은 프로토타입 + 센터 핀 + 큰 리어 윙) / LMGT3(박스형 쿠페 + 스포일러)
+## LMP3(작고 짧은 프로토타입 + 높은 롤후프 + 앞바퀴 펜더가 도드라진 모양)
 func _draw_wec_body(c) -> void:
 	var tcol: Color = Color(sim.TYRE_HEX[c.comp])
+	if c.cls == "P3":
+		var body3 := PackedVector2Array([Vector2(6.0, 0), Vector2(4.6, -2.0), Vector2(3.2, -3.4), Vector2(1.6, -3.4), Vector2(0.6, -2.4), Vector2(-4.6, -3.0), Vector2(-5.6, -1.8), Vector2(-5.6, 1.8), Vector2(-4.6, 3.0), Vector2(0.6, 2.4), Vector2(1.6, 3.4), Vector2(3.2, 3.4), Vector2(4.6, 2.0)])
+		_ci.draw_colored_polygon(body3, c.color)
+		_ci.draw_polyline(body3 + PackedVector2Array([body3[0]]), c.rim, 0.5)
+		_fill_ellipse(Vector2(0.2, 0), Vector2(1.9, 1.3), Color("#0f172a")) # 오픈 콕핏
+		_ci.draw_rect(Rect2(-1.6, -0.6, 1.0, 1.2), c.rim) # 롤후프
+		_ci.draw_rect(Rect2(-6.4, -3.4, 1.2, 6.8), Color("#111827")) # 리어 윙
+		_ci.draw_rect(Rect2(2.0, -3.9, 1.4, 0.5), tcol)
+		_ci.draw_rect(Rect2(2.0, 3.4, 1.4, 0.5), tcol)
+		return
 	if c.cls == "P2":
 		# 앞이 뾰족한 프로토타입: 노즈 → 넓은 사이드 → 좁은 꼬리
 		var body := PackedVector2Array([Vector2(7.2, 0), Vector2(5.0, -2.6), Vector2(1.0, -3.9), Vector2(-5.2, -3.6), Vector2(-6.6, -2.2), Vector2(-6.6, 2.2), Vector2(-5.2, 3.6), Vector2(1.0, 3.9), Vector2(5.0, 2.6)])
@@ -916,14 +1125,6 @@ func _car_body(o: Vector2) -> PackedVector2Array:
 	return out
 
 
-func _ellipse(center: Vector2, r: Vector2, col: Color, width: float) -> void:
-	var pts := PackedVector2Array()
-	for k in 25:
-		var a := TAU * k / 24.0
-		pts.append(center + Vector2(cos(a) * r.x, sin(a) * r.y))
-	_ci.draw_polyline(pts, col, width, true)
-
-
 func _fill_ellipse(center: Vector2, r: Vector2, col: Color) -> void:
 	var pts := PackedVector2Array()
 	for k in 16:
@@ -943,6 +1144,24 @@ func _draw_spray(p: Vector2, ang: float, wet: float) -> void:
 	var mist := Color(0.85, 0.9, 1.0, 0.22 * wet + 0.08)
 	var clear := Color(0.85, 0.9, 1.0, 0.0)
 	_ci.draw_polygon(PackedVector2Array([base + side * 2.0, base + back * ln + side * spread, base + back * ln - side * spread, base - side * 2.0]), PackedColorArray([mist, clear, clear, mist]))
+
+
+## 확대 추적 때만 화면 안 다른 차 위에 짧은 이름표 표시
+func _draw_other_labels(font) -> void:
+	var sc: float = _car_scale(false)
+	if sc < OTHER_LABEL_SCALE:
+		return
+	var vis := Rect2(Vector2.ZERO, size).grow(40.0)
+	for c in sim.cars:
+		if c.mine or not _smooth.has(c.id):
+			continue
+		var q: Vector2 = _X(_smooth[c.id]["p"])
+		if not vis.has_point(q):
+			continue
+		var lp: Vector2 = q + Vector2(11, -9) * sc
+		var code: String = str(c.code)
+		_ci.draw_string_outline(font, lp, code, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(0, 0, 0, 0.7))
+		_ci.draw_string(font, lp, code, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, K.DIM)
 
 
 func _draw_my_labels(font) -> void:
@@ -975,6 +1194,43 @@ func _draw_my_labels(font) -> void:
 			_ci.draw_rect(box, Color(0.08, 0.1, 0.13, 0.88 * a))
 			_ci.draw_rect(box, Color(AMBER, 0.8 * a), false, 1.5)
 			_ci.draw_string(font, bp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, a))
+
+
+## 박스 시 복귀 자리: 복귀 예측의 앞차·뒤차 사이를 시간 간격 비율로 나눈 트랙 위 점
+func _draw_ghost(font) -> void:
+	var mc: Array = sim.my_cars()
+	if sel_slot >= mc.size():
+		return
+	var c = mc[sel_slot]
+	if sim.is_pitting(c) or not _smooth.has(c.id):
+		return
+	var pr: Variant = sim.predict_pit(c)
+	if pr == null:
+		return
+	var T = sim.T
+	var v: float = T.L / maxf(30.0, c.last_lap_t if c.last_lap_t > 0.0 else 90.0) # 트랙 거리/초
+	var d: float
+	var ah = pr["ahead"]
+	var bh = pr["behind"]
+	var da: Variant = _smooth.get(ah[0].id, {}).get("d") if ah != null else null # 피트레인 차는 트랙 거리 없음
+	var db: Variant = _smooth.get(bh[0].id, {}).get("d") if bh != null else null
+	if da != null and db != null:
+		var back: float = fposmod(float(da) - float(db), T.L)
+		d = float(da) - back * float(ah[1]) / maxf(0.01, float(ah[1]) - float(bh[1]))
+	elif da != null:
+		d = float(da) - float(ah[1]) * v
+	elif db != null:
+		d = float(db) - float(bh[1]) * v
+	else:
+		return
+	d = fposmod(d, T.L)
+	var q := _X(T.point_at_dist(d))
+	var r := 9.0 * _car_scale(true)
+	_ci.draw_circle(q, r, Color(GREEN, 0.25))
+	_ci.draw_arc(q, r, 0, TAU, 28, Color(GREEN, 0.9), 2.0, true)
+	var t := "박스 시 P%d" % int(pr["pos"])
+	_ci.draw_string_outline(font, q + Vector2(r + 4, 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 4, Color(0, 0, 0, 0.7))
+	_ci.draw_string(font, q + Vector2(r + 4, 5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, GREEN)
 
 
 func _draw_safety_car(font) -> void:
@@ -1217,3 +1473,24 @@ func _draw_events(font) -> void:
 		var wt: String = "🏆  우승!" if _win_rank == 1 else "🍾  포디움 P%d!" % _win_rank
 		var col: Color = Color("#fbbf24") if _win_rank == 1 else Color.WHITE
 		_big_text(font, wt, size.y * 0.42, Color(col, fa), Color(0.05, 0.06, 0.08, 0.85 * fa), int(22 + 14 * pop))
+
+
+## 정적 그림 다시 그릴 때를 정하는 노면 키 (섹터별 라인·라인 밖을 0.05 단위로)
+func _wx_key() -> String:
+	if sim.wet <= 0.05 or sim.sec_wet.size() != sim.NS:
+		return "d"
+	var k := ""
+	for sx in sim.NS:
+		k += "%d.%d," % [int(sim.sec_w(sx) * 20.0), int(float(sim.off_wet[sx]) * 20.0)]
+	return k
+
+
+## 섹터 sx 구간의 트랙 점 (화면 좌표, 다음 섹터 첫 점까지 이어서 틈 없게)
+func _sec_poly(sx: int) -> PackedVector2Array:
+	var T = sim.T
+	var out := PackedVector2Array()
+	var a: int = int(T.sec_idx[sx])
+	var b: int = int(T.sec_idx[sx + 1])
+	for j in range(a, b + 1):
+		out.append(_X(T.pts[j % T.m]))
+	return out

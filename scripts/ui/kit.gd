@@ -193,6 +193,8 @@ static func card(parent: Control, title: String = "", accent: Color = LINE) -> V
 ## 토글 버튼 묶음. items: [[값, 글자], …]. cb(값) 호출.
 static func seg(parent: Control, items: Array, current: String, cb: Callable, fsize := 14, enabled := true) -> Array:
 	var row = hbox(4)
+	# 부모가 가운데 정렬 상자여도 폭을 꽉 채운다 (안 그러면 버튼이 최소 폭으로 줄어 글자가 한 자씩 꺾여 빈 막대처럼 보임)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(row)
 	var grp = ButtonGroup.new()
 	var out: Array = []
@@ -279,8 +281,39 @@ static func scroll_v(parent: Control) -> VBoxContainer:
 	drag_scroll(sc)
 	var v = vbox(10)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 내용이 화면보다 짧으면 위에 몰리지 않고 세로 가운데에 (길면 평소처럼 스크롤)
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	sc.add_child(v)
 	return v
+
+
+## 본문을 다시 만든 뒤 한 프레임 늦게 글 상자 높이를 다시 잰다.
+## 줄바꿈 글(Label·RichTextLabel)은 너비를 알기 전에 높이가 잡혀 스크롤 영역이 짧아질 수 있다 (폴드 펼침 화면 등)
+static func relayout_later(node: Control) -> void:
+	if node == null or not node.is_inside_tree():
+		return
+	var cb: Callable = _relayout.bind(node)
+	if not node.get_tree().process_frame.is_connected(cb):
+		node.get_tree().process_frame.connect(cb, CONNECT_ONE_SHOT)
+
+
+static func _relayout(node: Control) -> void:
+	if not is_instance_valid(node) or not node.is_inside_tree():
+		return
+	_remeasure(node)
+	var p = node.get_parent()
+	if p is Container:
+		p.queue_sort()
+
+
+static func _remeasure(n: Node) -> void:
+	for ch in n.get_children():
+		_remeasure(ch)
+	if n is Control:
+		n.update_minimum_size()
+	if n is Container:
+		n.queue_sort()
 
 
 ## "?" 도움말 버튼 (누르면 설명 창)

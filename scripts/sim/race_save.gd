@@ -6,9 +6,10 @@ extends RefCounted
 const RaceSimS = preload("res://scripts/sim/race_sim.gd")
 const CarS = preload("res://scripts/sim/car.gd")
 const DB = preload("res://scripts/data/game_db.gd")
+const BLog = preload("res://scripts/sim/blog.gd")
 const PATH := "user://race_resume.bin"
 const VER := 1
-const SKIP := ["T", "CIRC", "rng", "cars", "_cuts_cache", "_oc", "_oc_clock"]
+const SKIP := ["T", "CIRC", "rng", "wx_rng", "cars", "_oc", "_oc_clock"]
 
 
 static func _vars(o: Object) -> Array:
@@ -30,11 +31,22 @@ static func _enc(v: Variant) -> Variant:
 			d[k] = _enc(v[k])
 		return d
 	if v is Array:
+		if _flat(v):
+			return v.duplicate() # 숫자·글자만 든 배열(섹터 통과 시각 등)은 통째로
 		var a: Array = []
 		for x in v:
 			a.append(_enc(x))
 		return a
 	return v
+
+
+## 배열 안에 객체·딕셔너리·배열이 없으면 true (원소마다 재귀할 필요 없음)
+static func _flat(v: Array) -> bool:
+	for x in v:
+		var ty: int = typeof(x)
+		if ty == TYPE_OBJECT or ty == TYPE_DICTIONARY or ty == TYPE_ARRAY:
+			return false
+	return true
 
 
 static func _dec(v: Variant, by_id: Dictionary) -> Variant:
@@ -46,6 +58,8 @@ static func _dec(v: Variant, by_id: Dictionary) -> Variant:
 			d[k] = _dec(v[k], by_id)
 		return d
 	if v is Array:
+		if _flat(v):
+			return v.duplicate()
 		var a: Array = []
 		for x in v:
 			a.append(_dec(x, by_id))
@@ -60,12 +74,13 @@ static func pack(sim) -> Dictionary:
 		if not SKIP.has(n):
 			s[n] = _enc(sim.get(n))
 	var cs: Array = []
+	var car_vars: Array = _vars(sim.cars[0]) if not sim.cars.is_empty() else [] # 차는 모두 같은 스크립트 → 변수 목록은 한 번만
 	for c in sim.cars:
 		var d := {}
-		for n in _vars(c):
+		for n in car_vars:
 			d[n] = _enc(c.get(n))
 		cs.append(d)
-	return {"sim": s, "cars": cs, "rng_seed": sim.rng.seed, "rng_state": sim.rng.state}
+	return {"sim": s, "cars": cs, "rng_seed": sim.rng.seed, "rng_state": sim.rng.state, "wx_seed": sim.wx_rng.seed, "wx_state": sim.wx_rng.state}
 
 
 ## 저장용 딕셔너리 → 새 sim
@@ -89,8 +104,16 @@ static func unpack(data: Dictionary):
 	sim.cars = cars
 	for n in s:
 		sim.set(n, _dec(s[n], by_id))
+	# 예전 버그(주말 연습에서 WEC 차에 F1 식 연료 탑재)로 탱크보다 많이 실린 저장 → 탱크로 맞춘다
+	if sim.is_wec():
+		for c in sim.cars:
+			c.fuel = minf(float(c.fuel), sim.TANK)
 	sim.rng.seed = int(data["rng_seed"])
 	sim.rng.state = int(data["rng_state"])
+	if data.has("wx_seed"):
+		sim.wx_rng.seed = int(data["wx_seed"])
+		sim.wx_rng.state = int(data["wx_state"])
+	sim.wx_fix() # 예전 저장: 섹터 노면이 없으면 전체 노면으로 채움
 	return sim
 
 
@@ -111,6 +134,7 @@ static func save(sim, meta: Dictionary, extra_sim = null) -> void:
 static func load_save() -> Dictionary:
 	if not has_save():
 		return {}
+	BLog.add("레이스 이어하기 불러옴")
 	var f = FileAccess.open(PATH, FileAccess.READ)
 	if f == null:
 		return {}

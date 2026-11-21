@@ -10,6 +10,8 @@ const HT = preload("res://scripts/ui/help_text.gd")
 const RS = preload("res://scripts/sim/race_sim.gd")
 const WK = preload("res://scripts/sim/weekend.gd")
 const RaceViewS = preload("res://scripts/ui/race_view.gd")
+const HUB = preload("res://scripts/ui/data_hub.gd")
+const TraitsS = preload("res://scripts/sim/traits.gd")
 
 var sim
 var wk
@@ -26,9 +28,14 @@ var _side: VBoxContainer
 var _live: RichTextLabel
 var _secs: HBoxContainer
 var p_comp := "M"            # 연습 주행 타이어
-var q_speed := 30            # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤
+var q_speed := 4             # 예선 진행 속도 (실제 1초 = 세션 N초). 0 = 멈춤. 레이스와 같은 기준: 1× = 4초 (기본 1×)
 var q_comps: Array = ["S", "S"]
 var q_pushes: Array = ["std", "std"]
+var p_set := "auto"          # 연습 세트: auto(쓴 것 먼저) / new / used
+var q_sets: Array = ["auto", "auto"]  # 예선 세트: auto(새 것 먼저) / new / used
+var p_idx := -1              # 연습 '쓴 세트'에서 직접 고른 세트 번호 (used_sets 안, -1 = 가장 덜 쓴 것)
+var q_idx: Array = [-1, -1]  # 예선 같은 것 (결승 출발은 wk.start_idx)
+const SET_ITEMS := [["auto", "자동"], ["new", "새 세트"], ["used", "쓴 세트"]]
 var _q_ver := -1
 var _q_head: RichTextLabel
 var _q_car_txt: Array = []
@@ -166,7 +173,7 @@ func _trait(c) -> String:
 		cons.append("뚜렷한 약점 없음")
 	return "[b]%s[/b] · %s\n속도 %d · 일관 %d · 타이어 %d · 공격 %d · 방어 %d · 우천 %d\n[color=#22c55e]강점[/color] %s · [color=#ef4444]약점[/color] %s" % [
 		c.name, style, int(d["speed"] * 100), int(d["cons"] * 100), int(d["tyreMgmt"] * 100), int(d["aggr"] * 100), int(d["def"] * 100), int(d["wet"] * 100),
-		" · ".join(pros), " · ".join(cons)]
+		" · ".join(pros), " · ".join(cons)] + ("\n[color=#ffc53d]◆ 특성: %s[/color]" % TraitsS.label(c.traits) if not c.traits.is_empty() else "")
 
 
 func _wing_desc(w: float) -> String:
@@ -184,7 +191,7 @@ func _wing_desc(w: float) -> String:
 func _sets_txt(slot: int) -> String:
 	var s: Dictionary = wk.sets[slot]
 	var u: Dictionary = wk.used_sets[slot]
-	return "주말 타이어 (연습·예선·결승 공용) — 새 [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d  /  쓴 S %d · M %d · H %d" % [s["S"], s["M"], s["H"], u["S"], u["M"], u["H"]]
+	return "주말 타이어 (연습·예선·결승 공용) — 새 [color=#ef4444]S[/color] %d · [color=#facc15]M[/color] %d · H %d  /  쓴 S %d · M %d · H %d" % [s["S"], s["M"], s["H"], u["S"].size(), u["M"].size(), u["H"].size()]
 
 
 # ── 연습 ──
@@ -198,12 +205,25 @@ func _render_practice() -> void:
 	tr.text = _trait(c)
 	card.add_child(tr)
 	var ed: bool = anim == null
-	_setup_slider(card, c, "wing", ed)
-	card.add_child(K.label("타이어 공기압", 14, K.DIM))
-	K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, anim == null)
-	card.add_child(K.label("연료 탑재", 14, K.DIM))
-	K.seg(card, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, anim == null)
-	# 세부 셋업
+	# ── 버튼으로 고르는 것끼리 ──
+	_section(card, "공기압" if sim.is_wec() else "공기압 · 연료")
+	var bg = GridContainer.new()
+	bg.columns = 2 if get_viewport_rect().size.x >= 900.0 else 1
+	bg.add_theme_constant_override("h_separation", 10)
+	bg.add_theme_constant_override("v_separation", 6)
+	card.add_child(bg)
+	var pv = K.vbox(4)
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bg.add_child(pv)
+	_psi_block(pv, c, "q", ed)
+	if not sim.is_wec(): # WEC 는 급유 레이스 — 출발 연료는 늘 가득, 연료량은 레이스 중 피트에서 정한다
+		var fv = K.vbox(4)
+		fv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bg.add_child(fv)
+		fv.add_child(K.label("연료 탑재", 14, K.DIM))
+		K.seg(fv, [["light", "가볍게 (-3%)"], ["std", "표준 (+2%)"], ["heavy", "넉넉하게 (+6%)"]], c.fuel_load, _on_fuel, 14, ed)
+	# ── 슬라이더끼리 ──
+	_section(card, "셋업 슬라이더")
 	var ct: Dictionary = sim.circ_traits()
 	var ag: float = clampf((c.aggr - 0.6) / 0.15, -1.0, 1.0)
 	var hint := []
@@ -211,15 +231,15 @@ func _render_practice() -> void:
 	hint.append("코너 탈출 트랙션이 중요해요" if ct["trac"] > 0.3 else ("긴 직선·고속 구간 위주" if ct["trac"] < -0.3 else "트랙션 비중 보통"))
 	hint.append("%s는 브레이킹이 공격적이에요" % c.name if ag > 0.3 else ("%s는 부드럽게 브레이킹해요" % c.name if ag < -0.3 else "%s의 브레이킹은 무난해요" % c.name))
 	var dh = K.rtl(13)
-	dh.text = "[color=#8b98a5]세부 셋업 · 서킷: %s[/color]" % " · ".join(hint)
+	dh.text = "[color=#8b98a5]서킷: %s[/color]" % " · ".join(hint)
 	card.add_child(dh)
-	for key in ["susp", "bbias", "diff"]:
+	for key in ["wing", "susp", "bbias", "diff"]:
 		_setup_slider(card, c, key, ed)
 	var eb = K.btn("🔧 엔지니어 추천값으로 맞추기 (%s)" % _eng_grade(), 14, _on_engineer)
 	eb.disabled = not ed
 	card.add_child(eb)
 	var dx = K.rtl(12)
-	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 정답은 띠 안 어딘가에 있어요 — 가운데가 정답은 아니에요. 테스트를 달릴수록 띠가 좁아지고, 드라이버 피드백이 방향을 알려줘요. 항목마다 딱 맞으면 랩당 약 0.09초 빨라져요. 서스펜션을 단단하게·디퍼렌셜을 잠글수록 타이어 마모가 늘고, 브레이크를 뒤로 보낼수록 실수가 늘어요.[/color]"
+	dx.text = "[color=#8b98a5]노란 띠 = 엔지니어 추천 범위 (엔지니어가 좋을수록 좁아요). 엔지니어 추천은 결승까지 생각한 '안전한 타협안'이라 예선만 보면 조금 느릴 수 있고, 등급이 낮으면 틀린 곳을 가리킬 때도 있어요(테스트를 달릴수록 바로잡혀요). 세부 셋업은 정답 하나가 아니라 타협이에요 — 슬라이더 아래 숫자가 고속·저속·연석·브레이킹 중 어디서 얻고 잃는지 보여줘요(엔지니어 계산이라 등급만큼 부정확). 서킷마다 맞는 곳이 다르고, 단단하게·잠글수록 빠를 수 있지만 타이어 마모가 늘어 결승에서 아파요. 드라이버마다 취향이 있어서 취향과 멀면 속도는 같아도 실수가 늘어요(드라이버가 말해줘요). 공기압을 높이면 서스펜션도 더 단단해진 것처럼 느껴져요. 드라이버 피드백은 늘 맞는 방향을 알려줘요.[/color]"
 	card.add_child(dx)
 	var left: int = wk.practice_left[sel]
 	# 연습 타이어: 쓴 세트가 있으면 그걸로, 없으면 새 세트를 하나 열어요
@@ -227,13 +247,14 @@ func _render_practice() -> void:
 	var ps: Dictionary = wk.sets[sel]
 	var pu: Dictionary = wk.used_sets[sel]
 	var pitems: Array = []
-	for k in ["S", "M", "H"]:
-		if sim.is_wec() and not sim.wec_comps(c.cls).has(k):
-			continue
-		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), int(pu[k])]])
-	if not wk.has_any(sel, p_comp):
-		p_comp = "M"
+	for k in wk.dry_comps(c):
+		pitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(ps[k]), (pu[k] as Array).size()]])
+	if not wk.has_any(sel, p_comp) and not pitems.is_empty():
+		p_comp = pitems[0][0]
 	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
+	p_set = _set_seg(card, sel, p_comp, "쓴 것 먼저", p_set, _on_pset, anim == null)
+	if p_set == "used":
+		p_idx = _used_pick(card, sel, p_comp, p_idx, _on_pidx, "", anim == null)
 	var h = K.hbox(6)
 	card.add_child(h)
 	h.add_child(K.btn("셋업 테스트 (3랩)", 15, func(): _run_practice("short")))
@@ -241,16 +262,13 @@ func _render_practice() -> void:
 	h.get_child(0).disabled = anim != null or left < 3
 	h.get_child(1).disabled = anim != null or left < 5
 	var info = K.rtl(14)
-	info.text = "남은 연습 [b]%d랩[/b] · %s\n마모율 추정 (오차 ±%d%%%s): [color=#ef4444]S[/color] %s · [color=#facc15]M[/color] %s · H %s" % [
-		left, _sets_txt(sel), int(round(float(wk.wear_est["err"]) * 100.0)), (", 롱런 %d회" % int(wk.wear_est["runs"])) if int(wk.wear_est["runs"]) > 0 else ", 미측정",
-		wk.est_range_text("S"), wk.est_range_text("M"), wk.est_range_text("H")]
+	var wl: PackedStringArray = []
+	for k in wk.dry_comps(c):
+		var rn: int = int(wk.wear_est["runs"].get(k, 0))
+		wl.append("[color=%s]%s[/color] %s [color=#8b98a5](±%d%%%s)[/color]" % [RS.TYRE_HEX[k], k, wk.est_range_text(k), int(round(wk.wear_err(k) * 100.0)), (" · 롱런 %d회" % rn) if rn > 0 else " · 미측정"])
+	info.text = "남은 연습 [b]%d랩[/b] · %s\n마모율 추정 — 롱런을 달린 컴파운드만 정확해져요 (결승 전략 계획이 이 값을 써요)\n%s\n[color=#8b98a5]셋업 테스트 = 예선 쪽 정보(윙·공기압 범위가 빨리 좁혀짐, 예선 환산 기록) · 롱런 = 결승 쪽 정보(마모·세부 셋업 범위, 연료 보정 평균)[/color]" % [left, _sets_txt(sel), "  ·  ".join(wl)]
 	card.add_child(info)
-	if anim != null:
-		_live.text = "[b]%s[/b] 주행 중…" % c.name
-	elif wk.last_feedback != "":
-		_live.text = "[color=#ffc53d]“%s”[/color]" % wk.last_feedback
-	else:
-		_live.text = "[color=#8b98a5]롱런을 하면 타이어 마모 추정 오차가 절반으로 줄어요 (35%→17%→9%).[/color]"
+	_update_live_feedback()
 	# 기록
 	if not wk.practice_runs.is_empty():
 		var tc = K.card(_side, "연습 기록")
@@ -260,10 +278,31 @@ func _render_practice() -> void:
 		var t := ""
 		for r in wk.practice_runs:
 			var col := "#a855f7" if r["best"] == best else "#e6edf3"
-			t += "%s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], WK.PRESS_KO[r["press"]], r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
+			var extra: String = ("연료 보정 %s" % K.fmt_lap(r["fc_avg"])) if r["kind"] == "long" and r.has("fc_avg") else (("예선 환산 %s" % K.fmt_lap(r["q_est"])) if r.has("q_est") else "")
+			t += "%s %s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  %s  마모 %.1f%%/랩\n" % [r["code"], r["comp"], r["wing"], "%.1fpsi" % float(r.get("psi", 0.0)), r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), extra, r["wear_lap"]]
 		var rr = K.rtl(14)
 		rr.text = t
 		tc.add_child(rr)
+		# 데이터 허브: 지금 셋업 기준 섹터별 예상 시간을 가장 빠를 것 같은 차와 비교
+		var cc = _my(sel)
+		var ref = null
+		var ref_sum := INF
+		for o in sim.cars:
+			if o.mine or o.cls != cc.cls:
+				continue
+			var es: Array = sim.est_sectors(o)
+			var sm := 0.0
+			for x in es:
+				sm += float(x)
+			if sm < ref_sum:
+				ref_sum = sm
+				ref = o
+		if ref != null:
+			var hc = K.card(_side, "📊 데이터 허브 · %s vs %s (텔레메트리 예상 섹터)" % [cc.code, ref.code], K.AMBER)
+			var hr = K.rtl(14)
+			hr.text = HUB.report(sim, sim.est_sectors(cc), sim.est_sectors(ref), ref.code)
+			hc.add_child(hr)
+	_rival_card()
 	var b2 = K.hbox(6)
 	_side.add_child(b2)
 	b2.add_child(K.btn("⚡ 엔지니어에게 맡기기 (자동)", 15, _on_auto_practice))
@@ -271,17 +310,112 @@ func _render_practice() -> void:
 	_side.add_child(K.btn("◀ 뒤로", 14, _on_back))
 
 
+## 다른 팀 연습 기록표: 숏런(한 랩)·롱런(5랩 평균) 순위. 남의 연료량은 모른다 → 숫자를 그대로 믿으면 안 됨
+func _rival_card() -> void:
+	var tc = K.card(_side, "📋 다른 팀 연습 기록 (연료량 모름)")
+	var t := ""
+	var ranks: PackedStringArray = []
+	for kind in ["s", "l"]:
+		var tb: Array = wk.practice_table(kind)
+		var rows: PackedStringArray = []
+		for i in tb.size():
+			var x: Dictionary = tb[i]
+			if x["mine"]:
+				ranks.append("%s %s %d위" % [x["code"], "숏런" if kind == "s" else "롱런", i + 1])
+			if i < 6 or x["mine"]:
+				var col: String = "#f59e0b" if x["mine"] else "#e6edf3"
+				rows.append("[color=%s]%d. %s[/color] [color=%s]%s[/color] %s" % [col, i + 1, x["code"], RS.TYRE_HEX[x["comp"]], x["comp"], K.fmt_lap(x["t"])])
+		t += "[b]%s[/b]  %s\n" % ["숏런 최고" if kind == "s" else "롱런 평균", "  ".join(rows)]
+	if not ranks.is_empty():
+		t += "[color=#f59e0b]%s[/color]\n" % " · ".join(ranks)
+	t += "[color=#8b98a5]남의 차가 연료를 얼마나 실었는지는 몰라요. 숏런에도 연료를 많이 싣고 숨기는 팀이 있어요 — 숏런은 빠른데 롱런이 처지면 예선형, 반대면 결승형 차예요.[/color]"
+	var rr = K.rtl(13)
+	rr.text = t
+	tc.add_child(rr)
+
+
 func _on_pcomp(v) -> void:
 	p_comp = v
+	p_idx = -1
 	refresh()
+
+
+func _on_pset(v) -> void:
+	p_set = v
+	refresh()
+
+
+func _on_pidx(v) -> void:
+	p_idx = int(v)
+	refresh()
+
+
+## 새 세트 / 쓴 세트 고르기 버튼 (개수 표시, 없는 쪽은 "없음"). 쓴 세트는 마모 % 를 작은 순으로
+func _set_items(slot: int, comp: String, auto_txt: String) -> Array:
+	var nn: int = int(wk.sets[slot].get(comp, 0))
+	var uu: int = wk.used_n(slot, comp)
+	var ws: Array = []
+	for st in wk.used_sets[slot].get(comp, []):
+		ws.append(float(st["w"]))
+	ws.sort()
+	var pct: PackedStringArray = []
+	for w in ws:
+		pct.append("%d%%" % int(round(w * 100.0)))
+	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 %d (%s)" % [uu, " · ".join(pct)] if uu > 0 else "쓴 세트 없음"]]
+
+
+## 쓴 세트 직접 고르기 줄 ("18% · 2회", 덜 쓴 순). cur = 고른 번호(-1 = 가장 덜 쓴 것, 그 버튼이 눌린 모양).
+## kind: "q" 예선 손해 / "start" 결승 출발 손해 한 줄, "" 없음. 돌려주는 값 = 유효한 번호(-1 그대로 둠)
+func _used_pick(card: Control, slot: int, comp: String, cur: int, cb: Callable, kind: String, enabled := true) -> int:
+	var arr: Array = wk.used_sets[slot].get(comp, [])
+	if arr.is_empty():
+		return -1
+	if cur >= arr.size():
+		cur = -1
+	var shown: int = cur if cur >= 0 else RS.least_worn(arr)
+	var order: Array = range(arr.size())
+	order.sort_custom(func(a, b): return float(arr[a]["w"]) < float(arr[b]["w"]))
+	var flow := HFlowContainer.new() # 세로 폰에서 세트가 많으면 줄바꿈
+	flow.add_theme_constant_override("h_separation", 4)
+	flow.add_theme_constant_override("v_separation", 4)
+	card.add_child(flow)
+	var grp := ButtonGroup.new()
+	for i in order:
+		var b = K.btn("%d%% · %d회" % [int(round(float(arr[i]["w"]) * 100.0)), int(arr[i]["h"])], 12)
+		b.toggle_mode = true
+		b.button_group = grp
+		b.button_pressed = i == shown
+		b.disabled = not enabled
+		b.pressed.connect(cb.bind(i))
+		flow.add_child(b)
+	var st: Dictionary = arr[shown]
+	if kind == "q":
+		card.add_child(K.label("이 세트로 어택: 예선 약 +%.2f초" % (wk.q_used_pen(comp, float(st["w"])) * sim.wsc()), 12, K.DIM))
+	elif kind == "start":
+		var hh: int = mini(3, int(st["h"]))
+		card.add_child(K.label("달군 %d회 → 랩당 +%.2f초 · 마모 %d%%에서 출발" % [int(st["h"]), RS.HEAT_PEN * float(hh), int(round(float(st["w"]) * 100.0))], 12, K.DIM))
+	return cur
+
+
+## 세트 버튼 줄: 없는 쪽은 눌리지 않게 막고, 고른 쪽이 바닥났으면 "자동"으로 되돌린다. 돌려주는 값 = 실제 선택
+func _set_seg(card: Control, slot: int, comp: String, auto_txt: String, cur: String, cb: Callable, enabled := true) -> String:
+	var nn: int = int(wk.sets[slot].get(comp, 0))
+	var uu: int = wk.used_n(slot, comp)
+	if (cur == "new" and nn <= 0) or (cur == "used" and uu <= 0):
+		cur = "auto"
+	var bs: Array = K.seg(card, _set_items(slot, comp, auto_txt), cur, cb, 13, enabled)
+	if bs.size() == 3:
+		bs[1].disabled = bs[1].disabled or nn <= 0
+		bs[2].disabled = bs[2].disabled or uu <= 0
+	return cur
 
 
 func _run_practice(kind: String) -> void:
 	if anim != null:
 		return
-	var r: Dictionary = wk.practice_run(sel, kind, p_comp)
+	var r: Dictionary = wk.practice_run(sel, kind, p_comp, p_set, p_idx if p_set == "used" else -1)
 	if r.is_empty():
-		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s 타이어가 남아 있지 않아요" % RS.TYRE_KO[p_comp])
+		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s %s타이어가 남아 있지 않아요" % [RS.TYRE_KO[p_comp], {"new": "새 ", "used": "쓴 "}.get(p_set, "")])
 		return
 	anim = {"kind": "practice", "t": 0.0, "dur": 3.5 if kind == "long" else 2.4, "car": _my(sel), "laps": 3 if kind == "long" else 2}
 	refresh()
@@ -292,6 +426,9 @@ func _render_quali() -> void:
 	var st: int = wk.Q["stage"]
 	var sub: String = ["", "P16 이하 탈락", "P11~15 결정 · 상위 10대 Q3 진출", "상위 10대 폴 포지션 결정전"][st]
 	var ttl := "%s 예선 Q%d" % [sim.CIRC["name"], st]
+	if wk.single_quali():
+		sub = "%s 예선 · 30분 단일 세션 · 탈락 없음 — 이 기록으로 그리드가 정해져요" % ("F3" if wk.fmt() == "f3" else "F2")
+		ttl = "%s 예선" % sim.CIRC["name"]
 	if sim.is_wec():
 		sub = "클래스 상위 8대 하이퍼폴 진출 · 다른 클래스는 기록순 그리드" if st == 1 else "클래스 상위 8대 폴 포지션 결정전"
 		ttl = "%s %s" % [sim.CIRC["name"], "예선" if st == 1 else "하이퍼폴"]
@@ -302,10 +439,18 @@ func _render_quali() -> void:
 	var hc = K.card(_side, "", K.RED)
 	_q_head = K.rtl(17)
 	hc.add_child(_q_head)
-	K.seg(hc, [["0", "⏸ 멈춤"], ["10", "10×"], ["30", "30×"], ["60", "60×"]], str(q_speed), _on_qspeed, 14)
+	# 배속 표시는 레이스 화면과 같은 기준 (1× = 시뮬레이션 4배)
+	K.seg(hc, [["0", "⏸ 멈춤"], ["4", "1×"], ["20", "5×"], ["40", "10×"]], str(q_speed), _on_qspeed, 14)
 	if wk.Q["stage_over"]:
 		var oc = K.card(_side, "Q%d 종료" % st, K.AMBER)
-		oc.add_child(K.label("탈락: %s" % ", ".join(wk.Q.get("cut_names", PackedStringArray())), 15, K.INK))
+		# 누가 다음 세션에 가고 누가 그리드가 정해졌는지 분명히 (내 차 둘 다 탈락이면 "전부 확정"처럼 보이던 것)
+		var nx_name: String = "하이퍼폴" if sim.is_wec() else "Q%d" % (st + 1)
+		var my_line: PackedStringArray = []
+		for c in wk.my_cars():
+			my_line.append("%s %s" % [c.code, ("[color=#22c55e]%s 진출[/color]" % nx_name) if wk._participant(c, st + 1) else "[color=#8b98a5]탈락 · 그리드 확정[/color]"])
+		var oq = K.rtl(15)
+		oq.text = "%s 진출: 상위 %d대%s\n내 차: %s\n탈락(그리드 확정): %s" % [nx_name, wk._cut_n(), (" (%s 클래스)" % wk.main_cls()) if sim.is_wec() else "", " · ".join(my_line), ", ".join(wk.Q.get("cut_names", PackedStringArray()))]
+		oc.add_child(oq)
 		var nb = K.btn("다음 세션 시작 ▶", 18, _on_next_stage)
 		oc.add_child(nb)
 	# 내 차: 차고에 있으면 타이어·강도를 골라 내보내고, 아웃랩 중이면 포기할 수 있다
@@ -323,12 +468,12 @@ func _render_quali() -> void:
 			var s: Dictionary = wk.sets[slot]
 			var u: Dictionary = wk.used_sets[slot]
 			var items: Array = []
-			var al: Array = ["S", "M", "H"]
+			var al: Array = wk.dry_comps(c)
 			if sim.is_wec():
-				al = ["M"] if st >= 2 else sim.wec_comps(c.cls)
+				al = sim.wec_comps(c.cls) # 하이퍼폴도 대회 허용 컴파운드 안에서 자유 (2026 르망: 대부분 소프트, 페라리 미디엄)
 			for k in al:
 				if wk.has_any(slot, k):
-					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), int(u[k])]])
+					items.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), (u[k] as Array).size()]])
 			if items.is_empty():
 				card.add_child(K.label("남은 타이어가 없어요", 14, K.BAD))
 				continue
@@ -339,6 +484,9 @@ func _render_quali() -> void:
 			if not have:
 				q_comps[slot] = items[0][0]
 			K.seg(card, items, q_comps[slot], _on_q_comp.bind(slot), 14)
+			q_sets[slot] = _set_seg(card, slot, q_comps[slot], "새 것 먼저", String(q_sets[slot]), _on_q_set.bind(slot))
+			if q_sets[slot] == "used":
+				q_idx[slot] = _used_pick(card, slot, q_comps[slot], int(q_idx[slot]), _on_q_idx.bind(slot), "q")
 			K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_pushes[slot], _on_q_push.bind(slot), 14)
 			var go = K.btn("피트 출발 ▶", 18, _on_q_go.bind(slot))
 			go.disabled = float(wk.Q["red_left"]) > 0.0 or float(wk.Q["t"]) > wk.q_last_dep()
@@ -352,7 +500,7 @@ func _render_quali() -> void:
 	_q_log = K.rtl(13)
 	lc.add_child(_q_log)
 	var hint = K.rtl(12)
-	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요. 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 +0.45초).[/color]" % WK.OUT_MIN
+	hint.text = "[color=#8b98a5]노면은 차들이 랩을 쌓을수록 좋아져요. 막판엔 다들 나와서 트래픽이 심해지고, 레드 플래그가 나면 어택 중이던 랩은 무효예요. 체커기 %.1f분 전까지 피트를 나가야 어택을 시작할 수 있어요(아웃랩 한 바퀴). 한 번 나갈 때마다 타이어 한 세트(새 세트가 없으면 쓴 세트 — 많이 쓴 세트일수록 느려요).[/color]" % wk.out_min()
 	_side.add_child(hint)
 	_side.add_child(K.btn("⚡ 남은 예선 자동 진행", 15, _on_auto_quali))
 	_q_live_update()
@@ -364,6 +512,18 @@ func _on_qspeed(v) -> void:
 
 func _on_q_comp(v, slot: int) -> void:
 	q_comps[slot] = v
+	q_idx[slot] = -1
+	refresh()
+
+
+func _on_q_set(v, slot: int) -> void:
+	q_sets[slot] = v
+	refresh()
+
+
+func _on_q_idx(v, slot: int) -> void:
+	q_idx[slot] = int(v)
+	refresh()
 
 
 func _on_q_push(v, slot: int) -> void:
@@ -371,11 +531,11 @@ func _on_q_push(v, slot: int) -> void:
 
 
 func _on_q_go(slot: int) -> void:
-	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot])
+	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot], q_sets[slot], int(q_idx[slot]) if q_sets[slot] == "used" else -1)
 	if err != "":
 		_live.text = "[color=#ef4444]%s[/color]" % err
 	if q_speed == 0:
-		q_speed = 30
+		q_speed = 4
 	refresh()
 
 
@@ -516,24 +676,37 @@ func _render_grid() -> void:
 	if sim.is_wec():
 		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "WEC 규정: 모든 차가 새 타이어로 출발 · 이번 대회 드라이 %s · 레이스용 새 세트는 정해진 수만큼 (더블 스틴트가 기본)" % "·".join(PackedStringArray(sim.wec_comps(wk.main_cls()))))
 	else:
-		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요.")
+		_title("%s 스타팅 그리드 확정" % sim.CIRC["name"], ("파크 페르메: 윙은 예선 셋업으로 고정. 출발 타이어는 남은 할당 안에서 자유롭게 고를 수 있어요." if wk.single_quali() else "파크 페르메: 윙은 예선 셋업으로 고정. Q3 진출 차는 그 세션 타이어로 출발하고, 나머지는 출발 타이어를 고를 수 있어요."))
 	for c in wk.my_cars():
 		var card = K.card(_side, "#%d %s · 그리드 P%d" % [c.slot + 1, c.name, (sim.class_pos(c) if false else c.grid + 1)], K.AMBER)
 		var s: Dictionary = wk.sets[c.slot]
 		var info = K.rtl(14)
 		info.text = "윙 W%.1f 고정 · %s" % [c.wing, _sets_txt(c.slot)]
 		card.add_child(info)
-		card.add_child(K.label("출발 타이어" + (" (Q3 타이어 고정)" if c.q3_locked else " (자유 선택 · 새 세트 1개 사용)"), 14, K.DIM))
+		card.add_child(K.label("출발 타이어" + (" (Q3 타이어 고정)" if c.q3_locked else " (자유 선택)"), 14, K.DIM))
 		var slot: int = c.slot
-		var sitems: Array = [["S", "소프트 (새 %d)" % s["S"]], ["M", "미디엄 (새 %d)" % s["M"]], ["H", "하드 (새 %d)" % s["H"]]]
+		var sitems: Array = []
+		for k in wk.dry_comps(c):
+			sitems.append([k, "%s (새 %d·쓴 %d)" % [RS.TYRE_KO[k], int(s[k]), wk.used_n(c.slot, k)]])
 		if sim.is_wec():
 			var sal: Array = sim.wec_comps(c.cls)
 			sitems = []
+			# 출발 노면 온도로 컴파운드마다 창 안/밖 (첫 타이어로 달릴 구간 가운데)
+			var st_t: float = sim.run_temp(RS.STINT * maxi(1, c.tyre_every))
 			for k in sal:
-				sitems.append([k, "%s (새 세트)" % RS.TYRE_KO[k]])
+				var wo: float = sim.win_off(c.cls, k, st_t)
+				var wtx: String = "" if sal.size() < 2 else (" · 창 안" if wo == 0.0 else (" · 뜨거움 +%d°" % int(ceil(wo)) if wo > 0.0 else " · 차가움 %d°" % int(floor(wo))))
+				sitems.append([k, "%s (새 세트%s)" % [RS.TYRE_KO[k], wtx]])
+			if sal.size() > 1:
+				card.add_child(K.label("출발 노면 약 %d°C (첫 타이어 구간)" % int(round(st_t)), 13, K.DIM))
 		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
-		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
-		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
+		if not sim.is_wec() and not c.q3_locked and RS.SLICK.has(c.comp):
+			wk.start_pref[slot] = _set_seg(card, slot, c.comp, "새 것 먼저", String(wk.start_pref[slot]), _on_start_set.bind(slot))
+			if wk.start_pref[slot] == "used":
+				wk.start_idx[slot] = _used_pick(card, slot, c.comp, int(wk.start_idx[slot]), _on_start_idx.bind(slot), "start")
+			else:
+				wk.start_idx[slot] = -1
+		_psi_block(card, c, "race", true)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):
 			_plan_editor(card, c)
 	_render_q_table()
@@ -552,14 +725,56 @@ func _on_wing(v: float, wl) -> void:
 	wl.text = "윙 각도 [b]W %.1f[/b] · %s" % [v, _wing_desc(v)]
 
 
-func _on_press(v, slot: int) -> void:
-	wk.set_press(slot, v)
-	refresh()
+## 타이어 공기압: 넣을 때(차가운) 값 슬라이더 + −/+ (0.5 psi). 위 띠 = 엔지니어 추천, 아래 = 달리면 몇까지 오르는지
+## kind: "q" 연습·예선 화면 / "race" 결승 출발 화면
+func _psi_block(parent: Control, c, kind: String, ed: bool) -> void:
+	var lab = K.rtl(14)
+	lab.text = _psi_text(c, kind)
+	parent.add_child(lab)
+	var lo: float = sim.psi_min
+	var span: float = RS.PSI_SPAN
+	var row = K.hbox(6)
+	parent.add_child(row)
+	var mid = K.vbox(0)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var bar = BandBar.new()
+	var lh: Array = wk.psi_band(c.slot, kind)
+	bar.lo = (float(lh[0]) - lo) / span
+	bar.hi = (float(lh[1]) - lo) / span
+	mid.add_child(bar)
+	var sl = K.slider(lo, lo + span, 0.5, c.psi, _on_psi.bind(c.slot, kind, lab), ed)
+	mid.add_child(sl)
+	var mb = K.btn("−", 16, func(): sl.set_value(c.psi - 0.5))
+	var pb = K.btn("+", 16, func(): sl.set_value(c.psi + 0.5))
+	for b in [mb, pb]:
+		b.disabled = not ed
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER # 슬라이더가 폭을 가져가게
+		b.custom_minimum_size = Vector2(44, 36)
+	row.add_child(mb)
+	row.add_child(mid)
+	row.add_child(pb)
+	parent.add_child(K.label("낮게: 연석 잘 먹음 / 잘 안 데워짐·미끄럼 · 높게: 직선 조금 빠름 / 튐·과열·마모", 12, K.DIM))
+
+
+func _psi_text(c, kind: String) -> String:
+	var lh: Array = wk.psi_band(c.slot, kind)
+	var rq: float = sim.press_rise("q")
+	var rr: float = sim.press_rise("race")
+	var run: String = "예선 런 약 [b]%.1f[/b] · 결승 약 [b]%.1f psi[/b]" % [c.psi + rq, c.psi + rr] if kind == "q" else "결승 약 [b]%.1f psi[/b]" % (c.psi + rr)
+	return "타이어 공기압 [b]%.1f psi[/b] [color=#8b98a5](규정 최소 %.1f)[/color]\n[color=#8b98a5]노면 %d°C → 달리면 %s까지 올라요 · 노란 띠 = 엔지니어 추천 %s %.1f~%.1f[/color]" % [c.psi, sim.psi_min, int(round(sim.track_t)), run, "예선용" if kind == "q" else "결승용", float(lh[0]), float(lh[1])]
+
+
+func _on_psi(v: float, slot: int, kind: String, lab) -> void:
+	wk.set_psi(slot, v)
+	lab.text = _psi_text(_my(slot), kind)
+	if kind == "q":
+		_update_live_feedback()
 
 
 ## 셋업 슬라이더 한 줄: 이름·값 + 추천 범위 띠 + 슬라이더
 const SET_FMT := {"wing": "W %.1f", "susp": "%.1f", "bbias": "앞 %.1f%%", "diff": "%d%%"}
 const SET_END := {"wing": ["눕힘 (직선)", "세움 (코너)"], "susp": ["부드럽게", "단단하게"], "bbias": ["뒤쪽", "앞쪽"], "diff": ["열림", "잠김"]}
+const SET_END_SHORT := {"wing": ["직선", "코너"]} # 좁은 화면(세로 폰)에서 줄바꿈 안 되게
 
 
 func _setup_val(c, key: String) -> float:
@@ -573,32 +788,70 @@ func _setup_label(c, key: String) -> String:
 	var ls: String = SET_FMT[key] % (int(lh[0]) if key == "diff" else float(lh[0]))
 	var hs: String = SET_FMT[key] % (int(lh[1]) if key == "diff" else float(lh[1]))
 	var extra: String = (" · " + _wing_desc(v)) if key == "wing" else ""
-	return "[b]%s[/b] %s%s   [color=#ffc53d]추천 %s ~ %s[/color]" % [RS.SETUP_KO[key], vs, extra, ls, hs]
+	var t: String = "[b]%s[/b] %s%s   [color=#ffc53d]추천 %s ~ %s[/color]" % [RS.SETUP_KO[key], vs, extra, ls, hs]
+	if RS.SETUP_RANGE.has(key):
+		# 가운데 대비 어디서 얻고 잃는지 (엔지니어 계산 — 등급만큼 부정확). 초록 = 빨라짐, 빨강 = 느려짐
+		var sv: Dictionary = wk.setup_view(c.slot, key)
+		var parts: PackedStringArray = []
+		for ch in sv["ch"]:
+			parts.append("%s [color=%s]%+.2f[/color]" % [ch[0], "#22c55e" if float(ch[1]) < -0.005 else ("#ef4444" if float(ch[1]) > 0.005 else "#8b98a5"), float(ch[1]) + 0.0]) # + 0.0: -0.00 대신 +0.00
+		var wr: float = sv["wear"]
+		parts.append("마모 [color=%s]%+.0f%%[/color]" % ["#ef4444" if wr > 0.5 else ("#22c55e" if wr < -0.5 else "#8b98a5"), wr])
+		t += "\n[color=#8b98a5]가운데 대비 초/랩:[/color] %s · [color=#8b98a5]엔지니어 계산 합계[/color] %+.2f" % [" · ".join(parts), float(sv["tot"]) + 0.0]
+	return t
 
 
 func _setup_slider(card: VBoxContainer, c, key: String, ed: bool) -> void:
-	var lab = K.rtl(14)
+	# 한 항목 = 제목 줄 + [왼쪽 뜻 | 추천 띠·슬라이더 | 오른쪽 뜻] — 양끝 글자가 다음 항목에 붙어 보이지 않게 같은 줄 양옆에
+	var blk = K.vbox(2)
+	card.add_child(blk)
+	var lab = K.rtl(15)
 	lab.text = _setup_label(c, key)
-	card.add_child(lab)
+	blk.add_child(lab)
+	var row = K.hbox(8)
+	blk.add_child(row)
+	var narrow: bool = get_viewport_rect().size.x < 900.0
+	var end_w: float = 64.0 if narrow else 92.0
+	var ends: Array = SET_END_SHORT.get(key, SET_END[key]) if narrow else SET_END[key]
+	var l0 = K.label(ends[0], 14, K.INK)
+	l0.custom_minimum_size = Vector2(end_w, 0)
+	l0.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l0.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	l0.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(l0)
+	var mid = K.vbox(0)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
 	var r: Array = wk._span(key)
 	var bar = BandBar.new()
 	var lh: Array = wk.band_lohi(c.slot, key)
 	bar.lo = (float(lh[0]) - float(r[0])) / (float(r[1]) - float(r[0]))
 	bar.hi = (float(lh[1]) - float(r[0])) / (float(r[1]) - float(r[0]))
-	card.add_child(bar)
+	mid.add_child(bar)
 	var sl = K.slider(float(r[0]), float(r[1]), {"wing": 0.1, "susp": 0.1, "bbias": 0.5, "diff": 1.0}[key], _setup_val(c, key), _on_setup_val.bind(key, lab), ed)
-	card.add_child(sl)
-	# 양 끝 설명 (띠·슬라이더와 같은 폭이 되도록 슬라이더 아래 한 줄로)
-	var row = K.hbox(6)
-	card.add_child(row)
-	var l0 = K.label(SET_END[key][0], 12, K.DIM)
-	l0.autowrap_mode = TextServer.AUTOWRAP_OFF
-	l0.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(l0)
-	var l1 = K.label(SET_END[key][1], 12, K.DIM)
-	l1.autowrap_mode = TextServer.AUTOWRAP_OFF
-	l1.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mid.add_child(sl)
+	var l1 = K.label(ends[1], 14, K.INK)
+	l1.custom_minimum_size = Vector2(end_w, 0)
+	l1.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	l1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	row.add_child(l1)
+	# 항목 사이 간격
+	var gap = Control.new()
+	gap.custom_minimum_size = Vector2(0, 8)
+	card.add_child(gap)
+
+
+## 카드 안 소제목 (버튼 묶음 · 슬라이더 묶음 구분)
+func _section(card: VBoxContainer, title: String) -> void:
+	var gap = Control.new()
+	gap.custom_minimum_size = Vector2(0, 4)
+	card.add_child(gap)
+	var t = K.label(title, 15, K.AMBER)
+	card.add_child(t)
+	var ln = ColorRect.new()
+	ln.color = Color(1, 1, 1, 0.08)
+	ln.custom_minimum_size = Vector2(0, 1)
+	card.add_child(ln)
 
 
 func _on_setup_val(v: float, key: String, lab) -> void:
@@ -607,11 +860,28 @@ func _on_setup_val(v: float, key: String, lab) -> void:
 	else:
 		wk.set_detail(sel, key, v)
 	lab.text = _setup_label(_my(sel), key)
+	_update_live_feedback()
+
+
+## 연습 드라이버 멘트 줄 (슬라이더를 움직이는 즉시 "셋업 바뀜" 표시가 뜨도록 따로 뺌)
+func _update_live_feedback() -> void:
+	var c = _my(sel)
+	var fb: String = String(wk.last_feedback[sel]) if sel < wk.last_feedback.size() else ""
+	var dirty: bool = bool(wk.setup_dirty[sel]) if sel < wk.setup_dirty.size() else false
+	if anim != null:
+		_live.text = "[b]%s[/b] 주행 중…" % c.name
+	elif fb != "":
+		var note: String = "[color=#8b98a5] · 연습 %d랩째 주행 기준[/color]" % int(wk.fb_lap[sel])
+		if dirty:
+			note = "\n[color=#f59e0b]⚠ 셋업이 바뀌었어요 — 다시 달려야 새 멘트를 들을 수 있어요[/color]"
+		_live.text = "[color=#ffc53d]“%s”[/color]%s" % [fb, note]
+	else:
+		_live.text = "[color=#8b98a5]롱런을 하면 타이어 마모 추정 오차가 절반으로 줄어요 (35%→17%→9%).[/color]"
 
 
 func _eng_grade() -> String:
-	var q: float = wk.eng_q
-	return "엔지니어 S급" if q >= 0.9 else ("A급" if q >= 0.65 else ("B급" if q >= 0.4 else "C급"))
+	var g: String = wk.eng_grade()
+	return "엔지니어 %s급 · 정확도 %s" % [g, {"S": "아주 높음", "A": "높음", "B": "보통", "C": "낮음", "D": "매우 낮음"}[g]]
 
 
 func _on_engineer() -> void:
@@ -675,8 +945,19 @@ func _on_qpush(v) -> void:
 	refresh()
 
 
+func _on_start_set(v, slot: int) -> void:
+	wk.start_pref[slot] = v
+	refresh()
+
+
+func _on_start_idx(v, slot: int) -> void:
+	wk.start_idx[slot] = int(v)
+	refresh()
+
+
 func _on_start_comp(v, slot: int) -> void:
 	wk.set_start_comp(slot, v)
+	wk.start_idx[slot] = -1
 	if plan_edit.has(slot) and not plan_edit[slot]["edited"]:
 		plan_edit.erase(slot)
 	refresh()
@@ -772,7 +1053,7 @@ func _plan_editor(card: VBoxContainer, c) -> void:
 	t += "\n예상 손실 [b]%.1f초[/b] · 최적 대비 %s" % [float(ev["cost"]), ("[color=#22c55e]%+.1f초[/color]" % diff) if diff <= 1.0 else ("[color=#f59e0b]%+.1f초[/color]" % diff)]
 	for w in ev["warn"]:
 		t += "\n[color=#ef4444]⚠ %s[/color]" % w
-	t += "\n[color=#8b98a5]마모는 연습에서 잰 추정치 기준이에요 (오차 ±%d%%). 레이스 중 '피트' 탭에서 A·B를 바꾸거나 자동 피트를 켤 수 있어요.[/color]" % int(round(float(wk.wear_est["err"]) * 100.0))
+	t += "\n[color=#8b98a5]마모는 연습 롱런으로 잰 추정치 기준이에요 (S ±%d%% · M ±%d%% · H ±%d%%, 롱런 안 한 컴파운드는 '보통 타이어'로 가정). 레이스 중 '피트' 탭에서 A·B를 바꾸거나 자동 피트를 켤 수 있어요.[/color]" % [int(round(wk.wear_err("S") * 100.0)), int(round(wk.wear_err("M") * 100.0)), int(round(wk.wear_err("H") * 100.0))]
 	var r = K.rtl(13)
 	r.text = t
 	card.add_child(r)
@@ -866,9 +1147,18 @@ func _quali_tick(delta: float) -> void:
 		var c = wk._car(id)
 		var f: float = clampf((t - float(r["t0"])) / maxf(0.01, float(r["dur"])), 0.0, 1.0)
 		var d: float = 0.0
+		# 피트 입구·출구 (트랙 위 거리)
+		var exit_d: float = fposmod(float(T.cum[T.pit_out]), T.L)
+		var entry_d: float = fposmod(float(T.cum[T.pit_in]), T.L)
+		const LANE_F := 0.15 # 아웃랩·인랩 중 피트레인에 있는 시간 비율
 		match String(r["phase"]):
 			"out":
-				d = f * T.L
+				# 차고 → 피트레인 → 출구에서 트랙 합류 → 출발선까지
+				if f < LANE_F:
+					var pl: Array = T.pit_lane_point(sim._lane_u(0.35 + 0.65 * (f / LANE_F), sim._stall_u(c.stall_idx)))
+					lst.append([c, pl[0], pl[1]])
+					continue
+				d = exit_d + (T.L - exit_d) * ((f - LANE_F) / (1.0 - LANE_F))
 			"push":
 				var res: Dictionary = r["res"]
 				var el: float = (t - float(r["t0"])) * 60.0
@@ -881,7 +1171,17 @@ func _quali_tick(delta: float) -> void:
 				if c.mine and my_push == null:
 					my_push = [res, sec, el]
 			_:
-				d = f * T.L * 0.5
+				# 인랩: 어택을 마친 곳(또는 포기한 곳)부터 피트 입구까지 돌고 → 피트레인으로 들어가 차고에서 사라짐
+				var d0: float = float(r.get("d0", 0.0)) * T.L
+				var tgt: float = entry_d if entry_d > d0 else entry_d + T.L
+				if f < 1.0 - LANE_F:
+					d = d0 + (tgt - d0) * (f / (1.0 - LANE_F))
+				else:
+					if f >= 0.999:
+						continue
+					var pl2: Array = T.pit_lane_point(sim._lane_u(0.35 * ((f - (1.0 - LANE_F)) / LANE_F), sim._stall_u(c.stall_idx)))
+					lst.append([c, pl2[0], pl2[1]])
+					continue
 		lst.append([c, d])
 	_view.solo = {"list": lst}
 	if my_push != null:

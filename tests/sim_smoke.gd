@@ -34,6 +34,46 @@ func _init() -> void:
 				fails += 1
 			print("%-12s #%d %s | 완주=%s 우승=%s(%s) | 스톱=%s 출발=%s DNF=%d | 계획 %dms" % [key, n, "비" if n == 2 else "맑음", ok, winner.code, winner.team, stops, starts, dnf, plan_ms])
 			print("    AI 전술·실수: %s" % sim.tally)
+	# 공짜 모드 없음: 표준·자유 외 페이스·지시는 장점과 대가가 둘 다 표시돼야 (F1·WEC)
+	for wk in [["monza", false], ["lemans", true]]:
+		var fs = RaceSimS.new()
+		fs.new_race(wk[0], 0, 12, "dry", ["M", "M"], 77)
+		if fs.is_wec() != wk[1]:
+			print("  ! %s 시리즈 판정 이상" % wk[0])
+			fails += 1
+		var fc = fs.my_cars()[0]
+		for kk in [["pace", "attack"], ["pace", "save"], ["instr", "attack"], ["instr", "defend"], ["instr", "hold"], ["instr", "lift"]]:
+			var fx: Dictionary = fs.mode_effects(fc, kk[0], kk[1])
+			if fx["pros"].is_empty() or fx["cons"].is_empty():
+				print("  ! %s %s %s: 장점 또는 대가 표시 없음 %s" % [wk[0], kk[0], kk[1], fx])
+				fails += 1
+	# 전략 뷰: 스틴트가 0랩부터 끊김 없이 이어지고, 예상 피트는 앞으로의 랩, 언더컷은 기회·위협 둘 다 계산
+	var sv = RaceSimS.new()
+	sv.new_race("monza", 0, 20, "dry", ["M", "M"], 515)
+	sv.prepare_start()
+	var sg := 0
+	while (sv.leader_lap < 12 or sv.sc) and not sv.done and sg < 100000: # SC 중엔 언더컷 계산을 안 하므로 그린일 때 확인
+		sv.advance(1.0)
+		sg += 1
+	var sv_bad := 0
+	var cuts := 0
+	var sv_ord: Array = sv.order()
+	for j in sv_ord.size():
+		var o = sv_ord[j]
+		var sl: Array = sv.stints(o)
+		if int(sl[0][1]) != 0 or int(sl[-1][2]) < o.lap:
+			sv_bad += 1
+		for q in range(1, sl.size()):
+			if int(sl[q][1]) != int(sl[q - 1][2]):
+				sv_bad += 1
+		var ep: Variant = sv.est_next_pit(o)
+		if ep != null and (int(ep[0]) <= o.lap or int(ep[1]) < int(ep[0])):
+			sv_bad += 1
+		if j > 0 and sv.undercut_net(o, sv_ord[j - 1]) != null:
+			cuts += 1
+	print("  전략 뷰: 이상 %d · 언더컷 계산된 쌍 %d" % [sv_bad, cuts])
+	if sv_bad > 0 or cuts == 0:
+		fails += 1
 	# 자동 전략: 내 차 두 대를 자동(A·B)에 맡겨 완주 + 컴파운드 규정 위반 없는지
 	for key in ["monza", "silverstone", "singapore", "interlagos"]:
 		for n in 2:
@@ -107,5 +147,79 @@ func _init() -> void:
 		print("저장·이어하기 %s: %s (L5에서 저장, 우승 %s)" % [key, "같음" if same else "다름!", ra[0]])
 		if not same or not b.done:
 			fails += 1
+	# 고장·반쯤 고장·더티 에어·트랙 포지션 (2026-11-21)
+	var fx = RaceSimS.new()
+	fx.new_race("monaco", 0, 20, "dry", ["M", "M"], 515)
+	fx.prepare_start()
+	while fx.leader_lap < 3:
+		fx.advance(1.0)
+	var ai_f = null
+	for o in fx.cars:
+		if not o.mine and o.is_running() and fx.next_stop(o) != null:
+			ai_f = o
+			break
+	ai_f.fault = null
+	fx._start_fault(ai_f)
+	ai_f.fault["dt"] = 1.1
+	ai_f.fault["fix"] = 12.0
+	fx._fault_decide(ai_f)
+	var dt_f: float = float(ai_f.fault["dt"])
+	var rep_f: bool = bool(ai_f.fault["repair"])
+	var pits0: int = ai_f.pits
+	var gf := 0
+	while ai_f.is_running() and ai_f.pits == pits0 and gf < 20000:
+		fx.advance(0.5)
+		gf += 1
+	var fault_ok: bool = dt_f >= 0.35 and dt_f <= 1.2 and rep_f and (not ai_f.is_running() or ai_f.fault == null)
+	var mz = RaceSimS.new()
+	mz.new_race("monza", 0, 20, "dry", ["M", "M"], 1)
+	var tp_ok: bool = fx.stop_cost() - fx.pit_loss() > mz.stop_cost() - mz.pit_loss() + 6.0
+	print("   반쯤 고장: 랩당 +%.2f초 수리=%s → 피트 후 %s · 트랙 포지션 값 모나코 %.1f > 몬자 %.1f %s" % [dt_f, rep_f, "해제" if ai_f.fault == null else "남음", fx.stop_cost(), mz.stop_cost(), "OK" if fault_ok and tp_ok else "실패"])
+	if not (fault_ok and tp_ok):
+		fails += 1
+	# 비·노면: 섹터별 노면(평균 = wet, 라인 밖 ≥ 라인), 마를 때 라인 먼저, 팀 예보 오차(전략 능력 높을수록 작음), 크로스오버
+	var wx_ok := true
+	var dry_line := false
+	var err_hi := 0.0
+	var err_lo := 0.0
+	for sd_w in 12:
+		var ws = RaceSimS.new()
+		ws.new_race("silverstone", -1, 25, "rain", ["M", "M"], 6100 + sd_w)
+		var best = ws.cars[0]
+		var worst = ws.cars[0]
+		for c in ws.cars:
+			if ws.fc_q(c) > ws.fc_q(best):
+				best = c
+			if ws.fc_q(c) < ws.fc_q(worst):
+				worst = c
+		err_hi += absf(float(ws.fc_belief(best)["s"]) - float(ws.rain["start"]))
+		err_lo += absf(float(ws.fc_belief(worst)["s"]) - float(ws.rain["start"]))
+		ws.prepare_start()
+		var gw := 0
+		while not ws.done and gw < 200000:
+			ws.advance(2.0)
+			gw += 1
+			if ws.sec_wet.size() != ws.NS:
+				wx_ok = false
+				break
+			var m := 0.0
+			for k in ws.NS:
+				m += float(ws.sec_wet[k]) * float(ws.T.share[k])
+				if float(ws.off_wet[k]) + 0.0001 < float(ws.sec_wet[k]):
+					wx_ok = false
+				if ws.off_gap(k) > 0.05:
+					dry_line = true
+			if absf(m - ws.wet) > 0.001:
+				wx_ok = false
+	var xs = RaceSimS.new()
+	xs.new_race("monza", -1, 20, "dry", ["M", "M"], 3)
+	for k in xs.NS:
+		xs.sec_wet[k] = 0.5
+	xs.wet = 0.5
+	var xo: Dictionary = xs.crossover(xs.cars[0])
+	var xo_ok: bool = xo["alt"] == "I" and float(xo["now"]) > 1.0
+	print("   비·노면: 섹터 노면 %s · 라인 먼저 마름 %s · 예보 시작 랩 오차 좋은 팀 %.1f < 약한 팀 %.1f · 크로스오버 슬릭→인터 %+.1f초 %s" % ["OK" if wx_ok else "실패", "OK" if dry_line else "없음", err_hi / 12.0, err_lo / 12.0, float(xo["now"]), "OK" if wx_ok and dry_line and err_hi < err_lo and xo_ok else "실패"])
+	if not (wx_ok and dry_line and err_hi < err_lo and xo_ok):
+		fails += 1
 	print("총 %dms, 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

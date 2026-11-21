@@ -13,7 +13,7 @@
   "wear": 0.9,
   "pitLoss": 23,
   "rain": 0.25,
-  "wingOpt": 1.5,
+  "wingOpt": 1.5, "psiMin": 26.0, "trackT": 40,
   "setupHint": "직선이 아주 길어요. 날개를 눕힐수록 최고속이 올라가요.",
   "pts": [
    [
@@ -208,7 +208,7 @@
   "wear": 1.15,
   "pitLoss": 22.5,
   "rain": 0.35,
-  "wingOpt": 4,
+  "wingOpt": 4, "psiMin": 28.0, "trackT": 35,
   "setupHint": "고속 S자 코너가 연속되어 에어로와 섀시 밸런스가 매우 중요합니다. 다운포스를 높이는 편이 유리합니다.",
   "pts": [
    [
@@ -391,7 +391,7 @@
   "wear": 1.12,
   "pitLoss": 20.5,
   "rain": 0.4,
-  "wingOpt": 3.5,
+  "wingOpt": 3.5, "psiMin": 28.0, "trackT": 35,
   "setupHint": "매고츠-베케츠 고속 연속 코너를 위해 탄탄한 다운포스와 타이어 관리가 필수입니다.",
   "pts": [
    [
@@ -558,7 +558,7 @@
   "wear": 0.8,
   "pitLoss": 19,
   "rain": 0.2,
-  "wingOpt": 4.8,
+  "wingOpt": 4.8, "psiMin": 20.0, "trackT": 42,
   "setupHint": "가장 좁고 느린 시가지 트랙입니다. 최대 다운포스(윙 5)와 예선 그리드가 절대적입니다.",
   "pts": [
    [
@@ -713,7 +713,7 @@
   "wear": 1.2,
   "pitLoss": 23.5,
   "rain": 0.05,
-  "wingOpt": 2.5,
+  "wingOpt": 2.5, "psiMin": 23.0, "trackT": 30,
   "setupHint": "긴 직선 3개와 거친 아스팔트로 인해 리어 타이어 마모가 매우 심합니다. 언더컷 효과가 큽니다.",
   "pts": [
    [
@@ -884,7 +884,7 @@
   "wear": 1.05,
   "pitLoss": 21,
   "rain": 0.3,
-  "wingOpt": 3,
+  "wingOpt": 3, "psiMin": 24.0, "trackT": 30,
   "setupHint": "1km가 넘는 직선과 좁은 시가지 코너가 섞여 있어요. 중간 세팅이 무난해요.",
   "pts": [
    [
@@ -1071,7 +1071,7 @@
   "wear": 1,
   "pitLoss": 21,
   "rain": 0.5,
-  "wingOpt": 3.5,
+  "wingOpt": 3.5, "psiMin": 24.5, "trackT": 40,
   "setupHint": "짧은 랩에 코너가 많고 비가 잦아요. 다운포스를 넉넉히 주는 편이 좋아요.",
   "pts": [
    [
@@ -1246,7 +1246,7 @@
   "wear": 1.02,
   "pitLoss": 21.5,
   "rain": 0.25,
-  "wingOpt": 3.1,
+  "wingOpt": 3.1, "psiMin": 25.0, "trackT": 32,
   "setupHint": "빠른 방향 전환과 연석 공략이 중요하며 세이프티카 변수가 잦은 개막전 트랙입니다.",
   "pts": [
    [
@@ -1401,7 +1401,7 @@
   "wear": 1.15,
   "pitLoss": 23,
   "rain": 0.3,
-  "wingOpt": 2.8,
+  "wingOpt": 2.8, "psiMin": 26.5, "trackT": 30,
   "setupHint": "끝없이 말려 들어가는 T1-2 달팽이 코너의 프론트 마모와 초장거리 백스트레이트 최고속을 동시에 잡아야 합니다.",
   "pts": [
    [
@@ -1580,7 +1580,7 @@
   "wear": 1.08,
   "pitLoss": 22,
   "rain": 0.3,
-  "wingOpt": 2.7,
+  "wingOpt": 2.7, "psiMin": 26.5, "trackT": 50,
   "setupHint": "섹터 1 고속 S자와 섹터 2의 극저속 오르막 시케인, 긴 직선이 결합되어 타이어 열관리가 핵심입니다.",
   "pts": [
    [
@@ -1743,7 +1743,7 @@
   "wear": 1.22,
   "pitLoss": 22,
   "rain": 0.15,
-  "wingOpt": 3.8,
+  "wingOpt": 3.8, "psiMin": 25.0, "trackT": 45,
   "setupHint": "고속 롱코너가 많아 차량의 순수 에어로 성능과 타이어 마모 관리가 적나라하게 드러납니다.",
   "pts": [
    [
@@ -1914,7 +1914,7 @@
   "wear": 1.1,
   "pitLoss": 23,
   "rain": 0.48,
-  "wingOpt": 2.4,
+  "wingOpt": 2.4, "psiMin": 28.0, "trackT": 28,
   "setupHint": "케멜 직선 추월을 위한 낮은 드래그와 섹터 2 고속 코너 그립 사이의 타협이 승부를 가릅니다.",
   "pts": [
    [
@@ -2117,7 +2117,7 @@
   "wear": 1.12,
   "pitLoss": 20,
   "rain": 0.38,
-  "wingOpt": 4.3,
+  "wingOpt": 4.3, "psiMin": 25.0, "trackT": 30,
   "setupHint": "트랙 폭이 좁아 추월이 매우 어렵고 고각도 뱅크 코너가 타이어에 큰 수직 하중을 줍니다.",
   "pts": [
    [
@@ -2268,7 +2268,7 @@
   "wear": 1.14,
   "pitLoss": 26.5,
   "rain": 0.25,
-  "wingOpt": 4.6,
+  "wingOpt": 4.6, "psiMin": 21.5, "trackT": 34,
   "night": [
    0,
    1
@@ -2423,7 +2423,7 @@
   "wear": 1.16,
   "pitLoss": 21.5,
   "rain": 0.2,
-  "wingOpt": 3.4,
+  "wingOpt": 3.4, "psiMin": 24.5, "trackT": 40,
   "setupHint": "스즈카를 닮은 섹터 1 고속 에세스와 섹터 2의 긴 백스트레이트가 공존하는 밸런스 서킷입니다.",
   "pts": [
    [
@@ -2586,7 +2586,7 @@
   "wear": 0.92,
   "pitLoss": 21,
   "rain": 0.05,
-  "wingOpt": 1.4,
+  "wingOpt": 1.4, "psiMin": 23.0, "trackT": 15,
   "night": [
    0,
    1
@@ -2737,7 +2737,7 @@
   "wear": 1.04,
   "pitLoss": 21.5,
   "rain": 0.02,
-  "wingOpt": 3,
+  "wingOpt": 3, "psiMin": 22.5, "trackT": 30,
   "night": [
    0.45,
    1

@@ -89,6 +89,12 @@ func _process(_delta: float) -> bool:
 			step = 46
 		46:
 			_shot("race_tab_laps")
+			main.race_panel._on_tab("strat")
+			main._refresh_ui()
+			wait = 3
+			step = 471
+		471:
+			_shot("race_tab_strat")
 			main._on_tower_click(str(main.sim.order()[0].id))
 			wait = 3
 			step = 48
@@ -163,6 +169,29 @@ func _process(_delta: float) -> bool:
 				step = 11
 		11:
 			_shot("portrait_rain_night")
+			main.race_panel._on_tab("laps")
+			wait = 4
+			step = 112
+		112:
+			_shot("portrait_laps")
+			main.race_panel._on_tab("strat")
+			step = 1141
+		1141:
+			main.sim.advance(1.5)
+			if main.sim.leader_lap >= 10 or main.sim.done:
+				main._refresh_ui()
+				wait = 4
+				step = 1151
+		1151:
+			_shot("portrait_strat")
+			root.size = Vector2i(1100, 1200) # 폴드 펼친 화면 비율
+			main._on_resize()
+			main.race_panel._on_tab("drive")
+			main._refresh_ui()
+			wait = 5
+			step = 113
+		113:
+			_shot("fold_race")
 			main._autosave() # 메뉴에 '이어하기' 버튼이 보이도록
 			root.size = Vector2i(1280, 720)
 			main._on_resize()
@@ -200,16 +229,40 @@ func _process(_delta: float) -> bool:
 			step = 14
 		14:
 			_shot("hq_home")
+			root.size = Vector2i(1100, 1200)
+			main._on_resize()
+			main._open_hq()
+			wait = 4
+			step = 114
+		114:
+			_shot("fold_hq_home")
+			root.size = Vector2i(720, 1140) # 폴드 바깥·세로 폰
+			main._on_resize()
+			main._open_hq()
+			wait = 4
+			step = 115
+		115:
+			_shot("portrait_hq_home")
+			root.size = Vector2i(1280, 720)
+			main._on_resize()
+			main._open_hq()
+			main.hq_view._pu_open = "0|ice"
 			main.hq_view._on_tab("rnd")
 			wait = 3
 			step = 15
 		15:
 			_shot("hq_rnd")
+			main.hq_view._staff_open = "aero"
 			main.hq_view._on_tab("staff")
 			wait = 3
 			step = 16
 		16:
 			_shot("hq_staff")
+			main.hq_view._on_tab("league")
+			wait = 3
+			step = 116
+		116:
+			_shot("hq_league")
 			main.hq_view._on_tab("spon")
 			wait = 3
 			step = 17
@@ -295,6 +348,24 @@ func _process(_delta: float) -> bool:
 				step = 71
 		71:
 			_shot("wec_lmp2")
+			main.race_panel._on_tab("power")
+			main._refresh_ui()
+			wait = 4
+			step = 171
+		171:
+			_shot("wec_lmp2_drv")
+			main.sim.night = true # 피트 탭 교대 버튼: 밤·비일 때 안정·웻 수치와 추천 이유 표시 확인
+			main.sim.wet = 0.4
+			for k in main.sim.NS: # 섹터마다 다른 노면 (라인 먼저 마름 · 피트 탭 노면 줄·트랙 색 확인)
+				main.sim.sec_wet[k] = [0.08, 0.15, 0.35, 0.6, 0.55, 0.3][k]
+				main.sim.off_wet[k] = minf(1.0, float(main.sim.sec_wet[k]) + 0.12)
+			main.sim.ever_wet = true
+			main.race_panel._on_tab("pit")
+			main._refresh_ui()
+			wait = 4
+			step = 172
+		172:
+			_shot("wec_lmp2_pit")
 			main._set_cam(-1)
 			main._show_menu()
 			main._on_mode("quick")
@@ -316,6 +387,22 @@ func _process(_delta: float) -> bool:
 			step = 28
 		28:
 			_shot("wec_follow")
+			main.race_panel._on_tab("laps")
+			main._refresh_ui()
+			wait = 4
+			step = 72
+		72:
+			_shot("wec_laps")
+			root.size = Vector2i(1100, 1200)
+			main._on_resize()
+			main._refresh_ui()
+			wait = 5
+			step = 73
+		73:
+			_shot("fold_wec_race")
+			root.size = Vector2i(1280, 720)
+			main._on_resize()
+			main.race_panel._on_tab("drive")
 			main._set_speed(4)
 			main._set_cam(-1)
 			step = 29
