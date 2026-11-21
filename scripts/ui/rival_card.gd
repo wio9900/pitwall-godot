@@ -166,7 +166,7 @@ func refresh() -> void:
 	else:
 		t += "[color=#8b98a5]페이스 추이: 데이터 수집 중 (3랩 필요)[/color]\n"
 	if RS.SLICK.has(c.comp) and c.dnf == "" and not c.finished:
-		var wr: float = float(RS.COMP[c.comp][1]) * float(sim.rules.get("wear_mult", 1.0)) * float(sim.CIRC["wear"]) * (RS.WEAR_SCALE / sim.laps) * 0.85
+		var wr: float = float(sim.cpv(c.comp)[1]) * float(sim.rules.get("wear_mult", 1.0)) * float(sim.CIRC["wear"]) * (RS.WEAR_SCALE / sim.laps) * 0.85
 		var to_lim: int = int(maxf(0.0, (0.62 - c.stint_laps * wr) / maxf(0.001, wr)))
 		var est: int = c.lap + 1 + to_lim
 		t += "예상 다음 피트 (공칭 마모 기준): [b]%s[/b]" % (("L%d 전후" % est) if est < sim.laps - 1 else "끝까지 갈 수도")

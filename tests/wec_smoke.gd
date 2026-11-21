@@ -153,5 +153,26 @@ func _init() -> void:
 	print("   손상 절뚝이기: 감속 +%d%% → 피트 후 %.2f (피트 %d) %s" % [int(limp0 * 100.0), hurt.limp if hurt != null else -1.0, hurt.pits if hurt != null else -1, "OK" if limp_ok else "실패"])
 	if not limp_ok:
 		fails += 1
+	# 수정 24: 하이퍼카 컴파운드 온도 창 — 르망 낮 35°C 는 미디엄, 밤(약 21°C)은 소프트, 하드는 밤에 차가움
+	var tw = RaceSimS.new()
+	tw.new_race("lemans", 0, 54, "dry", ["M", "M"], 4343)
+	tw.track_t = 35.0
+	var hy = null
+	for o in tw.cars:
+		if o.cls == "HY" and not o.mine:
+			hy = o
+			break
+	hy.pace = "standard"
+	hy.wec_style = "std"
+	var t_day: float = tw.track_temp_at(0.1)
+	var t_night: float = tw.track_temp_at(0.4)
+	tw.leader_lap = 0
+	var pick_day: String = tw.wec_pick_comp(hy, 10, false)
+	tw.leader_lap = int(tw.laps * 0.35)
+	var pick_night: String = tw.wec_pick_comp(hy, 10, false)
+	var win_ok: bool = t_night < t_day - 10.0 and tw.win_off("HY", "S", 35.0) > 0.0 and tw.win_off("HY", "H", t_night) < 0.0 and tw.win_off("HY", "M", 25.0) == 0.0 and tw.win_off("GT", "M", 50.0) == 0.0
+	print("   온도 창: 낮 %.0f°C → %s · 밤 %.0f°C → %s %s" % [t_day, pick_day, t_night, pick_night, "OK" if (win_ok and pick_day == "M" and pick_night == "S") else "실패"])
+	if not (win_ok and pick_day == "M" and pick_night == "S"):
+		fails += 1
 	print("WEC 테스트 %dms 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

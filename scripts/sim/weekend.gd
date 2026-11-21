@@ -311,7 +311,7 @@ func est_mult(comp: String) -> float:
 
 
 func est_wear_rate(comp: String) -> float:
-	return maxf(0.010, float(RS.COMP[comp][1]) * est_mult(comp) * float(sim.rules.get("wear_mult", 1.0)))
+	return maxf(0.010, float(sim.cpv(comp)[1]) * est_mult(comp) * float(sim.rules.get("wear_mult", 1.0)))
 
 
 func est_range_text(comp: String) -> String:
@@ -467,7 +467,7 @@ func _run_laps(c, kind: String, comp: String, fuel: float, n: int, noise: Callab
 	var res: Array = []
 	for i in n:
 		var ft: float = fuel * sim.fuel_k() * ws
-		var t: float = base + (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear)) * ws + ft + float(noise.call())
+		var t: float = base + (wear * wear * float(sim.cpv(comp)[2]) + sim.cliff_pen(comp, wear)) * ws + ft + float(noise.call())
 		if pu > 0.0 and wear > 0.5:
 			t += 0.3 * pu # 공기압이 높으면 런 후반 과열
 		res.append(t)
@@ -623,7 +623,7 @@ func q_lap(c, push: String, traffic: Variant, stage: int, comp: String, used_set
 	var trf_risk: float = tv[1]
 	var stage_evo := (stage - 1) * -0.18
 	var ws: float = sim.wsc()
-	var comp_delta: float = float(QCOMP.get(comp, RS.COMP[comp][0])) * ws
+	var comp_delta: float = float(QCOMP.get(comp, sim.cpv(comp)[0])) * ws
 	var used_pen: float = (q_used_pen(comp, set_w) if set_w >= 0.0 else 0.45) * ws if used_set else 0.0
 	var note := ("쓴 타이어 어택 (약 +%.2fs)" % used_pen) if used_set else ""
 	var deleted := false

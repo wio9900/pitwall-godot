@@ -17,6 +17,12 @@ const H_CLIFF := 0.62
 const SPEED_BASE := 4.0 # 화면 1× = 시뮬레이션 4배속
 
 const COMP := {"S": [-1.05, 0.048, 4.0], "M": [0.0, 0.032, 3.3], "H": [0.50, 0.027, 2.6], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
+## WEC 하이퍼카(미쉐린) 전용: 컴파운드 사이 속도·마모 차이는 작고, 노면 온도 창이 고르는 기준 (수정 24).
+## F1 표를 그대로 쓰면 소프트가 미디엄보다 1.5배 닳아 더블 스틴트도 못 버팀 — 실제 르망은 밤에 소프트 트리플 스틴트(미쉐린 2025).
+## 미디엄은 F1 표와 같음 → LMGT3·LMP2(미디엄 한 종류) 결과는 그대로
+const WEC_COMP := {"S": [-0.25, 0.034, 3.6], "M": [0.0, 0.032, 3.3], "H": [0.30, 0.029, 3.0], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
+const WIN_BASE := 0.15 # 온도 창을 벗어나는 순간 타이어 온도 목표가 과열·저온 경계까지 이동
+const WIN_K := 0.03    # 그 뒤 1°C 마다 더 (뜨거우면 과열·마모, 차가우면 그립·실수 — 기존 타이어 온도 식이 계산)
 const SLICK := {"S": true, "M": true, "H": true}
 const TYRE_KO := {"S": "소프트", "M": "미디엄", "H": "하드", "I": "인터", "W": "웻"}
 const TYRE_HEX := {"S": "#ef4444", "M": "#facc15", "H": "#f1f5f9", "I": "#22c55e", "W": "#3b82f6"}
@@ -113,6 +119,7 @@ var finishing := false
 var ever_wet := false
 var night := false
 var track_t := 35.0      # 오늘 노면 온도 (°C) — 높을수록 공기압이 많이 오른다
+var track_now := 35.0    # 지금 노면 온도 (°C) — WEC 는 밤에 식는다 (track_temp_at, 선두 랩마다)
 var psi_min := 22.0      # 최소 출발 공기압 (규정)
 var psi_hot_opt := 24.0  # 숨은 최적 '주행(데워진)' 공기압 — 연습 피드백·엔지니어 추천으로 찾는다
 var psi_eng_err := 0.0   # 퀵 레이스 내 팀 엔지니어 추천의 치우침
@@ -566,7 +573,14 @@ func weather_pen(comp: String, w: float) -> float:
 	return 0.4 + 7.4 * pow((0.85 - w) / 0.85, 1.25)
 
 
+## 컴파운드 값 [속도, 마모, 마모 손해 계수]: WEC 는 WEC_COMP
+func cpv(k: String) -> Array:
+	return WEC_COMP[k] if is_wec() else COMP[k]
+
+
 func cliff_pen(comp: String, w: float) -> float:
+	if comp == "S" and is_wec() and w > 0.65: # WEC 소프트는 미디엄처럼 오래 감 (WEC_COMP)
+		return 1.5 + 2.5 * minf(1.0, (w - 0.65) / 0.35)
 	if comp == "S" and w > 0.60:
 		return 1.6 + 2.6 * minf(1.0, (w - 0.60) / 0.40)
 	if comp == "M" and w > 0.65:
@@ -624,7 +638,7 @@ func stop_cost() -> float:
 
 
 func true_wear_rate(comp: String) -> float:
-	return float(COMP[comp][1]) * float(true_mult.get(comp, 1.0)) * float(rules.get("wear_mult", 1.0))
+	return float(cpv(comp)[1]) * float(true_mult.get(comp, 1.0)) * float(rules.get("wear_mult", 1.0))
 
 
 # ── 쓴 타이어 세트 (수정 15): 세트마다 {"w": 쌓인 마모(이 레이스 랩 단위 0~1), "h": 달군 횟수} ──
@@ -974,6 +988,85 @@ func _init_tyre_press() -> void:
 	track_t = t0 + gauss(5.0)
 	psi_hot_opt = psi_min + press_rise("race", t0) + uni(-0.6, 0.8)
 	psi_eng_err = gauss(0.4)
+	track_now = track_temp_at(0.0)
+
+
+## 노면 온도 (°C), p = 레이스 진행(0~1). 밤이 있는 서킷은 해가 지면 nightDrop 만큼 식고 해질녘·새벽(진행 6% 구간)에 서서히 바뀐다
+func track_temp_at(p: float) -> float:
+	var nt = CIRC.get("night")
+	if nt == null:
+		return track_t
+	var n0: float = float(nt[0])
+	var n1: float = float(nt[1])
+	var f := 1.0
+	if n0 > 0.0:
+		f = clampf((p - n0 + 0.03) / 0.06, 0.0, 1.0)
+	if n1 < 1.0:
+		f *= 1.0 - clampf((p - n1 + 0.03) / 0.06, 0.0, 1.0)
+	return track_t - float(CIRC.get("nightDrop", DB.wec.get("nightDrop", 14.0))) * f
+
+
+## 컴파운드 노면 온도 창 [낮음, 높음] °C (data/wec.json tyreWin — 미쉐린 하이퍼카)
+func tyre_win(k: String) -> Array:
+	return DB.wec.get("tyreWin", {}).get(k, [-99.0, 99.0])
+
+
+## 온도 창 밖 정도 (°C): + 뜨거움 · − 차가움 · 0 = 창 안. 하이퍼카 슬릭만 (LMGT3·LMP2 는 한 종류라 해당 없음)
+func win_off(cls: String, k: String, temp: float) -> float:
+	if not is_wec() or cls != "HY" or not SLICK.has(k):
+		return 0.0
+	var w: Array = tyre_win(k)
+	if temp > float(w[1]):
+		return temp - float(w[1])
+	if temp < float(w[0]):
+		return temp - float(w[0])
+	return 0.0
+
+
+## 온도 창 밖이면 타이어 온도 목표를 얼마나 옮기나 (+ 과열 쪽 · − 저온 쪽)
+func win_tt(cls: String, k: String, temp: float) -> float:
+	var o: float = win_off(cls, k, temp)
+	if o == 0.0:
+		return 0.0
+	return signf(o) * (WIN_BASE + WIN_K * absf(o))
+
+
+## WEC 컴파운드 고르기: 새 타이어로 달릴 n 랩 동안 예상 노면 온도(구간 가운데)로 각 컴파운드의 시간을 어림해 가장 빠른 것.
+## 팀 전략 능력만큼 온도를 잘못 읽고, 공격형은 무른 쪽·아끼는 팀은 단단한 쪽으로 조금 치우친다. 플레이어 자동 박스·피트 탭 표시도 같은 식
+func wec_pick_comp(c, n: int, noisy: bool = true) -> String:
+	var al: Array = wec_comps(c.cls)
+	if al.size() == 1:
+		return String(al[0])
+	n = maxi(1, n)
+	var p_mid: float = (float(leader_lap) + n * 0.5) / maxf(1.0, float(laps))
+	var temp: float = track_temp_at(p_mid) + (gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0)
+	var best := String(al[0])
+	var best_t := INF
+	for k in al:
+		var t: float = comp_run_time(c, String(k), n, temp)
+		if c.wec_style == "push" and k == "S":
+			t -= 0.1 * wsc() * n
+		elif c.wec_style == "save" and k == "H":
+			t -= 0.1 * wsc() * n
+		if t < best_t:
+			best_t = t
+			best = String(k)
+	return best
+
+
+## 컴파운드 k 로 노면 temp°C 에서 n 랩 달리는 시간 어림 (초, 기준 대비): 속도 + 마모 손해 + 절벽 + 온도 창 밖 손해
+func comp_run_time(c, k: String, n: int, temp: float) -> float:
+	var ws: float = wsc()
+	var ttg: float = float(PACE[c.pace][3]) + win_tt(c.cls, k, temp)
+	var hot: float = maxf(0.0, ttg - 0.80)
+	var cold: float = maxf(0.0, 0.42 - ttg)
+	var r: float = true_wear_rate(k) * float(CIRC["wear"]) * WEC_WEAR * (1.0 + hot * 5.0)
+	var t := 0.0
+	var w := 0.0
+	for i in n:
+		t += (float(cpv(k)[0]) + w * w * float(cpv(k)[2]) + cliff_pen(k, w) + cold * 4.0 + hot * 3.0) * ws
+		w += r
+	return t
 
 
 ## 달리면서 오르는 공기압 (psi). F1 은 워머(70°C)로 데운 뒤 재는 출발 공기압이라 조금, WEC 는 워머 금지라 차가운 데서 많이.
@@ -1112,7 +1205,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var t = base * sh * car_factor(c) * (1.0 - c.speed * K["drv_k"] * spd)
 	var evo_bonus = -0.65 * track_evo * (1.0 - w)
 	var ws := wsc()
-	t += (float(COMP[c.comp][0]) + c.used_set_pen + c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear) + c.fuel * fuel_k() + evo_bonus) * sh * ws
+	t += (float(cpv(c.comp)[0]) + c.used_set_pen + c.wear * c.wear * float(cpv(c.comp)[2]) + cliff_pen(c.comp, c.wear) + c.fuel * fuel_k() + evo_bonus) * sh * ws
 	t += setup_sec(c, c.sec, w)
 	var sx: Dictionary = setup_extra(c)
 	t += float(sx["dt"]) * sh
@@ -1185,7 +1278,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	# 타이어 온도
 	var pu: float = press_u(c, "live")
 	var pf: Array = press_fx(pu)
-	var target = tt_target + (0.05 if att_on else 0.0) + DIRTY_TT * dirty_f + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(pf[2]) - (0.05 if night else 0.0)
+	var target = tt_target + (0.05 if att_on else 0.0) + DIRTY_TT * dirty_f + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(pf[2]) - (0.05 if night else 0.0) + win_tt(c.cls, c.comp, track_now)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
@@ -1494,7 +1587,7 @@ func ai_stint_cost(k: String, n: int, w0: float, r: float) -> float:
 	var w = w0
 	for i in n:
 		var wm = w + r / 2.0
-		t += float(COMP[k][0]) + wm * wm * float(COMP[k][2]) + cliff_pen(k, wm)
+		t += float(cpv(k)[0]) + wm * wm * float(cpv(k)[2]) + cliff_pen(k, wm)
 		w += r
 	if w > ai_lim(k) + 0.08:
 		return t + 30.0 + (w - ai_lim(k)) * 60.0
@@ -1756,7 +1849,7 @@ func _best_final(c, rem: int) -> String:
 		var r: float = ai_nom_rate(k, c) * c.est_err
 		if rem * r > ai_lim(k) - 0.03:
 			continue
-		var tt: float = rem * float(COMP[k][0]) + float(COMP[k][2]) * r * r * rem * rem * rem / 3.0
+		var tt: float = rem * float(cpv(k)[0]) + float(cpv(k)[2]) * r * r * rem * rem * rem / 3.0
 		if tt < best_t:
 			best_t = tt
 			best = k
@@ -1952,9 +2045,9 @@ func pit_decision(c) -> Variant:
 					c.ai_sets[fin] -= 1
 				return {"comp": fin, "tyres": true}
 	# 계획에 없던 피트: 남은 랩 동안 잃을 시간이 피트 손실보다 클 때만
-	var pen_now: float = c.wear * c.wear * float(COMP[c.comp][2]) + cliff_pen(c.comp, c.wear)
+	var pen_now: float = c.wear * c.wear * float(cpv(c.comp)[2]) + cliff_pen(c.comp, c.wear)
 	var fresh = "H" if left > 7 else ("M" if left > 4 else "S")
-	var fresh_gap: float = float(COMP[fresh][0]) - float(COMP[c.comp][0])
+	var fresh_gap: float = float(cpv(fresh)[0]) - float(cpv(c.comp)[0])
 	if left >= 2 and ((pen_now - fresh_gap) * left * 0.75 > stop_cost() or c.wear >= 0.92):
 		if ns != null:
 			c.stops_done += 1
@@ -2059,7 +2152,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 			var fuel_line: float = c.fuel - one_lap * T.share[NS - 1]
 			if left >= 1 and fuel_line < one_lap * 0.90:
 				var d_t: bool = c.wear > 0.45 or kind_of(c.comp) != want_kind
-				var comp0: String = (wec_fit_comp(c.cls, "M") if want == "slick" else "W") if d_t else c.comp
+				var comp0: String = (wec_pick_comp(c, wec_tyre_run(c, left), false) if want == "slick" else "W") if d_t else c.comp
 				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
 				var d_d: bool = c.auto_swap or must_swap(c)
 				return {"comp": comp0, "tyres": d_t, "driver": d_d, "fuel": true, "fill": _auto_fill(c)}
@@ -2120,19 +2213,20 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		driver = must_swap(c)
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
-		# 컴파운드 선택: 마지막 한 스틴트·서늘한 밤·공격형 팀은 소프트, 남은 게 길고 아끼는 팀은 하드
-		var one_stint: bool = left <= STINT + 1 or c.tyre_every <= 1
-		if one_stint and (left <= STINT + 1 or night or c.wec_style == "push") and rnd() < (0.75 if left <= STINT + 1 else 0.45):
-			comp = "S"
-		elif c.wec_style == "save" and left > STINT * 2 and rnd() < 0.5:
-			comp = "H"
-		elif comp == "S" and not one_stint:
-			comp = "M"
+		# 컴파운드 선택: 이 타이어로 달릴 구간(마지막이면 남은 랩, 아니면 타이어 교체 주기)의 예상 노면 온도로 계산 (수정 24)
+		comp = wec_pick_comp(c, wec_tyre_run(c, left))
 	if not tyres:
 		comp = c.comp
 	comp = wec_fit_comp(c.cls, comp)
 	c.crew_out = true
 	return {"comp": comp, "tyres": tyres, "driver": driver, "fuel": true, "fill": _auto_fill(c)}
+
+
+## 새 타이어로 달릴 랩 수 어림: 남은 게 한 스틴트 남짓이면 끝까지, 아니면 타이어 교체 주기(더블 스틴트 등)
+func wec_tyre_run(c, left: int) -> int:
+	if left <= STINT + 1:
+		return left
+	return mini(left, STINT * maxi(1, c.tyre_every))
 
 
 ## AI·자동 박스 급유량: 남은 거리가 한 탱크 안이면 완주에 필요한 만큼만(스플래시) → 정차가 짧다. 아니면 가득
@@ -2574,7 +2668,7 @@ func schedule_next(c, t: float) -> void:
 			if car_in_front != null:
 				var fx2: float = car_in_front.cross[k + 1] if car_in_front.cross.size() > k + 1 else car_in_front.sec_end
 				dur = maxf(dur, fx2 + 0.35 - t)
-		c.wear = minf(1.0, c.wear + float(COMP[c.comp][1]) * 0.25 * c.tyre_deg_rate * sh)
+		c.wear = minf(1.0, c.wear + float(cpv(c.comp)[1]) * 0.25 * c.tyre_deg_rate * sh)
 		c.fuel -= FPL * 0.55 * c.fuel_burn_rate * sh
 		c.ers = clampf(c.ers + 0.3 * sh, 0.0, 1.0)
 		c.tt = clampf(c.tt + (0.35 - c.tt) * 0.3, 0.0, 1.0)
@@ -2754,6 +2848,7 @@ func on_leader_lap() -> void:
 		event("노면 변화: 이제 %s 타이어가 맞아요" % ("슬릭" if nk == "slick" else TYRE_KO[nk]), "wet")
 	if wet > 0.85 and not sc and rnd() < 0.25:
 		deploy("SC")
+	track_now = track_temp_at(float(l) / maxf(1.0, float(laps)))
 	if CIRC.has("night") and CIRC["night"] != null:
 		var prog = float(l) / laps
 		var n: bool = prog >= float(CIRC["night"][0]) and prog < float(CIRC["night"][1])
@@ -3370,7 +3465,7 @@ func prepare_start() -> void:
 func my_rates(c) -> Dictionary:
 	var out := {}
 	for k in SLICK:
-		out[k] = float(COMP[k][1]) * float(plan_mult.get(k, 1.0)) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85 * c.tyre_deg_rate
+		out[k] = float(cpv(k)[1]) * float(plan_mult.get(k, 1.0)) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85 * c.tyre_deg_rate
 	var done_laps: int = c.lap - c.stint_start_lap
 	if done_laps >= 3 and SLICK.has(c.comp):
 		var obs: float = (c.wear - c.stint_start_wear) / float(done_laps)
@@ -3888,7 +3983,7 @@ func predict_pit(c) -> Variant:
 
 ## 공개 정보로 본 타이어 마모율(랩당). 남의 차는 실제 마모를 모르니 달린 랩 × 컴파운드 기준값(×0.85)
 func est_wear_rate(comp: String) -> float:
-	return float(COMP[comp][1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85
+	return float(cpv(comp)[1]) * float(rules.get("wear_mult", 1.0)) * float(CIRC["wear"]) * (WEAR_SCALE / laps) * 0.85
 
 
 func _seen_wear(o) -> float:
@@ -3915,8 +4010,8 @@ func undercut_net(att, dfn) -> Variant:
 			nc = "M"
 	var aw: float = _seen_wear(att)
 	var dw: float = _seen_wear(dfn)
-	var gain_lap: float = aw * aw * float(COMP[att.comp][2]) + cliff_pen(att.comp, aw) + float(COMP[att.comp][0]) - float(COMP[nc][0])
-	var dfn_lap: float = dw * dw * float(COMP[dfn.comp][2])
+	var gain_lap: float = aw * aw * float(cpv(att.comp)[2]) + cliff_pen(att.comp, aw) + float(cpv(att.comp)[0]) - float(cpv(nc)[0])
+	var dfn_lap: float = dw * dw * float(cpv(dfn.comp)[2])
 	var gp: float = float(att.cross[k]) - float(dfn.cross[k])
 	return {"code": dfn.code if att.mine else att.code, "net": (gain_lap + dfn_lap * 0.5) * 2.0 - 1.0 - gp}
 
@@ -4044,8 +4139,8 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 
 func _finish_wec_car(c, stall_keys: Array) -> void:
 	c.comp = wec_fit_comp(c.cls, c.comp)
-	if not c.mine and c.cls == "HY" and wec_comps("HY").has("S") and rnd() < 0.15:
-		c.comp = "S"
+	if not c.mine and c.cls == "HY":
+		c.comp = wec_pick_comp(c, STINT * maxi(1, c.tyre_every)) # 출발 노면 온도로 (수정 24)
 	c.wec_sets = wec_race_sets(c.cls)
 	apply_driver(c)
 	c.used = {c.comp: true}

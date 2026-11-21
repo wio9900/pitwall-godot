@@ -24,6 +24,7 @@ var tab := "drive"
 ## 피트 설정 초안 (WEC 드라이버는 기본 '교대' — 주행 시간 규정 때문에 보통 교대가 맞다)
 var draft: Array = [{"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "yes", "fill": 1.0}, {"comp": "", "tyres": true, "fuel": true, "driver": true, "drv": -1, "fuel_pick": "yes", "fill": 1.0}]
 var _pits_seen: Array = [0, 0]
+var _wec_comp_set := {}     # WEC 기본 컴파운드를 엔지니어 계산으로 넣었는지 ("차 id:피트 수")
 var _seen_seq := -1
 
 var _prompt: PanelContainer
@@ -683,7 +684,15 @@ func _refresh_pit(c) -> void:
 	if String(d["comp"]) == "":
 		var it: String = sim.ideal_tyre(sim.wet)
 		d["comp"] = (String(ns["comp"]) if ns != null else "M") if it == "slick" else it
+	# WEC 하이퍼카: 다음 타이어로 달릴 구간 가운데의 예상 노면 온도 → 컴파운드마다 온도 창 안/밖 (수정 24)
+	var run_n: int = sim.wec_tyre_run(c, int(sim.laps_to_go(c))) if wec else 0
+	var run_t: float = sim.track_temp_at((float(sim.leader_lap) + run_n * 0.5) / maxf(1.0, float(sim.laps))) if wec else 0.0
 	if wec:
+		var ck := "%d:%d" % [c.id, c.pits] # 피트를 마칠 때마다 다시 계산
+		if not _wec_comp_set.has(ck):
+			_wec_comp_set[ck] = true
+			if sim.ideal_tyre(sim.wet) == "slick":
+				d["comp"] = sim.wec_pick_comp(c, run_n, false) # 기본 = 엔지니어 계산 (플레이어가 고르면 그대로)
 		d["comp"] = sim.wec_fit_comp(c.cls, String(d["comp"]))
 	var allowed: Array = sim.dry_list(c)
 	for i in _tyre_btns.size():
@@ -692,7 +701,10 @@ func _refresh_pit(c) -> void:
 		b.visible = not (wec and (comp == "I" or (RS.SLICK.has(comp) and not allowed.has(comp))))
 		var sub: String = RS.TYRE_KO[comp]
 		if wec:
-			pass # WEC 새 세트 수는 컴파운드 공용이라 아래 한 줄에만 표시
+			# WEC 새 세트 수는 컴파운드 공용이라 아래 한 줄에만 표시. 대신 온도 창
+			if RS.SLICK.has(comp) and allowed.size() > 1:
+				var wo: float = sim.win_off(c.cls, comp, run_t)
+				sub = "창 안" if wo == 0.0 else ("뜨거움 +%d°" % int(ceil(wo)) if wo > 0.0 else "차가움 %d°" % int(floor(wo)))
 		elif RS.SLICK.has(comp) and c.tyre_sets != null and c.tyre_sets.has(comp):
 			var rem := int(c.tyre_sets[comp])
 			sub = "새 %d세트" % rem if rem > 0 else "쓴 세트"
@@ -819,6 +831,8 @@ func _refresh_pit(c) -> void:
 		var sets_txt := ""
 		if wec:
 			sets_txt = " · 새 드라이 %d세트 남음 (규정: %s)" % [c.wec_sets, "·".join(PackedStringArray(allowed))]
+			if allowed.size() > 1:
+				sets_txt += "\n[color=#8b98a5]노면 지금 %d°C · 이 타이어로 달릴 %d랩 동안 약 %d°C (창: S %s · M %s · H %s)[/color]" % [int(round(sim.track_now)), run_n, int(round(run_t)), _win_txt("S"), _win_txt("M"), _win_txt("H")]
 		elif c.tyre_sets != null:
 			sets_txt = " · 새 타이어 S:%d M:%d H:%d" % [int(c.tyre_sets["S"]), int(c.tyre_sets["M"]), int(c.tyre_sets["H"])]
 		var est := ""
@@ -1132,3 +1146,13 @@ func _pen_tag(c) -> String:
 				return "·" + kv[1]
 		return ""
 	return ""
+
+
+## 컴파운드 온도 창 글자 ("~28°" · "12~40°" · "25°~")
+func _win_txt(k: String) -> String:
+	var w: Array = sim.tyre_win(k)
+	if float(w[0]) <= 0.0:
+		return "~%d°" % int(w[1])
+	if float(w[1]) >= 60.0:
+		return "%d°~" % int(w[0])
+	return "%d~%d°" % [int(w[0]), int(w[1])]
