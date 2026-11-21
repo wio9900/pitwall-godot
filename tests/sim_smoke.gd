@@ -177,5 +177,49 @@ func _init() -> void:
 	print("   반쯤 고장: 랩당 +%.2f초 수리=%s → 피트 후 %s · 트랙 포지션 값 모나코 %.1f > 몬자 %.1f %s" % [dt_f, rep_f, "해제" if ai_f.fault == null else "남음", fx.stop_cost(), mz.stop_cost(), "OK" if fault_ok and tp_ok else "실패"])
 	if not (fault_ok and tp_ok):
 		fails += 1
+	# 비·노면: 섹터별 노면(평균 = wet, 라인 밖 ≥ 라인), 마를 때 라인 먼저, 팀 예보 오차(전략 능력 높을수록 작음), 크로스오버
+	var wx_ok := true
+	var dry_line := false
+	var err_hi := 0.0
+	var err_lo := 0.0
+	for sd_w in 12:
+		var ws = RaceSimS.new()
+		ws.new_race("silverstone", -1, 25, "rain", ["M", "M"], 6100 + sd_w)
+		var best = ws.cars[0]
+		var worst = ws.cars[0]
+		for c in ws.cars:
+			if ws.fc_q(c) > ws.fc_q(best):
+				best = c
+			if ws.fc_q(c) < ws.fc_q(worst):
+				worst = c
+		err_hi += absf(float(ws.fc_belief(best)["s"]) - float(ws.rain["start"]))
+		err_lo += absf(float(ws.fc_belief(worst)["s"]) - float(ws.rain["start"]))
+		ws.prepare_start()
+		var gw := 0
+		while not ws.done and gw < 200000:
+			ws.advance(2.0)
+			gw += 1
+			if ws.sec_wet.size() != ws.NS:
+				wx_ok = false
+				break
+			var m := 0.0
+			for k in ws.NS:
+				m += float(ws.sec_wet[k]) * float(ws.T.share[k])
+				if float(ws.off_wet[k]) + 0.0001 < float(ws.sec_wet[k]):
+					wx_ok = false
+				if ws.off_gap(k) > 0.05:
+					dry_line = true
+			if absf(m - ws.wet) > 0.001:
+				wx_ok = false
+	var xs = RaceSimS.new()
+	xs.new_race("monza", -1, 20, "dry", ["M", "M"], 3)
+	for k in xs.NS:
+		xs.sec_wet[k] = 0.5
+	xs.wet = 0.5
+	var xo: Dictionary = xs.crossover(xs.cars[0])
+	var xo_ok: bool = xo["alt"] == "I" and float(xo["now"]) > 1.0
+	print("   비·노면: 섹터 노면 %s · 라인 먼저 마름 %s · 예보 시작 랩 오차 좋은 팀 %.1f < 약한 팀 %.1f · 크로스오버 슬릭→인터 %+.1f초 %s" % ["OK" if wx_ok else "실패", "OK" if dry_line else "없음", err_hi / 12.0, err_lo / 12.0, float(xo["now"]), "OK" if wx_ok and dry_line and err_hi < err_lo and xo_ok else "실패"])
+	if not (wx_ok and dry_line and err_hi < err_lo and xo_ok):
+		fails += 1
 	print("총 %dms, 실패 %d" % [Time.get_ticks_msec() - t0, fails])
 	quit(1 if fails > 0 else 0)

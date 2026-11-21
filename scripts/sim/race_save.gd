@@ -9,7 +9,7 @@ const DB = preload("res://scripts/data/game_db.gd")
 const BLog = preload("res://scripts/sim/blog.gd")
 const PATH := "user://race_resume.bin"
 const VER := 1
-const SKIP := ["T", "CIRC", "rng", "cars", "_oc", "_oc_clock"]
+const SKIP := ["T", "CIRC", "rng", "wx_rng", "cars", "_oc", "_oc_clock"]
 
 
 static func _vars(o: Object) -> Array:
@@ -80,7 +80,7 @@ static func pack(sim) -> Dictionary:
 		for n in car_vars:
 			d[n] = _enc(c.get(n))
 		cs.append(d)
-	return {"sim": s, "cars": cs, "rng_seed": sim.rng.seed, "rng_state": sim.rng.state}
+	return {"sim": s, "cars": cs, "rng_seed": sim.rng.seed, "rng_state": sim.rng.state, "wx_seed": sim.wx_rng.seed, "wx_state": sim.wx_rng.state}
 
 
 ## 저장용 딕셔너리 → 새 sim
@@ -110,6 +110,10 @@ static func unpack(data: Dictionary):
 			c.fuel = minf(float(c.fuel), sim.TANK)
 	sim.rng.seed = int(data["rng_seed"])
 	sim.rng.state = int(data["rng_state"])
+	if data.has("wx_seed"):
+		sim.wx_rng.seed = int(data["wx_seed"])
+		sim.wx_rng.state = int(data["wx_state"])
+	sim.wx_fix() # 예전 저장: 섹터 노면이 없으면 전체 노면으로 채움
 	return sim
 
 

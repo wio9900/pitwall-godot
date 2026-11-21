@@ -156,6 +156,7 @@ var lap_hist: Array = []
 var pos_hist: Array = []    # 랩별 클래스 순위 [{lap, pos}] (복기용, 잘리지 않음)
 var lap_times: Array = []   # 랩별 랩타임 [{lap, t, comp, pit, cliff}] (복기용)
 var pit_log: Array = []     # 피트 기록 [{lap, pos, from, to, sc}]
+var xo_feel := ""           # 드라이버가 '대안 타이어가 빠를 것 같다'고 말한 타이어 종류 (같은 말 반복 방지)
 var cur_sec_times: Array = []
 var last_sec_times: Array = []
 

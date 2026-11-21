@@ -53,6 +53,7 @@ var _radar_head: RichTextLabel
 var _radar: Array = []
 var _radar_sb: Array = []
 var _radar_row: HBoxContainer
+var _wx_line: RichTextLabel # 섹터별 노면 + 크로스오버 (젖었을 때만)
 var _w_opts: VBoxContainer
 var _w_tyre_btns: Array = []
 var _w_fuel_btns: Array = []
@@ -323,6 +324,7 @@ func _build_pit(pg: VBoxContainer) -> void:
 		cell.add_child(r)
 		_radar.append(r)
 		_radar_sb.append(sb)
+	_wx_line = _rt(pg, 12)
 	# WEC: 타이어 교체 여부 · 급유 · 교대
 	_w_opts = K.vbox(4)
 	pg.add_child(_w_opts)
@@ -655,18 +657,19 @@ func _refresh_pit(c) -> void:
 		_pred.text = "[font_size=26][b]P%d[/b][/font_size]  [color=#8b98a5]지금 박스 시 복귀 순위 (손실 약 %d초%s)[/color]\n%s · %s%s" % [int(pr["pos"]), int(round(float(pr["loss"]))), (", " + sim.sc_kind + " 중") if sim.sc else "", a, b, u]
 	if not wec and sim.pit_closed():
 		_pred.text = "[color=#ef4444][b]⛔ 피트레인 폐쇄 중 (L%d 까지)[/b] — 지금 들어가면 스톱 앤 고 10초 페널티[/color]\n" % sim.pit_closed_until + _pred.text
-	# 기상 레이더
+	# 기상 레이더 (내 팀 예보 — 팀 전략 능력만큼 오차, 랩마다 갱신)
 	var cur: int = mini(sim.laps, sim.leader_lap + 1)
 	# 앞으로 5랩 동안 비 걱정이 없으면 칸 대신 한 줄만
 	var calm: bool = sim.wet < 0.05
 	for i in 5:
-		if cur + i + 1 <= sim.laps and sim.forecast_wet_at(cur + i + 1) >= 0.2:
+		if cur + i + 1 <= sim.laps and (sim.forecast_wet_at(cur + i + 1, c) >= 0.2 or sim.forecast_prob_at(cur + i + 1, c) >= 40):
 			calm = false
 	_radar_row.visible = not calm
+	_wx_line.visible = sim.wet >= 0.03 or sim.ever_wet
 	if calm:
-		_radar_head.text = "[color=#8b98a5]날씨[/color]  ☀ 앞으로 5랩 비 걱정 없음 [color=#8b98a5](강수확률 %d%%)[/color]" % sim.forecast_prob_at(cur)
+		_radar_head.text = "[color=#8b98a5]날씨[/color]  ☀ 앞으로 5랩 비 걱정 없음 [color=#8b98a5](강수확률 %d%%)[/color]" % sim.forecast_prob_at(cur, c)
 	else:
-		_radar_head.text = "[color=#8b98a5]기상 레이더[/color]  지금 강수확률 [b]%d%%[/b] · 노면 수막 [b]%.1fmm[/b] [color=#8b98a5](인터 1.2mm · 웻 3.5mm부터)[/color]" % [sim.forecast_prob_at(cur), sim.wet_mm(sim.wet)]
+		_radar_head.text = "[color=#8b98a5]기상 레이더 · 팀 예보 정확도 %s[/color]  지금 강수확률 [b]%d%%[/b] · 노면 수막 [b]%.1fmm[/b] [color=#8b98a5](인터 1.2mm · 웻 3.5mm부터)[/color]" % [_fc_grade(sim.fc_q(c)), sim.forecast_prob_at(cur, c), sim.wet_mm(sim.wet)]
 	for i in 5:
 		var tl: int = cur + i + 1
 		var r: RichTextLabel = _radar[i]
@@ -675,10 +678,12 @@ func _refresh_pit(c) -> void:
 			r.text = "[center][color=#8b98a5]FIN[/color][/center]"
 			sb.bg_color = K.PANEL2
 			continue
-		var fw: float = sim.forecast_wet_at(tl)
+		var fw: float = sim.forecast_wet_at(tl, c)
 		var icon := "🌧" if fw >= 0.55 else ("🌦" if fw >= 0.2 else "☀")
 		sb.bg_color = Color("#1e3a8a") if fw >= 0.55 else (Color("#1e3350") if fw >= 0.2 else K.PANEL2)
-		r.text = "[center][b]L%d[/b] %s\n%d%% · %.1fmm[/center]" % [tl, icon, sim.forecast_prob_at(tl), sim.wet_mm(fw)]
+		r.text = "[center][b]L%d[/b] %s\n%d%% · %.1fmm[/center]" % [tl, icon, sim.forecast_prob_at(tl, c), sim.wet_mm(fw)]
+	if _wx_line.visible:
+		_wx_line.text = _wx_text(c)
 	# 타이어 선택
 	var ns: Variant = sim.next_stop(c)
 	if String(d["comp"]) == "":
@@ -1156,3 +1161,44 @@ func _win_txt(k: String) -> String:
 	if float(w[1]) >= 60.0:
 		return "%d°~" % int(w[0])
 	return "%d~%d°" % [int(w[0]), int(w[1])]
+
+
+## 예보 정확도 글자 (팀 전략 능력 0~1)
+func _fc_grade(q: float) -> String:
+	return "높음" if q >= 0.7 else ("보통" if q >= 0.4 else "낮음")
+
+
+## 섹터별 노면 칸 + 지금 타이어 vs 대안 (랩당 차이, 예보로 뒤집히는 랩)
+func _wx_text(c) -> String:
+	var secs: PackedStringArray = []
+	for s in sim.NS:
+		var w: float = sim.sec_w(s)
+		var col: String = "#8b98a5" if w < 0.05 else ("#7dd3fc" if w < 0.22 else ("#22c55e" if w < 0.65 else "#3b82f6"))
+		var dry_line: String = "·" if sim.off_gap(s) >= 0.08 else "" # 라인만 마른 섹터
+		secs.append("[color=%s]S%d %.1f%s[/color]" % [col, s + 1, sim.wet_mm(w), dry_line])
+	var t: String = "[color=#8b98a5]노면(mm)[/color] " + "  ".join(secs)
+	var gap := 0.0
+	for s in sim.NS:
+		gap = maxf(gap, sim.off_gap(s))
+	if gap >= 0.08:
+		t += "  [color=#8b98a5](· = 라인만 마름 → 추월 어려움)[/color]"
+	var xo: Dictionary = sim.crossover(c)
+	var cur_ko: String = "슬릭" if sim.kind_of(c.comp) == "slick" else String(sim.TYRE_KO[c.comp])
+	var alt_ko: String = "슬릭" if xo["alt"] == "slick" else String(sim.TYRE_KO[xo["alt"]])
+	var now: float = float(xo["now"])
+	var line: String
+	if now > 0.0:
+		var loss: float = sim.wec_stop_time(c, true, false) if sim.is_wec() else sim.pit_loss()
+		var pay: int = int(ceil(loss / maxf(0.05, now)))
+		line = "[color=#f59e0b]지금 %s 랩당 %.1f초 빠름[/color] [color=#8b98a5](피트 손실 약 %d초 → %d랩이면 회수)[/color]" % [_iga(alt_ko), now, int(round(loss)), pay]
+	else:
+		line = "[color=#22c55e]지금 %s 유지가 랩당 %.1f초 빠름[/color]" % [cur_ko, -now]
+	if int(xo["lap"]) > 0:
+		line += " · [b]L%d쯤 뒤집힘[/b] [color=#8b98a5](팀 예보)[/color]" % int(xo["lap"])
+	return t + "\n[color=#8b98a5]%s vs %s:[/color] %s" % [cur_ko, alt_ko, line]
+
+
+## 받침 이/가 (마지막 글자에 받침이 있으면 "이")
+static func _iga(w: String) -> String:
+	var u: int = w.unicode_at(w.length() - 1)
+	return w + ("이" if u >= 0xAC00 and u <= 0xD7A3 and (u - 0xAC00) % 28 != 0 else "가")

@@ -488,7 +488,7 @@ func _process(delta: float) -> void:
 func _refresh_static() -> void:
 	var key := ""
 	if sim != null and sim.T != null:
-		key = "%s|%s|%d|%d|%s|%d|%d" % [sim.circ_key, sim.night, int(sim.wet * 20.0), int(sim.drs_on()), size, get_viewport().msaa_2d, follow_slot]
+		key = "%s|%s|%s|%d|%s|%d|%d" % [sim.circ_key, sim.night, _wx_key(), int(sim.drs_on()), size, get_viewport().msaa_2d, follow_slot]
 	var k: float = _s / maxf(_st_s, 0.000001)
 	var pos: Vector2 = _off - (_st_off + _st_m) * k
 	var full: Vector2 = (size + _st_m * 2.0) * k
@@ -765,9 +765,18 @@ func _draw_track(T, night: bool) -> void:
 	_ci.draw_polyline(poly, EDGE.darkened(0.55 if night else 0.15), w + maxf(2.0, w * 0.14), true)
 	_ci.draw_polyline(poly, Color("#262c36") if night else ASPHALT, w, true)
 	var inner: Color = Color("#171c24") if night else ASPHALT_IN
-	if sim.wet > 0.05:
-		inner = inner.lerp(WET_TINT, 0.15 + sim.wet * 0.45)
-	_ci.draw_polyline(poly, inner, w * 0.62, true)
+	if sim.wet > 0.05 and sim.sec_wet.size() == sim.NS:
+		# 섹터마다 노면 색: 아스팔트 = 라인 밖, 안쪽 띠 = 레이싱 라인 (마를 때 라인이 먼저 어두워짐)
+		var asph: Color = Color("#262c36") if night else ASPHALT
+		for sx in sim.NS:
+			var seg: PackedVector2Array = _sec_poly(sx)
+			var ow: float = float(sim.off_wet[sx])
+			var lw: float = sim.sec_w(sx)
+			if ow > 0.05:
+				_ci.draw_polyline(seg, asph.lerp(WET_TINT, 0.08 + ow * 0.3), w, true)
+			_ci.draw_polyline(seg, inner.lerp(WET_TINT, 0.15 + lw * 0.45) if lw > 0.05 else inner, w * 0.62, true)
+	else:
+		_ci.draw_polyline(poly, inner, w * 0.62, true)
 	# 연석: 느린 코너 바깥쪽에 빨강·흰색 교차
 	var i := 0
 	while i < T.m:
@@ -1433,3 +1442,24 @@ func _draw_events(font) -> void:
 		var wt: String = "🏆  우승!" if _win_rank == 1 else "🍾  포디움 P%d!" % _win_rank
 		var col: Color = Color("#fbbf24") if _win_rank == 1 else Color.WHITE
 		_big_text(font, wt, size.y * 0.42, Color(col, fa), Color(0.05, 0.06, 0.08, 0.85 * fa), int(22 + 14 * pop))
+
+
+## 정적 그림 다시 그릴 때를 정하는 노면 키 (섹터별 라인·라인 밖을 0.05 단위로)
+func _wx_key() -> String:
+	if sim.wet <= 0.05 or sim.sec_wet.size() != sim.NS:
+		return "d"
+	var k := ""
+	for sx in sim.NS:
+		k += "%d.%d," % [int(sim.sec_w(sx) * 20.0), int(float(sim.off_wet[sx]) * 20.0)]
+	return k
+
+
+## 섹터 sx 구간의 트랙 점 (화면 좌표, 다음 섹터 첫 점까지 이어서 틈 없게)
+func _sec_poly(sx: int) -> PackedVector2Array:
+	var T = sim.T
+	var out := PackedVector2Array()
+	var a: int = int(T.sec_idx[sx])
+	var b: int = int(T.sec_idx[sx + 1])
+	for j in range(a, b + 1):
+		out.append(_X(T.pts[j % T.m]))
+	return out

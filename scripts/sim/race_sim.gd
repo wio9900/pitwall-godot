@@ -68,6 +68,7 @@ const STRAT_STYLES := ["aggressive", "balanced", "conservative", "reactive"]
 const STRAT_KO := {"aggressive": "공격형", "balanced": "균형형", "conservative": "보수형", "reactive": "반응형"}
 
 var rng := RandomNumberGenerator.new()
+var wx_rng := RandomNumberGenerator.new() # 날씨(섹터·예보) 전용 → 마른 레이스 결과는 예전과 같게
 var T: Variant            # 트랙 (track.gd)
 var CIRC: Dictionary = {}
 var circ_key := ""
@@ -99,7 +100,15 @@ var clock := 0.0
 var wet := 0.0
 var track_evo := 0.15
 var rain: Variant = null # {start, end, level}
-var fc: Variant = null   # 예보 {lo, hi, p}
+var fc: Variant = null   # 예보 {lo, hi, p} — 비가 안 오는 날의 '헛예보'에만 쓴다 (비 오는 날은 rain + 팀 오차)
+# 섹터별 노면: wet = 섹터 평균(랩타임 비중), 기존 판단 코드는 이 평균을 본다
+var sec_wet: Array = []  # 섹터별 레이싱 라인 젖음 0~1 (차가 실제로 달리는 곳)
+var off_wet: Array = []  # 섹터별 라인 밖 젖음 — 마를 때 라인이 먼저 마르고 밖은 늦게 (추월·실수에 영향)
+var wx_k: Array = []     # 섹터별 비 세기 배율 (한쪽만 더 쏟아짐)
+var wx_dry: Array = []   # 섹터별 마르는 속도 배율 (그늘·나무 = 느림)
+var wx_lag: Array = []   # 섹터별 비가 늦게 닿고 늦게 그치는 랩 수 (비구름이 한쪽에서 들어옴)
+var _fcw: Dictionary = {} # fc_window 캐시 (저장 안 해도 됨)
+var fc_err: Dictionary = {} # 팀 이름 → 예보 오차 {st, en, lv} (랩마다 레이더처럼 갱신, 전략 능력이 높을수록 작음)
 var sc := false
 var sc_kind := ""
 var sc_end_lap := 0
@@ -473,8 +482,9 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 			wet = float(rain["level"]) * 0.9
 			ever_wet = true
 			wet_start = true
+	_wx_init()
 	if rain != null:
-		fc = {"lo": maxi(1, rain["start"] - 2), "hi": rain["start"] + 2, "p": int(round(uni(50, 80)))}
+		fc = null # 비 오는 날 예보는 팀마다 rain + 오차 (forecast_*)
 	elif rnd() < 0.3:
 		fc = {"lo": int(round(laps * 0.4)), "hi": int(round(laps * 0.7)), "p": int(round(uni(15, 35)))}
 	else:
@@ -1227,7 +1237,7 @@ func next_stop(c) -> Variant:
 # ═════════ 섹터 시간 ═════════
 func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var sh: float = T.share[c.sec]
-	var w = wet
+	var w: float = sec_w(c.sec) # 이 섹터 레이싱 라인 노면
 	var base = float(CIRC["base"])
 	var pc: Array = PACE[c.pace]
 	var spd: float = pc[0]
@@ -1910,6 +1920,17 @@ func _alt_slick(comp: String) -> String:
 	return "M"
 
 
+## 차 c 의 팀 예보로, 지금 타이어 종류(have)가 맞지 않는 랩이 cur 부터 몇 랩 이어지나 (최대 8랩)
+func _wrong_laps(c, cur: int, have: String) -> int:
+	var n := 0
+	for l in range(cur, mini(laps, cur + 8) + 1):
+		if ideal_tyre(forecast_wet_at(l, c)) != have:
+			n += 1
+		else:
+			break
+	return n
+
+
 ## 피트 판단: 마지막 섹터에 들어설 때(피트 입구 전) 호출. 플레이어 차는 박스 지시가 있을 때만 들어온다.
 func pit_decision(c) -> Variant:
 	var cur: int = c.lap + 1
@@ -1951,17 +1972,11 @@ func pit_decision(c) -> Variant:
 	var tact: float = clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1)
 	if want != have:
 		var nw = ("M" if left > 8 else "S") if want == "slick" else want
-		var lose = weather_pen(c.comp, wet) - weather_pen(nw, wet)
+		var lose = wx_pen_track(c.comp) - wx_pen_track(nw)
 		var horizon: float = minf(left, uni(2, 9))
 		if tact >= 0.7:
-			# 예보를 읽는 팀: 실제로 맞지 않는 타이어로 달릴 랩 수를 센다 (곧 그치거나 마르면 버틴다)
-			var n_wrong := 0
-			for l in range(cur, mini(laps, cur + 8) + 1):
-				if ideal_tyre(forecast_wet_at(l)) != have:
-					n_wrong += 1
-				else:
-					break
-			horizon = minf(float(left), float(n_wrong) * uni(0.85, 1.15) + 0.5)
+			# 예보를 읽는 팀: 자기 팀 예보(오차 포함)로 맞지 않는 타이어로 달릴 랩 수를 센다 (곧 그치거나 마르면 버틴다)
+			horizon = minf(float(left), float(_wrong_laps(c, cur, have)) * uni(0.85, 1.15) + 0.5)
 		if lose * horizon > pit_loss() * c.nerve:
 			c.weather_pit = true
 			c.crew_out = true
@@ -1969,7 +1984,7 @@ func pit_decision(c) -> Variant:
 		return null
 	# 예보 선제 대응: 다음 랩에 노면이 바뀌고 어차피 2랩 안에 피트할 계획이면 지금 맞는 타이어로 (스톱 하나 절약)
 	if tact >= 0.8 and ns != null and int(ns["lap"]) - cur <= 2 and not sc and left > 2:
-		var want_next: String = ideal_tyre(forecast_wet_at(cur + 1))
+		var want_next: String = ideal_tyre(forecast_wet_at(cur + 1, c))
 		if want_next != have:
 			_tally("예보선제")
 			c.stops_done += 1
@@ -2206,8 +2221,11 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	var weather := false
 	if wrong:
 		var nw := "M" if want == "slick" else "W"
-		var lose: float = weather_pen(c.comp, wet) - weather_pen(nw, wet)
-		weather = lose * uni(1.8, 4.5) > wec_stop_time(c, true, false) * 0.75
+		var lose: float = wx_pen_track(c.comp) - wx_pen_track(nw)
+		var hz: float = uni(1.8, 4.5)
+		if clampf(c.strategy + (difficulty - 1) * 0.08, 0.3, 1.1) >= 0.7:
+			hz = minf(float(left), float(_wrong_laps(c, cur, kind_of(c.comp))) * uni(0.85, 1.15) + 0.5) # 예보를 읽는 팀
+		weather = lose * hz > wec_stop_time(c, true, false) * 0.75
 	# 주행 한도 직전(이번 랩을 마치면 한도): 연료가 남아도 들어와서 교대 — SC 로 스틴트가 길어지면 생기던 1랩 초과(AI 2%) 방지
 	var drv_due := false
 	if c.drivers.size() >= 2 and left >= 1:
@@ -2754,7 +2772,7 @@ func schedule_next(c, t: float) -> void:
 			elif c.instr == "hold" or hold_mate or is_yellow(c.sec):
 				dur = maxf(dur, (ahead.sec_end - t) + (0.5 if hold_mate else 1.0))
 			elif gap - diff < K["ot_gap"] and diff > 0:
-				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * wet + (0.1 if rs else 0.0) \
+				var p: float = float(CIRC["overtake"]) + diff * 0.8 + (c.aggr - ahead.aggr) * 0.1 + 0.08 - ahead.def_ * 0.15 + (c.wet - ahead.wet) * 0.3 * sec_w(c.sec) - off_gap(c.sec) * 0.6 + (0.1 if rs else 0.0) \
 					+ ((0.15 if has_ers() else 0.19) if c.drs else 0.0) + (0.06 if (has_ers() and c.ers_mode == "deploy" and c.ers > 0.02) else 0.0) + (0.08 if c.instr == "attack" else 0.0) + (ahead.wing - c.wing) * 0.02 \
 					- (0.12 if ahead.instr == "defend" else 0.0) - (0.04 if (has_ers() and ahead.ers_mode == "deploy" and ahead.ers > 0.02) else 0.0)
 				p += (0.06 if c.traits.has("dive") else 0.0) - (0.06 if ahead.traits.has("wall") else 0.0)
@@ -2768,7 +2786,7 @@ func schedule_next(c, t: float) -> void:
 						say(c, "%s 추월 성공!%s" % [ahead.code, " (DRS)" if c.drs else ""])
 					if ahead.mine:
 						say(ahead, "%s에게 추월당했어요" % c.code)
-				elif rnd() < K["crash"] * c.aggr * float(PACE[c.pace][2]) * (1.0 + 2.0 * wet) * (1.6 if c.instr == "attack" else 1.0) * (1.3 if ahead.instr == "defend" else 1.0) * (1.35 if c.traits.has("dive") else 1.0):
+				elif rnd() < K["crash"] * c.aggr * float(PACE[c.pace][2]) * (1.0 + 2.0 * sec_w(c.sec) + 3.0 * off_gap(c.sec)) * (1.6 if c.instr == "attack" else 1.0) * (1.3 if ahead.instr == "defend" else 1.0) * (1.35 if c.traits.has("dive") else 1.0):
 					if is_wec():
 						damage(c, "경합 중 접촉")
 						if c.dnf != "":
@@ -2864,11 +2882,9 @@ func on_leader_lap() -> void:
 	_update_timed_laps()
 	if sc:
 		sc_laps.append(l)
-	var tgt = 0.0
-	if rain != null and l >= rain["start"] and l < rain["end"]:
-		tgt = rain["level"]
 	var prev_kind = ideal_tyre(wet)
-	wet = clampf(wet + (tgt - wet) * (0.35 if tgt > wet else 0.15), 0.0, 1.0)
+	_wx_step(l)
+	_fc_refresh()
 	if wet >= 0.25:
 		ever_wet = true
 	if wet > 0.15:
@@ -2936,6 +2952,8 @@ func on_leader_lap() -> void:
 			continue
 		var left: int = laps - c.lap
 		var it = ideal_tyre(wet)
+		if ever_wet or wet > 0.05:
+			_xo_radio(c, left)
 		# 이미 박스 지시(예약)가 있거나 피트에 들어가는 중이면 피트 요청 무전은 하지 않는다
 		var booked: bool = c.pit_req != "" or c.boxing != null or is_pitting(c)
 		var want_k: String = it if it != "slick" else "slick"
@@ -3796,8 +3814,9 @@ func _my_auto_decision(c, cur: int, left: int, want: String) -> Variant:
 		var nw: String = want
 		if want == "slick":
 			nw = String(ns["comp"]) if ns != null else ("M" if left > 8 else "S")
-		var lose: float = weather_pen(c.comp, wet) - weather_pen(nw, wet)
-		if lose * minf(left, 5) > pit_loss():
+		var lose: float = wx_pen_track(c.comp) - wx_pen_track(nw)
+		# 자동 = 내 팀 엔지니어: 내 팀 예보로 맞지 않는 랩 수만큼 (곧 그칠 비면 버틴다)
+		if lose * minf(float(left), float(_wrong_laps(c, cur, have)) + 0.5) > pit_loss():
 			c.crew_out = true
 			say(c, "자동 전략: 노면이 바뀌었어요 → %s 로 박스" % TYRE_KO[nw])
 			return {"comp": nw, "tyres": true}
@@ -3932,24 +3951,246 @@ func request_swap() -> void:
 
 
 # ═════════ 기상 예보 · 피트 예측 (UI용) ═════════
-func forecast_wet_at(target_lap: int) -> float:
+# 비가 오는 날: 실제 비(rain)는 아무도 모른다. 팀마다 레이더 예보 = rain + 오차 (전략 능력이 높을수록, 가까울수록 정확)
+const WX_RISE := 0.35    # 비가 올 때 랩마다 목표 쪽으로 다가가는 비율 (예전 전체 노면과 같음)
+const WX_DRY := 0.15     # 레이싱 라인이 마르는 비율 (예전 전체 노면과 같음 → 평균 밸런스 유지)
+const WX_DRY_OFF := 0.08 # 라인 밖은 차가 안 지나가 늦게 마름
+const FC_RADAR := 6.0    # 이 랩 수 안쪽부터 레이더로 오차가 줄어든다
+
+
+func _wx_init() -> void:
+	wx_rng.seed = rng.seed ^ 0x5EED5
+	sec_wet = []
+	off_wet = []
+	wx_k = []
+	wx_dry = []
+	wx_lag = []
+	fc_err = {}
+	var front: int = wx_rng.randi() % NS       # 비구름이 먼저 닿는 섹터
+	var span: int = wx_rng.randi_range(2, NS - 1) # 같은 랩에 닿는 섹터 수 (나머지는 한 랩 늦게)
+	var mk := 0.0
+	var md := 0.0
+	for s in NS:
+		wx_k.append(wx_rng.randf_range(0.8, 1.15))
+		wx_dry.append(wx_rng.randf_range(0.75, 1.3))
+		wx_lag.append(0 if (wet_start or posmod(s - front, NS) < span) else 1)
+		sec_wet.append(wet)
+		off_wet.append(wet)
+		mk += float(wx_k[s]) * float(T.share[s])
+		md += float(wx_dry[s]) * float(T.share[s])
+	for s in NS: # 랩 전체 평균은 1 → 평균 노면은 예전과 같고 섹터 차이만 생긴다
+		wx_k[s] = float(wx_k[s]) / mk
+		wx_dry[s] = float(wx_dry[s]) / md
+	_fc_e(null) # 팀 예보 오차를 미리 만들어 둔다 (화면이 먼저 불러도 난수 순서가 같게)
+	for c in cars:
+		_fc_e(c)
+
+
+## 예전 저장(섹터 노면 없음) 불러올 때: 전체 노면 값으로 채운다
+func wx_fix() -> void:
+	if sec_wet.size() == NS:
+		return
+	sec_wet = []
+	off_wet = []
+	wx_k = []
+	wx_dry = []
+	wx_lag = []
+	for s in NS:
+		sec_wet.append(wet)
+		off_wet.append(wet)
+		wx_k.append(1.0)
+		wx_dry.append(1.0)
+		wx_lag.append(0)
+
+
+## 선두 랩마다: 섹터마다 비 목표로 다가가고, 마를 때는 라인이 먼저 → wet = 랩타임 비중 평균
+func _wx_step(l: int) -> void:
+	wx_fix()
+	var w_sum := 0.0
+	for s in NS:
+		var tgt := 0.0
+		var lag: int = int(wx_lag[s])
+		if rain != null and l >= int(rain["start"]) + lag and l < int(rain["end"]) + lag:
+			tgt = minf(1.0, float(rain["level"]) * float(wx_k[s]))
+		var lw: float = sec_wet[s]
+		var ow: float = off_wet[s]
+		lw += (tgt - lw) * (WX_RISE if tgt > lw else WX_DRY * float(wx_dry[s]))
+		ow += (tgt - ow) * (WX_RISE if tgt > ow else WX_DRY_OFF * float(wx_dry[s]))
+		sec_wet[s] = clampf(lw, 0.0, 1.0)
+		off_wet[s] = clampf(maxf(ow, lw), 0.0, 1.0) # 라인 밖이 라인보다 먼저 마르지는 않는다
+		w_sum += float(sec_wet[s]) * float(T.share[s])
+	wet = clampf(w_sum, 0.0, 1.0)
+
+
+## 섹터 s 레이싱 라인 젖음
+func sec_w(s: int) -> float:
+	return float(sec_wet[s]) if sec_wet.size() == NS else wet
+
+
+## 섹터 s 라인 밖이 라인보다 얼마나 더 젖었나 (마르는 중 = 한 줄만 마른 라인 → 추월 어려움)
+func off_gap(s: int) -> float:
+	return maxf(0.0, float(off_wet[s]) - float(sec_wet[s])) if off_wet.size() == NS else 0.0
+
+
+## 이 컴파운드의 날씨 손해(초/랩)를 섹터별 노면으로 계산 — 한쪽만 젖어도 그 섹터 비중만큼
+func wx_pen_track(comp: String) -> float:
+	if sec_wet.size() != NS:
+		return weather_pen(comp, wet)
+	var t := 0.0
+	for s in NS:
+		t += weather_pen(comp, float(sec_wet[s])) * float(T.share[s])
+	return t
+
+
+## 팀 예보 정확도 0~1 (팀 전략·엔지니어 능력)
+func fc_q(c) -> float:
+	return team_eng_q(c) if c != null else 0.5
+
+
+## 멀리 있을 때 비 시작·끝 랩 오차 크기 (랩)
+func _fc_sd(q: float) -> float:
+	return maxf(1.0, float(laps) * (0.03 + 0.09 * (1.0 - q)))
+
+
+func _fc_e(c) -> Dictionary:
+	var key: String = String(c.team) if c != null else ""
+	if not fc_err.has(key):
+		var q: float = fc_q(c)
+		var sd: float = _fc_sd(q)
+		fc_err[key] = {"q": q, "st": wx_rng.randfn(0.0, sd), "en": wx_rng.randfn(0.0, sd * 1.3), "lv": wx_rng.randfn(0.0, 0.06 + 0.14 * (1.0 - q))}
+	return fc_err[key]
+
+
+## 레이더 갱신: 선두 랩마다 오차가 조금씩 새로 섞인다 (평균 크기는 그대로) → 예보 숫자가 랩마다 움직인다
+func _fc_refresh() -> void:
+	for key in fc_err:
+		var e: Dictionary = fc_err[key]
+		var sd: float = _fc_sd(float(e["q"]))
+		e["st"] = float(e["st"]) * 0.8 + wx_rng.randfn(0.0, sd * 0.6)
+		e["en"] = float(e["en"]) * 0.8 + wx_rng.randfn(0.0, sd * 0.78)
+		e["lv"] = float(e["lv"]) * 0.8 + wx_rng.randfn(0.0, (0.06 + 0.14 * (1.0 - float(e["q"]))) * 0.6)
+
+
+## 이 팀이 믿는 비 {s 시작, e 끝, lv 세기, us·ue 불확실(랩)}: 실제 비 + 오차, 가까울수록 오차가 줄어든다. 비 없는 날 null
+func fc_belief(c) -> Variant:
 	if rain == null:
+		return null
+	var e: Dictionary = _fc_e(c)
+	var sd: float = _fc_sd(float(e["q"]))
+	var st := float(rain["start"])
+	var en := float(rain["end"])
+	var ls: float = st - float(leader_lap)
+	var le: float = en - float(leader_lap)
+	var ks: float = clampf(ls / FC_RADAR, 0.15, 1.0) if ls > 0.0 else 0.0 # 이미 내리면 시작은 안다
+	var ke: float = clampf(le / FC_RADAR, 0.15, 1.0) if le > 0.0 else 0.0
+	var bs: float = st + float(e["st"]) * ks
+	var be: float = maxf(bs + 1.0, en + float(e["en"]) * ke)
+	var lv: float = clampf(float(rain["level"]) + float(e["lv"]) * (ks if ls > 0.0 else 0.3), 0.2, 1.0)
+	return {"s": bs, "e": be, "lv": lv, "us": maxf(0.4, sd * ks), "ue": maxf(0.4, sd * ke)}
+
+
+## 이 팀 예보로 본 target 랩의 노면 (차 c 의 팀, null = 보통 팀)
+func forecast_wet_at(target_lap: int, c = null) -> float:
+	var b: Variant = fc_belief(c)
+	if b == null:
 		return wet
 	var w := wet
 	for l in range(leader_lap + 1, target_lap + 1):
 		var tgt := 0.0
-		if l >= int(rain["start"]) and l < int(rain["end"]):
-			tgt = float(rain["level"])
-		w = clampf(w + (tgt - w) * (0.35 if tgt > w else 0.15), 0.0, 1.0)
+		if float(l) >= float(b["s"]) and float(l) < float(b["e"]):
+			tgt = float(b["lv"])
+		w = clampf(w + (tgt - w) * (WX_RISE if tgt > w else WX_DRY), 0.0, 1.0)
 	return w
 
 
-func forecast_prob_at(target_lap: int) -> int:
-	if rain != null and target_lap >= int(rain["start"]) and target_lap < int(rain["end"]):
-		return mini(95, int(round(55.0 + float(rain["level"]) * 40.0)))
+static func _sig(x: float) -> float:
+	return 1.0 / (1.0 + exp(-1.7 * x))
+
+
+## 이 팀 예보로 본 target 랩 강수확률 (%)
+func forecast_prob_at(target_lap: int, c = null) -> int:
+	var b: Variant = fc_belief(c)
+	if b != null:
+		var t := float(target_lap)
+		var p_in: float = _sig((t - float(b["s"]) + 0.5) / float(b["us"])) * _sig((float(b["e"]) - t - 0.5) / float(b["ue"]))
+		return clampi(int(round(5.0 + p_in * (50.0 + float(b["lv"]) * 40.0))), 5, 95)
 	if fc != null and target_lap >= int(fc["lo"]) and target_lap <= int(fc["hi"]):
-		return int(fc["p"])
+		# 헛예보: 가까워지면 레이더에 아무것도 없다 → 좋은 팀은 확률을 내리고, 약한 팀은 계속 믿는다
+		var seen: float = clampf(float(int(fc["lo"]) - leader_lap) / FC_RADAR, 0.0, 1.0)
+		var q: float = fc_q(c)
+		return maxi(5, int(round(float(fc["p"]) * (seen + (1.0 - seen) * (1.0 - q) * 0.7))))
 	return 25 if wet > 0.1 else 5
+
+
+## 이 팀 예보로 앞으로 비가 올 만한 구간 {lo, hi, p} (확률 30% 넘는 첫·끝 랩, 최고 확률) — 없으면 null
+func fc_window(c = null) -> Variant:
+	var key: String = "%d|%s" % [leader_lap, String(c.team) if c != null else ""]
+	if _fcw.has(key): # 화면이 자주 부르니 선두 랩마다 한 번만 계산
+		return _fcw[key]
+	if _fcw.size() > 8:
+		_fcw.clear()
+	var lo := -1
+	var hi := -1
+	var pm := 0
+	for l in range(leader_lap + 1, laps + 1):
+		var p: int = forecast_prob_at(l, c)
+		if p >= 30:
+			if lo < 0:
+				lo = l
+			hi = l
+			pm = maxi(pm, p)
+		elif lo >= 0:
+			break
+	_fcw[key] = {"lo": lo, "hi": hi, "p": pm} if lo >= 0 else null
+	return _fcw[key]
+
+
+## 지금 타이어 vs 대안 {alt 종류, comp 대안 컴파운드, now 대안이 랩당 몇 초 빠른가(+ = 대안이 빠름), lap 예보로 뒤집히는 랩(-1 = 12랩 안에 없음)}
+func crossover(c) -> Dictionary:
+	var have: String = kind_of(c.comp)
+	var alt: String = "slick"
+	if have == "slick":
+		alt = "W" if is_wec() else "I"
+	elif have == "W" and not is_wec():
+		alt = "I" if wet >= 0.45 else "slick"
+	var ac: String = "M" if alt == "slick" else alt
+	var now: float = wx_pen_track(c.comp) - wx_pen_track(ac)
+	var flip := -1
+	for l in range(leader_lap + 1, mini(laps, leader_lap + 12) + 1):
+		var fw: float = forecast_wet_at(l, c)
+		if (weather_pen(c.comp, fw) - weather_pen(ac, fw) > 0.0) != (now > 0.0):
+			flip = l
+			break
+	return {"alt": alt, "comp": ac, "now": now, "lap": flip}
+
+
+## 드라이버 체감 무전: 대안 타이어가 빠를 것 같다고 느끼는 순간 (빗길 실력이 낮을수록 체감이 빗나감 → 이르거나 늦다)
+func _xo_radio(c, left: int) -> void:
+	var xo: Dictionary = crossover(c)
+	var feel: float = float(xo["now"]) + wx_rng.randfn(0.0, 0.25 + maxf(0.0, 0.9 - float(c.wet)) * 1.2)
+	if feel < -0.1:
+		c.xo_feel = ""
+		return
+	if feel < 0.3 or c.xo_feel == String(xo["alt"]) or left < 2:
+		return
+	c.xo_feel = String(xo["alt"])
+	var ss: PackedStringArray = []
+	for s in xo_secs(c, String(xo["comp"])):
+		ss.append("S%d" % (int(s) + 1))
+	var where: String = ("" if ss.size() >= NS or ss.is_empty() else ("·".join(ss) + " "))
+	if xo["alt"] == "slick":
+		say(c, "%s라인이 말라가요. 지금 슬릭이 빠를 것 같아요 (체감 랩당 약 %.1f초)" % [where, feel])
+	else:
+		say(c, "%s그립이 없어요. %s 빠를 것 같아요 (체감 랩당 약 %.1f초)" % [where, "웻이" if xo["alt"] == "W" else "인터가", feel])
+
+
+## 대안 타이어가 더 나은 섹터 번호들 (드라이버 무전·화면용)
+func xo_secs(c, ac: String) -> Array:
+	var out: Array = []
+	for s in NS:
+		if weather_pen(ac, sec_w(s)) < weather_pen(c.comp, sec_w(s)):
+			out.append(s)
+	return out
 
 
 ## 노면 수막(mm): 0(건조) ~ 1.2(인터 교차) ~ 3.5(웻 교차) ~ 5.5(폭우)

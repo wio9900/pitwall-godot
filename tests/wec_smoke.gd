@@ -189,6 +189,9 @@ func _init() -> void:
 	var r_gt: float = aw.wec_set_ratio("GT")
 	var t_dry: float = aw.track_now
 	aw.wet = 0.8
+	for k in aw.NS: # 노면은 섹터별 (wet = 섹터 평균)
+		aw.sec_wet[k] = 0.8
+		aw.off_wet[k] = 0.8
 	aw.on_leader_lap()
 	var t_wet: float = aw.track_now
 	var al_ok: bool = absf(r_hy - 0.6) < 0.01 and absf(r_gt - 0.8) < 0.01 and awd_n >= 3 and lmdh_n == 0 and aw.awd_share(190.0) > 0.3 and t_wet < t_dry - 5.0

@@ -1673,12 +1673,20 @@ func _refresh_ui() -> void:
 			top_label.text = "[font_size=28][b]LAP %d[/b][/font_size][color=#8b98a5]/%d[/color]   %s%s" % [lap_now, sim.laps, fmt_tag, chips]
 	# 날씨 줄: 서킷 · 노면 · 강수 확률 · 수막 · 그립 · 예보
 	# 짧게: 서킷 · 노면(젖었을 때만 수막) · 그립 · 비 예보 (자세한 건 피트 탭 기상 레이더)
-	var fc_txt := ""
-	if sim.fc != null and sim.leader_lap < int(sim.fc["hi"]):
-		fc_txt = "   🌦 비 예보 [b]L%d–%d[/b] (%d%%)" % [int(sim.fc["lo"]), int(sim.fc["hi"]), int(sim.fc["p"])]
-	elif sim.fc == null:
-		fc_txt = "   ☀ 비 예보 없음"
+	# 예보 = 내 팀 레이더 (팀 전략 능력만큼 오차, 랩마다 갱신)
+	var mcs: Array = sim.my_cars()
+	var fwin: Variant = sim.fc_window(mcs[0] if not mcs.is_empty() else null)
+	var fc_txt := "   ☀ 비 예보 없음"
+	if fwin != null:
+		fc_txt = "   🌦 비 예보 [b]L%d–%d[/b] (%d%%)" % [int(fwin["lo"]), int(fwin["hi"]), int(fwin["p"])]
 	var surf: String = ("☀ " + sim.surface_ko()) if sim.wet < 0.05 else ("🌧 %s %.1fmm" % [sim.surface_ko(), sim.wet_mm(sim.wet)])
+	if sim.wet >= 0.05 and sim.sec_wet.size() == sim.NS:
+		var dry: PackedStringArray = []
+		for s in sim.NS:
+			if sim.sec_w(s) < 0.1:
+				dry.append("S%d" % (s + 1))
+		if not dry.is_empty() and dry.size() < sim.NS:
+			surf += " (마름 %s)" % "·".join(dry)
 	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
 		sim.CIRC["name"], surf, int(round(sim.track_evo * 100)), fc_txt]
 	race_panel.refresh()

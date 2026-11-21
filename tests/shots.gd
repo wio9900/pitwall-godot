@@ -356,6 +356,10 @@ func _process(_delta: float) -> bool:
 			_shot("wec_lmp2_drv")
 			main.sim.night = true # 피트 탭 교대 버튼: 밤·비일 때 안정·웻 수치와 추천 이유 표시 확인
 			main.sim.wet = 0.4
+			for k in main.sim.NS: # 섹터마다 다른 노면 (라인 먼저 마름 · 피트 탭 노면 줄·트랙 색 확인)
+				main.sim.sec_wet[k] = [0.08, 0.15, 0.35, 0.6, 0.55, 0.3][k]
+				main.sim.off_wet[k] = minf(1.0, float(main.sim.sec_wet[k]) + 0.12)
+			main.sim.ever_wet = true
 			main.race_panel._on_tab("pit")
 			main._refresh_ui()
 			wait = 4
