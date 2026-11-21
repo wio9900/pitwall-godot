@@ -738,8 +738,8 @@ func _psi_block(parent: Control, c, kind: String, ed: bool) -> void:
 	mid.add_child(bar)
 	var sl = K.slider(lo, lo + span, 0.5, c.psi, _on_psi.bind(c.slot, kind, lab), ed)
 	mid.add_child(sl)
-	var mb = K.btn("−", 16, func(): sl.value = c.psi - 0.5)
-	var pb = K.btn("+", 16, func(): sl.value = c.psi + 0.5)
+	var mb = K.btn("−", 16, func(): sl.set_value(c.psi - 0.5))
+	var pb = K.btn("+", 16, func(): sl.set_value(c.psi + 0.5))
 	for b in [mb, pb]:
 		b.disabled = not ed
 		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER # 슬라이더가 폭을 가져가게

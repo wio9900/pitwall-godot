@@ -80,20 +80,36 @@ var _sc_t := -10.0
 var _win_t := -10.0
 var _win_rank := 0
 var _confetti: Array = []
-# 성능: 트랙·배경(정적)은 아래 층에 그려 두고, 카메라·밤·비·DRS 가 바뀔 때만 다시 그린다.
+# 성능: 트랙·배경(정적)은 SubViewport 에 한 번 그려 그림(텍스처)으로 두고, 카메라·밤·비·DRS 가 바뀔 때만 다시 그린다.
+# (예전엔 그리기 명령만 저장해서 르망 기준 삼각형 약 3.8만 개를 GPU 가 매 프레임 다시 그림 → 폰 30fps, 수정 22)
 # 차·연출(동적)만 매 프레임 그린다. 그리기 함수는 _ci 가 가리키는 층에 그린다.
 var _ci: CanvasItem
 var _layer: Layer
+var _vp: SubViewport
+var _img: TextureRect
 var _static_key := ""
+# 그림을 그릴 때의 카메라(_st_off·_st_s)와 화면 밖 여백(_st_m). 카메라가 움직이면 그림을 옮기고 늘이기만 하고,
+# 여백을 벗어나거나 확대가 3% 넘게 바뀌면 다시 그린다 (추적 카메라도 매 프레임 다시 그리지 않게)
+var _st_off := Vector2.ZERO
+var _st_s := 1.0
+var _st_m := Vector2.ZERO
+var _area := Vector2.ZERO  # 정적 층 그리는 영역 (화면 + 여백 2배)
+const STATIC_MARGIN := 0.25
 
 
 class Layer extends Control:
 	var host
 
 	func _draw() -> void:
+		var o: Vector2 = host._off
+		var sc: float = host._s
+		host._off = host._st_off + host._st_m
+		host._s = host._st_s
 		host._ci = self
 		host._draw_static()
 		host._ci = host
+		host._off = o
+		host._s = sc
 
 
 func _init() -> void:
@@ -101,10 +117,20 @@ func _init() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS # 256px 차 그림을 작게 줄여도 자글거리지 않게
 	_layer = Layer.new()
 	_layer.host = self
-	_layer.show_behind_parent = true
 	_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_layer)
+	_vp = SubViewport.new()
+	_vp.disable_3d = true
+	_vp.transparent_bg = false
+	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_vp.add_child(_layer)
+	add_child(_vp)
+	_img = TextureRect.new()
+	_img.show_behind_parent = true
+	_img.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_img.stretch_mode = TextureRect.STRETCH_SCALE
+	_img.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR # 뷰포트 그림엔 밉맵이 없음
+	add_child(_img)
 
 
 func reset() -> void:
@@ -229,7 +255,7 @@ func _update_cars(delta: float) -> void:
 			dist = float(pa[2])
 		else:
 			dist = sim.car_dist(c)
-		targets[c.id] = {"d": dist, "cls": c.cls}
+		targets[c.id] = {"d": dist, "raw": dist, "cls": c.cls}
 		if not last_by_cls.has(c.cls):
 			last_by_cls[c.cls] = []
 		last_by_cls[c.cls].append(c.id) # 클래스 안 공식 순서
@@ -276,6 +302,7 @@ func _update_cars(delta: float) -> void:
 	var ka = clampf(delta * 14.0 * sqrt(sp / 2.0 if sp > 2.0 else 1.0), 0.0, 1.0)
 	# 트랙 위 차는 '거리'로 부드럽게 따라간다: 화면 좌표로 섞으면 코너를 가로지르고, 섹터 경계에서 툭툭 튀어 보인다
 	var kd = 1.0 - exp(-delta * 9.0 * maxf(1.0, sqrt(sp)))
+	var kv = 1.0 - exp(-delta * 4.0) # 그림 속도 변화 부드럽게 (약 0.08초)
 	var snap_d: float = 40.0 * maxf(1.0, sp / 2.0)
 	var snap_dist: float = T.L * 0.08
 	for id in targets:
@@ -284,11 +311,21 @@ func _update_cars(delta: float) -> void:
 			var td: float = float(tg["d"])
 			var lw: float = float(lat_want.get(id, 0.0))
 			var s: Variant = _smooth.get(id)
+			var raw: float = float(tg["raw"])
 			if s == null or not s.has("d") or absf(wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5)) > snap_dist:
-				s = {"d": td, "lat": lw}
+				s = {"d": td, "lat": lw, "raw": raw, "v": 0.0}
 				_smooth[id] = s
 			else:
-				s["d"] = float(s["d"]) + wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5) * kd
+				# 그림 속도는 실제 속도(이번 프레임 실제 거리 변화)의 0.5~1.6배 안에서만, 부드럽게 바뀐다:
+				# 겹침 방지 목표가 순위 바뀔 때 툭 바뀌어도 멈칫·뒤로 가기·튀어나가기 없이 따라감 (수정 22)
+				var step: float = wrapf(td - float(s["d"]), -T.L * 0.5, T.L * 0.5) * kd
+				var rs: float = raw - float(s["raw"])
+				if rs > 0.0:
+					step = clampf(step, rs * 0.5, rs * 1.6)
+					step = lerpf(float(s["v"]), step, kv)
+				s["v"] = step
+				s["raw"] = raw
+				s["d"] = float(s["d"]) + step
 				s["lat"] = lerpf(float(s["lat"]), lw, clampf(delta * 4.0, 0.0, 1.0))
 			var ha: float = T.head_at_dist(float(s["d"]))
 			s["p"] = T.point_at_dist(float(s["d"])) + Vector2(-sin(ha), cos(ha)) * float(s["lat"])
@@ -451,16 +488,38 @@ func _process(delta: float) -> void:
 func _refresh_static() -> void:
 	var key := ""
 	if sim != null and sim.T != null:
-		key = "%s|%.2f|%.1f|%.1f|%s|%d|%d|%s" % [sim.circ_key, _s, _off.x, _off.y, sim.night, int(sim.wet * 20.0), int(sim.drs_on()), size]
-	if key != _static_key:
+		key = "%s|%s|%d|%d|%s|%d|%d" % [sim.circ_key, sim.night, int(sim.wet * 20.0), int(sim.drs_on()), size, get_viewport().msaa_2d, follow_slot]
+	var k: float = _s / maxf(_st_s, 0.000001)
+	var pos: Vector2 = _off - (_st_off + _st_m) * k
+	var full: Vector2 = (size + _st_m * 2.0) * k
+	var covers: bool = pos.x <= 0.5 and pos.y <= 0.5 and pos.x + full.x >= size.x - 0.5 and pos.y + full.y >= size.y - 0.5
+	if key != _static_key or absf(k - 1.0) > 0.03 or not covers:
 		_static_key = key
+		_st_off = _off
+		_st_s = _s
+		# 여백은 카메라가 움직이는 때만 (전체 보기는 화면 크기 그대로 → 메모리 절약)
+		_st_m = size * STATIC_MARGIN if (follow_slot >= 0 or user_zoom > 1.01) else Vector2.ZERO
+		_area = size + _st_m * 2.0
+		# 화면 실제 픽셀 크기로 그려야 흐리지 않다 (창 크기에 맞춰 늘리는 canvas_items 배율)
+		var px: float = get_global_transform_with_canvas().get_scale().x
+		_vp.size = Vector2i(maxi(1, int(ceil(_area.x * px))), maxi(1, int(ceil(_area.y * px))))
+		_vp.canvas_transform = Transform2D.IDENTITY.scaled(Vector2(px, px))
+		_vp.msaa_2d = get_viewport().msaa_2d
+		_layer.size = _area
 		_layer.queue_redraw()
+		_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+		if _img.texture == null:
+			_img.texture = _vp.get_texture()
+		pos = -_st_m
+		full = _area
+	_img.position = pos
+	_img.size = full
 
 
 ## 정적 층: 배경·격자·서킷·연석·DRS·지명
 func _draw_static() -> void:
 	var night: bool = sim != null and sim.night
-	_ci.draw_rect(Rect2(Vector2.ZERO, size), BG_NIGHT if night else BG)
+	_ci.draw_rect(Rect2(Vector2.ZERO, _area), BG_NIGHT if night else BG)
 	if sim == null or sim.T == null:
 		return
 	var T = sim.T
@@ -524,12 +583,12 @@ func _draw_backdrop() -> void:
 	var step := 48.0
 	var col := Color(1, 1, 1, 0.018)
 	var x := fposmod(_off.x, step)
-	while x < size.x:
-		_ci.draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
+	while x < _area.x:
+		_ci.draw_line(Vector2(x, 0), Vector2(x, _area.y), col, 1.0)
 		x += step
 	var y := fposmod(_off.y, step)
-	while y < size.y:
-		_ci.draw_line(Vector2(0, y), Vector2(size.x, y), col, 1.0)
+	while y < _area.y:
+		_ci.draw_line(Vector2(0, y), Vector2(_area.x, y), col, 1.0)
 		y += step
 
 
@@ -812,7 +871,7 @@ func _draw_labels(T, font, night: bool) -> void:
 		var n: Vector2 = T.nrm[si]
 		var tsz: Vector2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
 		var o: float = -float(T.inward) * 34.0
-		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, size.y - 4))
+		var lp := Vector2(clampf(p.x + n.x * o - tsz.x / 2, 4, _area.x - tsz.x - 4), clampf(p.y + n.y * o + 4, 14, _area.y - 4))
 		for step in 5:
 			var hit := false
 			for r in placed:
@@ -823,7 +882,7 @@ func _draw_labels(T, font, night: bool) -> void:
 				break
 			var k := 1.25 + step * 0.28
 			var dy := 13.0 if step % 2 == 0 else -13.0
-			lp = Vector2(clampf(p.x + n.x * o * k - tsz.x / 2, 4, size.x - tsz.x - 4), clampf(p.y + n.y * o * k + dy, 14, size.y - 4))
+			lp = Vector2(clampf(p.x + n.x * o * k - tsz.x / 2, 4, _area.x - tsz.x - 4), clampf(p.y + n.y * o * k + dy, 14, _area.y - 4))
 		placed.append(Vector3(lp.x + tsz.x / 2, lp.y, tsz.x))
 		var anchor := lp + Vector2(tsz.x / 2, -4)
 		if anchor.distance_to(p) > 26:

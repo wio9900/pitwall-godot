@@ -197,6 +197,17 @@ func _process(_delta: float) -> bool:
 		main._start_weekend_career()
 		# 쓴 세트 칩·직접 고르기 (D-3): 미디엄 새 세트 두 번 → 쓴 세트 2개, 두 번째 세트를 골라 연습하면 그 세트만 마모가 쌓여야 함
 		var v = main.wk_view
+		# 공기압 −/+ 버튼 (21): 누르면 그 차 공기압이 0.5 psi 바뀌어야 함
+		var psi0: Array = main.wk.my_cars().map(func(cc): return float(cc.psi))
+		for b in v.find_children("*", "Button", true, false):
+			if b.text == "−" and not b.disabled and b.custom_minimum_size.x == 44:
+				b.pressed.emit()
+				break
+		var psi1: Array = main.wk.my_cars().map(func(cc): return float(cc.psi))
+		if psi0 == psi1:
+			print("  ! 공기압 − 버튼이 값을 안 바꿈: %s" % [psi0])
+			quit(1)
+		print("공기압 − 버튼: %s → %s" % [psi0, psi1])
 		main.wk.practice_run(0, "short", "M", "new")
 		main.wk.practice_run(0, "short", "M", "new")
 		var ua: Array = main.wk.used_sets[0]["M"]
