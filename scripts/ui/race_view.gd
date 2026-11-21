@@ -788,10 +788,18 @@ func _draw_track(T, night: bool) -> void:
 			var hp := atan2(a.y - c0.y, a.x - c0.x)
 			var side := -1.0 if wrapf(hn - hp, -PI, PI) > 0 else 1.0
 			var n: Vector2 = T.nrm[i] * (TRACK_W * 0.55 * side)
-			var col := KERB_W if (i / 2) % 2 == 1 else KERB_R
-			if night:
-				col = col.darkened(0.4)
-			_ci.draw_line(_X(a + n), _X(b + n), col, maxf(2.0, w * 0.2))
+			# 확대하면 실제 줄무늬 길이(약 1.2m, 트랙 폭 = 13m 기준)로 촘촘하게, 멀리선 화면에서 5px 보다 잘게 나누지 않음 (수정 29)
+			var pa: Vector2 = _X(a + n)
+			var pb: Vector2 = _X(b + n)
+			var n_phys: int = maxi(1, int(a.distance_to(b) * 13.0 / TRACK_W / 1.2))
+			var ns: int = clampi(mini(n_phys, int(pa.distance_to(pb) / 5.0)), 1, 16)
+			for k in ns:
+				var col := KERB_W if (i / 2 + k) % 2 == 1 else KERB_R
+				if ns > 1:
+					col = KERB_W if k % 2 == 1 else KERB_R
+				if night:
+					col = col.darkened(0.4)
+				_ci.draw_line(pa.lerp(pb, float(k) / ns), pa.lerp(pb, float(k + 1) / ns), col, maxf(2.0, w * 0.2))
 		i += 2
 	# DRS 구간
 	if sim.drs_on():

@@ -553,7 +553,8 @@ func refresh() -> void:
 		if c.fault != null:
 			line2 += " [color=#ef4444]🔧%s +%.1fs%s[/color]" % [c.fault["kind"], float(c.fault["dt"]), " (수리 예정)" if bool(c.fault["repair"]) else ""]
 		if c.time_pen > 0.0:
-			line2 += " [color=#ef4444]+%d초%s[/color]" % [int(c.time_pen), _pen_tag(c)]
+			# 카드는 좁아서 빨간 "+5"만 (사유는 차 정보 창·결과에)
+			line2 += " [color=#ef4444]+%d[/color]" % int(c.time_pen)
 		elif c.tl_warn > 0 and c.dnf == "":
 			line2 += " [color=#f59e0b]TL %d/2[/color]" % c.tl_warn
 		var code: String = ("#%d %s" % [c.slot + 1, c.code]) if wec else c.code
@@ -600,9 +601,9 @@ func refresh() -> void:
 			_refresh_strat(c)
 		_:
 			_refresh_laps(c)
-	# 팀 오더: F1 에서 두 대 모두 달릴 때
-	var both: bool = mc.size() == 2 and mc[0].is_running() and mc[1].is_running()
-	_order_row.visible = not wec and both and tab == "drive" # 팀 오더는 주행 탭에서만
+	# 팀 오더: 두 대 모두 달릴 때 (WEC 는 같은 클래스끼리만 — sim 도 같은 클래스 팀메이트에만 적용)
+	var both: bool = mc.size() == 2 and mc[0].is_running() and mc[1].is_running() and mc[0].cls == mc[1].cls
+	_order_row.visible = both and tab == "drive" # 팀 오더는 주행 탭에서만
 	_press(_order_btns, [["free"], ["hold"]], sim.team_order)
 	_swap_btn.disabled = sim.swap_req
 
@@ -1138,20 +1139,6 @@ func _on_order(v: String) -> void:
 func _on_swap() -> void:
 	sim.request_swap()
 	refresh()
-
-
-## 카드에 붙일 짧은 페널티 사유 (자세한 건 차 정보 창)
-func _pen_tag(c) -> String:
-	for i in range(c.pen_log.size() - 1, -1, -1):
-		var pe: Dictionary = c.pen_log[i]
-		if pe.get("end", false):
-			continue
-		var w: String = String(pe["why"])
-		for kv in [["주행", "주행초과"], ["트랙 리밋", "트랙리밋"], ["과속", "과속"], ["릴리스", "릴리스"], ["부정", "부정출발"], ["스톱", "스톱앤고"]]:
-			if w.find(kv[0]) >= 0:
-				return "·" + kv[1]
-		return ""
-	return ""
 
 
 ## 컴파운드 온도 창 글자 ("~28°" · "12~40°" · "25°~")

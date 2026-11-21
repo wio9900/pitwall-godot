@@ -1687,8 +1687,13 @@ func _refresh_ui() -> void:
 				dry.append("S%d" % (s + 1))
 		if not dry.is_empty() and dry.size() < sim.NS:
 			surf += " (마름 %s)" % "·".join(dry)
-	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
-		sim.CIRC["name"], surf, int(round(sim.track_evo * 100)), fc_txt]
+	# 노면 온도(타이어 온도 창 판단 근거) · 현지 시각(낮밤이 바뀌는 WEC)
+	var clk: String = sim.local_clock()
+	var tmp_txt: String = "   노면 [color=#e6edf3]%d°C[/color]" % int(round(sim.track_now))
+	if clk != "":
+		tmp_txt += "   %s [color=#e6edf3]%s[/color]" % ["🌙" if sim.night else "🕒", clk]
+	info_label.text = "[color=#8b98a5]%s   [color=#e6edf3]%s[/color]%s   그립 [color=#e6edf3]%d%%[/color]%s[/color]" % [
+		sim.CIRC["name"], surf, tmp_txt, int(round(sim.track_evo * 100)), fc_txt]
 	race_panel.refresh()
 	rival.refresh()
 	_fit_tabs()
@@ -1869,6 +1874,13 @@ func _show_result() -> void:
 		for ru in runs:
 			parts.append(_tyre_bb(ru[0]) + ("[color=#8b98a5]×%d[/color]" % ru[1] if ru[1] > 1 else ""))
 		strat = " ".join(parts)
+		# 새 세트가 없어 쓰던 세트를 다시 낀 횟수 (S×9 가 새 세트 9개로 보이지 않게)
+		var reuse_n := 0
+		for pl in c.pit_log:
+			if bool(pl.get("reuse", false)):
+				reuse_n += 1
+		if reuse_n > 0:
+			strat += " [color=#8b98a5](재장착 %d)[/color]" % reuse_n
 		var pen = (" [color=#ef4444]+%ds[/color]" % int(c.penalty)) if c.penalty > 0 else ""
 		s += "[cell]%d  [/cell][cell][color=%s]■[/color] [color=%s]%s[/color] [color=#8b98a5]%s[/color]  [/cell][cell]%s%s  [/cell][cell]%s  [/cell][cell]%d[/cell]" % [
 			r["pos"], _hex(c.color), name_col, (_short_team(c.team) + " #%d" % (c.slot + 1)) if sim.is_wec() else c.code, c.code if sim.is_wec() else c.team, r["gap"], pen, strat, r["points"]]

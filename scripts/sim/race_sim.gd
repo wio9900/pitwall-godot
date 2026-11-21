@@ -1016,6 +1016,14 @@ func _init_tyre_press() -> void:
 
 
 ## 노면 온도 (°C), p = 레이스 진행(0~1). WEC 는 낮에도 시각 따라(오후 2시 반 최고 · 아침 최저, ±DAY_AMP),
+## 서킷 현지 시각 "HH:MM" (출발 시각 startH 가 있는 WEC 만, 없으면 ""). 노면 온도(track_temp_at)와 같은 진행률 기준
+func local_clock() -> String:
+	if not is_wec() or not CIRC.has("startH"):
+		return ""
+	var h: float = fposmod(float(CIRC["startH"]) + float(leader_lap) / maxf(1.0, float(laps)) * wec_hours(), 24.0)
+	return "%02d:%02d" % [int(h), int(fmod(h, 1.0) * 60.0)]
+
+
 ## 밤이 있는 서킷은 해가 지면 nightDrop 만큼 식고 해질녘·새벽(진행 6% 구간)에 서서히 바뀐다. 비는 따로(track_now 에서 젖음만큼)
 func track_temp_at(p: float) -> float:
 	var day: float = track_t
@@ -1075,18 +1083,24 @@ func wec_pick_comp(c, n: int, noisy: bool = true) -> String:
 	if al.size() == 1:
 		return String(al[0])
 	n = maxi(1, n)
-	var temp: float = run_temp(n) + (gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0)
+	var real_t: float = run_temp(n)
+	var temp: float = real_t + (gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0)
 	var best := String(al[0])
 	var best_t := INF
+	var tl: PackedStringArray = []
 	for k in al:
 		var t: float = comp_run_time(c, String(k), n, temp)
 		if c.wec_style == "push" and k == "S":
 			t -= 0.1 * wsc() * n
 		elif c.wec_style == "save" and k == "H":
 			t -= 0.1 * wsc() * n
+		tl.append("%s %.0f" % [k, t])
 		if t < best_t:
 			best_t = t
 			best = String(k)
+	# shortcut: 수정 25 진단 — 폰에서만 AI 타이어가 섞이는 원인 확인용. 출발(0랩)은 전부, 그 뒤는 하드를 고르거나 온도를 3°C 넘게 잘못 읽었을 때만. 원인 확정 후 지움
+	if noisy and not c.mine and (leader_lap == 0 or best == "H" or absf(temp - real_t) > 3.0):
+		BLog.add("타이어 L%d %s → %s (읽음 %.0f° 실제 %.0f° · %d랩 · %s · %s)" % [leader_lap, name_of(c), best, temp, real_t, n, " ".join(tl), c.wec_style])
 	return best
 
 
@@ -2537,6 +2551,33 @@ func apply_pit(c) -> void:
 		c.lamp_out = false
 		c.garage += 0.3 * float(CIRC["base"]) * laps / real_laps() # 헤드라이트 교체
 		event("%s 헤드라이트 수리" % name_of(c))
+	# 시간 페널티 해소 (F1 스포팅 규정 54조·WEC 같음): 받은 뒤 첫 정차에서 작업 전에 그 시간만큼 서 있는다.
+	# 강제 정차(레이스 컨트롤 수리 지시)는 제외. 이번 정차에서 새로 받는 페널티(릴리스 등)는 다음 정차에
+	if c.boxing != null and not c.boxing.get("forced", false) and c.time_pen > 0.0:
+		var held: float = c.time_pen
+		c.time_pen = 0.0
+		c.pit_total += held
+		c.pen_served += held
+		_tally("페널티 정차 해소")
+		if c.mine:
+			say(c, "이번 정차에서 %d초 페널티 해소 (작업 전 대기)" % int(held))
+		c.boxing["pen_held"] = held
+	# 새 드라이 세트가 바닥났으면 쓰던 세트를 다시 낀다 → 한 번도 안 쓴 컴파운드의 "쓴 세트"는 없다 (수정 25)
+	if is_wec() and c.boxing != null and bool(c.boxing.get("tyres", false)) and SLICK.has(String(c.boxing["comp"])) and c.wec_sets <= 0:
+		c.boxing["reuse"] = true
+		if not c.used.has(c.boxing["comp"]):
+			var alt := ""
+			if SLICK.has(c.comp) and c.used.has(c.comp):
+				alt = c.comp
+			else:
+				for k in ["M", "H", "S"]:
+					if c.used.has(k) and wec_comps(c.cls).has(k):
+						alt = k
+						break
+			if alt != "":
+				if c.mine:
+					say(c, "%s 새 세트가 없어 쓰던 %s 세트를 다시 껴요" % [TYRE_KO[c.boxing["comp"]], TYRE_KO[alt]])
+				c.boxing["comp"] = alt
 	if c.boxing != null and c.boxing.get("closed", false):
 		# 폐쇄 중 진입: 스톱 앤 고 10초 (정차 + 피트레인 한 번 더 통과에 해당하는 시간)
 		add_penalty(c, 10.0 + pit_loss(), "피트레인 폐쇄 중 진입 · 스톱 앤 고")
@@ -2560,7 +2601,7 @@ func apply_pit(c) -> void:
 			_force_green = false
 			if pg != null:
 				pr_green = int(pg["pos"])
-		c.pit_log.append({"lap": c.lap + 1, "pos": class_pos(c), "from": c.comp, "to": c.boxing["comp"] if c.boxing["tyres"] else c.comp, "tyres": bool(c.boxing["tyres"]), "sc": sc_kind if sc else "",
+		c.pit_log.append({"lap": c.lap + 1, "pos": class_pos(c), "from": c.comp, "to": c.boxing["comp"] if c.boxing["tyres"] else c.comp, "tyres": bool(c.boxing["tyres"]), "sc": sc_kind if sc else "", "pen_held": float(c.boxing.get("pen_held", 0.0)), "reuse": bool(c.boxing.get("reuse", false)),
 			"pred": int(pr["pos"]) if pr != null else class_pos(c), "pred_green": pr_green,
 			"ahead_ids": pr["ahead_ids"] if pr != null else []})
 	c.covering = false
@@ -3951,6 +3992,7 @@ func add_penalty(c, secs: float, why: String) -> void:
 	c.time_pen += secs
 	c.pen_log.append({"lap": c.lap + 1, "why": why, "secs": secs})
 	_tally("페널티")
+	BLog.add("페널티 L%d %s %d초 %s (크루 %.2f)" % [c.lap + 1, name_of(c), int(secs), why, c.crew]) # shortcut: 수정 25 진단 (릴리스가 폰에서만 잦음), 원인 확정 후 지움
 	event("🟨 %s %d초 페널티 (%s)" % [name_of(c), int(secs), why], "bad")
 	if c.mine:
 		say(c, "%d초 페널티 받았어요 (%s). 앞차와 간격을 더 벌려야 해요" % [int(secs), why])
@@ -4238,6 +4280,7 @@ func predict_pit(c) -> Variant:
 			fuel = bool(rq.get("fuel", true))
 			fill = float(rq.get("fill", 1.0))
 		loss = wec_stop_time(c, tyres, drv, fuel, fill) + 1.0
+	loss += c.time_pen # 받은 시간 페널티는 이번 정차에서 서 있다가 해소 (apply_pit)
 	var ord: Array = []
 	for o in order():
 		if o.dnf == "" and o.cls == c.cls:

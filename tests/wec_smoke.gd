@@ -92,6 +92,19 @@ func _init() -> void:
 	print("   르망 출발 직후 교대 의무 %s · 추천 드라이버 동점 처리 %s" % [due0, nd_ok])
 	if due0 or not nd_ok:
 		fails += 1
+	# 수정 28: 시간 페널티는 다음 정차에서 서 있다가 해소 (결과에 안 더함)
+	var pt = RaceSimS.new()
+	pt.new_race("spa", 0, 20, "dry", ["M", "M"], 77)
+	pt.prepare_start()
+	var pc = pt.my_cars()[0]
+	pt.add_penalty(pc, 5.0, "테스트")
+	pc.boxing = {"comp": "M", "tyres": true, "driver": false, "fuel": true, "fill": 1.0}
+	pc.pit_total = 30.0
+	pt.apply_pit(pc)
+	var held_ok: bool = pc.time_pen == 0.0 and pc.pen_served == 5.0 and float(pc.pit_log[-1]["pen_held"]) == 5.0 and pc.pit_total >= 35.0
+	print("   페널티 정차 해소 %s" % held_ok)
+	if not held_ok:
+		fails += 1
 	print("   부분 급유(탱크 30%%분) 정차 절약 %.1f초" % fsave)
 	if fsave <= 0.0:
 		fails += 1
@@ -163,7 +176,7 @@ func _init() -> void:
 	print("   손상 절뚝이기: 감속 +%d%% → 피트 후 %.2f (피트 %d) %s" % [int(limp0 * 100.0), hurt.limp if hurt != null else -1.0, hurt.pits if hurt != null else -1, "OK" if limp_ok else "실패"])
 	if not limp_ok:
 		fails += 1
-	# 수정 24: 하이퍼카 컴파운드 온도 창 — 르망 낮 35°C 는 미디엄, 밤(약 21°C)은 소프트, 하드는 밤에 차가움
+	# 수정 24·25: 하이퍼카 컴파운드 온도 창 — 르망 낮 35°C 한 스틴트는 미디엄 · 더블 스틴트는 하드, 밤(약 21°C)은 소프트, 하드는 밤에 차가움
 	var tw = RaceSimS.new()
 	tw.new_race("lemans", 0, 54, "dry", ["M", "M"], 4343)
 	tw.track_t = 35.0
@@ -178,11 +191,12 @@ func _init() -> void:
 	var t_night: float = tw.track_temp_at(0.4)
 	tw.leader_lap = 0
 	var pick_day: String = tw.wec_pick_comp(hy, 10, false)
+	var m_short: bool = tw.comp_run_time(hy, "M", 5, 30.0) < tw.comp_run_time(hy, "H", 5, 30.0) # 30°C 한 스틴트는 미디엄
 	tw.leader_lap = int(tw.laps * 0.35)
 	var pick_night: String = tw.wec_pick_comp(hy, 10, false)
 	var win_ok: bool = t_night < t_day - 10.0 and tw.win_off("HY", "S", 35.0) > 0.0 and tw.win_off("HY", "H", t_night) < 0.0 and tw.win_off("HY", "M", 25.0) == 0.0 and tw.win_off("GT", "M", 50.0) == 0.0
-	print("   온도 창: 낮 %.0f°C → %s · 밤 %.0f°C → %s %s" % [t_day, pick_day, t_night, pick_night, "OK" if (win_ok and pick_day == "M" and pick_night == "S") else "실패"])
-	if not (win_ok and pick_day == "M" and pick_night == "S"):
+	print("   온도 창: 30°C 5랩 미디엄 %s · 낮 %.0f°C 10랩 → %s · 밤 %.0f°C → %s %s" % [m_short, t_day, pick_day, t_night, pick_night, "OK" if (win_ok and m_short and pick_day == "H" and pick_night == "S") else "실패"])
+	if not (win_ok and m_short and pick_day == "H" and pick_night == "S"):
 		fails += 1
 	# 타이어 할당(2026 규정 → 비율) · LMH 사륜 · 젖으면 노면이 식음
 	var aw = RaceSimS.new()
