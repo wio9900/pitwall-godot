@@ -1549,11 +1549,15 @@ func _update_fps(delta: float) -> void:
 	if _fps_t < 0.5:
 		return
 	_fps_t = 0.0
+	# 처리 = 최근 1초 중 가장 느린 프레임의 스크립트·UI 시간(Godot 가 최대값으로 줌), 그리기 = 화면 렌더 CPU / GPU 시간
+	var vp_rid: RID = get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp_rid, true)
 	var proc_ms: float = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
 	var sim_ms: float = (float(_sim_us) / 1000.0 / float(_sim_n)) if _sim_n > 0 else 0.0
 	_sim_us = 0
 	_sim_n = 0
-	fps_label.text = "FPS %d · 처리 %.1fms · 시뮬 %.2fms · 노드 %d" % [Engine.get_frames_per_second(), proc_ms, sim_ms, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+	var fps: float = Engine.get_frames_per_second()
+	fps_label.text = "FPS %d/상한 %d · 프레임 %.1fms · 처리 최대 %.1fms · 그리기 CPU %.1f GPU %.1fms · 시뮬 %.2fms" % [fps, Engine.max_fps, 1000.0 / maxf(1.0, fps), proc_ms, RenderingServer.viewport_get_measured_render_time_cpu(vp_rid), RenderingServer.viewport_get_measured_render_time_gpu(vp_rid), sim_ms]
 
 
 ## 성능·배터리: 레이스 화면만 60fps, 나머지는 30fps. 배터리 절약이면 30/20fps + 안티에일리어싱 끔
