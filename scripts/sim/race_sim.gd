@@ -26,12 +26,10 @@ const PACE_KO := {"attack": "공격", "standard": "표준", "save": "세이브"}
 const ERS := {"harvest": [0.40, 0.30], "balance": [0.0, 0.02], "deploy": [-0.60, -0.35]}
 const ERS_KO := {"harvest": "충전", "balance": "밸런스", "deploy": "오버테이크"}
 const FUEL := {"lean": [0.50, 0.90], "std": [0.0, 1.0], "rich": [-0.25, 1.08]}
-const PRESS := {"low": [-0.15, 1.12, 0.05], "std": [0.0, 1.0, 0.0], "high": [0.15, 0.88, -0.05]}
-const PRESS_FX := {
-	"low": {"straight": 0.10, "warm": 1.5, "heat": 1.35, "kerb": 0.82},
-	"std": {"straight": 0.0, "warm": 1.0, "heat": 1.0, "kerb": 1.0},
-	"high": {"straight": -0.12, "warm": 0.65, "heat": 0.72, "kerb": 1.28},
-}
+# 타이어 공기압 (psi): 슬라이더 = 넣을 때(차가운/출발) 공기압, 달리면 노면 온도·스틴트 길이만큼 오른다.
+# 최소값은 타이어 회사 규정(서킷 데이터 psiMin, 피렐리 프리뷰 '최소 출발 공기압' 앞바퀴 기준).
+const PSI_SPAN := 5.0  # 슬라이더 = 최소 ~ 최소 + 5 psi
+const PSI_U := 1.5     # 데워진 공기압이 최적에서 1.5 psi 벗어남 = 한 칸 (예전 낮게/높게 정도)
 const DIRTY_WEAR := 0.12  # 더티 에어 바짝(0초) 붙으면 마모 +12% (다운포스 많은 서킷일수록 큼) — 따라가기만 하면 타이어가 먼저 죽음
 const DIRTY_TT := 0.06    # 더티 에어 타이어 온도 목표 +0.06 (과열 0.80 넘기 쉬워짐)
 const K := {"car_scale": 0.92, "drv_k": 0.022, "noise": 0.28, "fail": 0.0045, "crash": 0.005, "overtake_scale": 0.21, "victim": 0.25, "dirty": 1.0, "ot_gap": 0.3}
@@ -113,6 +111,10 @@ var done := false
 var finishing := false
 var ever_wet := false
 var night := false
+var track_t := 35.0      # 오늘 노면 온도 (°C) — 높을수록 공기압이 많이 오른다
+var psi_min := 22.0      # 최소 출발 공기압 (규정)
+var psi_hot_opt := 24.0  # 숨은 최적 '주행(데워진)' 공기압 — 연습 피드백·엔지니어 추천으로 찾는다
+var psi_eng_err := 0.0   # 퀵 레이스 내 팀 엔지니어 추천의 치우침
 var n_stalls := 11
 var radio_log: Array = [] # {lap, who, color, msg, kind}
 var team_order := "free"   # 팀 오더: free 자유 경쟁 / hold 순서 유지
@@ -322,6 +324,7 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 	var setups: Array = opts.get("setup", [])
 	var sets: Array = opts.get("sets", [])
 	n_stalls = teams.size()
+	_init_tyre_press()
 	if is_wec():
 		_build_wec_field(opts, start_comps)
 		teams = []
@@ -351,11 +354,11 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.plan = {"start": sc_, "stops": []}
 				c.fuel = laps * FPL * 1.02 * c.fuel_burn_rate # 드라이버 연비에 맞춰 싣는다
 				c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
-				c.press = "std"
+				c.psi = setup_psi({})
 				if k < setups.size():
 					var su: Dictionary = setups[k]
 					c.wing = float(su.get("wing", c.wing))
-					c.press = su.get("press", "std")
+					c.psi = setup_psi(su)
 					c.fuel_load = su.get("fuel_load", "std")
 					c.fuel = laps * FPL * (1.0 + float(FUEL_LOAD[c.fuel_load])) * c.fuel_burn_rate
 				if k < sets.size():
@@ -368,7 +371,6 @@ func new_race(circ_key_: String, my_team_: int, laps_: int, wx_opt: String, star
 				c.sc_miss = rnd() < 0.3
 				c.fuel = laps * FPL * (1.0 + uni(0.0, 0.04))
 				c.wing = snappedf(clampf(float(CIRC["wingOpt"]) + gauss(0.35), 1.0, 5.0), 0.1)
-				c.press = "low" if rnd() < 0.2 else ("high" if rnd() < 0.2 else "std")
 				c.comp = "M"
 			c.used = {c.comp: true}
 			cars.append(c)
@@ -466,6 +468,9 @@ func team_eng_q(c) -> float:
 
 ## AI 팀 세부 셋업: 전략·엔지니어 실력과 난이도만큼 최적값에 가깝게
 func _ai_setups() -> void:
+	for c in cars:
+		if not c.mine:
+			c.psi = psi_snap(psi_rec("race") + gauss(0.2 + 0.8 * (1.0 - team_eng_q(c))))
 	for c in cars:
 		if c.mine:
 			continue
@@ -717,7 +722,8 @@ func _calc_sec_kinds() -> void:
 func setup_sec(c, sec: int, w: float) -> float:
 	var sh: float = T.share[sec]
 	var ws_: float = _w_slow[sec] if c.wing < wing_opt(w, c) else _w_fast[sec]
-	return setup_pen(c, w) * sh * ws_ + float(PRESS[c.press][0]) * sh + press_straight(c.press) * sh * _w_fast[sec]
+	var pu: float = press_u(c, "live")
+	return setup_pen(c, w) * sh * ws_ + float(press_fx(pu)[0]) * sh + press_straight(pu) * sh * _w_fast[sec]
 
 
 ## 연습용 섹터별 예상 시간 (새 미디엄 · 가벼운 연료 · 깨끗한 랩)
@@ -834,14 +840,74 @@ func engineer_setup(c, q: float) -> void:
 		c.set(k, clampf(float(o[k]) + gauss(sd) * span, float(r[0]), float(r[1])))
 
 
-func press_straight(pr: String) -> float:
+## 공기압 직선 효과 (초/랩): 높으면 구름 저항이 줄어 직선이 빠르다 — 직선 비중 큰 서킷일수록
+func press_straight(u: float) -> float:
 	var k: float = float(CIRC["wE"]) / 0.05 if CIRC.has("wE") else (1.3 if float(CIRC["wingOpt"]) <= 2.0 else 0.9)
-	return float(PRESS_FX[pr]["straight"]) * k * wsc()
+	return float(press_fx(u)[6]) * k * wsc()
 
 
-func press_kerb(pr: String) -> float:
-	var k: float = PRESS_FX[pr]["kerb"]
+## 공기압 연석 실수 배율: 높으면 튀고 낮으면 잘 먹는다 — 연석 많은 서킷일수록
+func press_kerb(u: float) -> float:
+	var k: float = press_fx(u)[5]
 	return 1.0 + (k - 1.0) * (float(CIRC["wC"]) / 0.045 if CIRC.has("wC") else 1.0)
+
+
+## 노면 온도·최적 공기압 정하기 (레이스마다). 최적 주행 공기압 = 최소 + 서킷 보통 온도에서 오르는 양 + 숨은 치우침
+## → 오늘이 더우면 최적 출발 공기압이 최소 아래로 내려가 '최소 + 과열 감수'(현실 F1), 서늘하면 최소보다 높게 넣어야 창에 들어온다
+func _init_tyre_press() -> void:
+	psi_min = float(CIRC.get("psiMin", 21.0 if is_wec() else 23.0))
+	var t0: float = float(CIRC.get("trackT", 35.0))
+	track_t = t0 + gauss(5.0)
+	psi_hot_opt = psi_min + press_rise("race", t0) + uni(-0.6, 0.8)
+	psi_eng_err = gauss(0.4)
+
+
+## 달리면서 오르는 공기압 (psi). F1 은 워머(70°C)로 데운 뒤 재는 출발 공기압이라 조금, WEC 는 워머 금지라 차가운 데서 많이.
+## kind: "q" 짧은 런(예선·셋업 테스트) / "race" 긴 런 평균. 실제 피렐리 '예상 주행 공기압' = 출발 + 약 0.5~2.5 psi
+func press_rise(kind: String, temp: float = -999.0) -> float:
+	var tc: float = track_t if temp < -900.0 else temp
+	var r: float = (3.0 + 0.07 * (tc - 30.0)) if is_wec() else (1.6 + 0.05 * (tc - 35.0))
+	return maxf(0.4, r) * (0.6 if kind == "q" else 1.0)
+
+
+## 그 런에 딱 맞는 출발 공기압 (최소 아래로는 못 내림)
+func psi_rec(kind: String) -> float:
+	return maxf(psi_min, psi_hot_opt - press_rise(kind))
+
+
+func psi_snap(v: float) -> float:
+	return clampf(snappedf(v, 0.5), psi_min, psi_min + PSI_SPAN)
+
+
+## 저장된 셋업의 공기압. 예전 저장(낮게/표준/높게)은 엔지니어 추천 ±1.5 psi 로
+func setup_psi(su: Dictionary) -> float:
+	if su.has("psi"):
+		return psi_snap(float(su["psi"]))
+	var old: float = {"low": -1.5, "high": 1.5}.get(String(su.get("press", "std")), 0.0)
+	return psi_snap(psi_rec("race") + psi_eng_err + old)
+
+
+## 데워진 공기압이 최적에서 벗어난 정도 (칸, + = 높음). kind: "q" / "race" / "live"(레이스 중: 타이어 온도만큼 오름)
+## AI 는 예선 때 예선용으로 다시 맞춘다 (내 차는 플레이어가 연습·출발 화면에서 직접)
+func press_u(c, kind: String = "race") -> float:
+	if c.psi <= 0.0: # 예전 중간 저장
+		c.psi = psi_snap(psi_rec("race"))
+	var p: float = c.psi
+	if kind == "q" and not c.mine:
+		p = psi_snap(p + psi_rec("q") - psi_rec("race"))
+	var r: float = press_rise("q" if kind == "q" else "race")
+	if kind == "live":
+		r *= clampf(c.tt / 0.69, 0.4, 1.4) # 0.69 = 그린 레이스 중 평균 타이어 온도 (측정) → 평균적으로 결승 추천값 그대로
+	return clampf((p + r - psi_hot_opt) / PSI_U, -2.5, 2.5)
+
+
+## 공기압 효과 [랩타임 +초, 마모 ×, 온도 목표 +, 예열 ×, 과열 손해 ×, 연석 원값 ×, 직선 원값 초]
+## 창 안이 그립 최고. 높으면: 접지 좁아짐 · 과열·가운데 마모 · 연석에서 튐 / 직선 조금 빠름.
+## 낮으면: 미끄럼 · 잘 안 데워짐 · 어깨 마모 / 연석은 잘 먹음. 어느 쪽도 공짜 아님
+static func press_fx(u: float) -> Array:
+	var o: float = maxf(u, 0.0)
+	var d: float = maxf(-u, 0.0)
+	return [0.18 * u * u, 1.0 + 0.10 * o + 0.05 * d, 0.04 * o, maxf(0.4, 1.0 - 0.30 * d), 1.0 + 0.35 * o, 1.0 + 0.28 * o - 0.15 * d, -0.11 * u]
 
 
 func drs_on() -> bool:
@@ -1003,15 +1069,17 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 		for i in poisson(lam_fast * sh):
 			t += uni(0.15, 0.6)
 	# 타이어 온도
-	var target = tt_target + (0.05 if att_on else 0.0) + DIRTY_TT * dirty_f + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(PRESS[c.press][2]) - (0.05 if night else 0.0)
+	var pu: float = press_u(c, "live")
+	var pf: Array = press_fx(pu)
+	var target = tt_target + (0.05 if att_on else 0.0) + DIRTY_TT * dirty_f + (0.02 if (c.ers_mode == "deploy" and has_ers()) else 0.0) + float(pf[2]) - (0.05 if night else 0.0)
 	if SLICK.has(c.comp) and w > 0.25:
 		target -= 0.25
 	if not SLICK.has(c.comp) and w < 0.2:
 		target += 0.3
-	c.tt = clampf(c.tt + (target - c.tt) * minf(0.9, 0.35 * float(PRESS_FX[c.press]["warm"])), 0.0, 1.0)
+	c.tt = clampf(c.tt + (target - c.tt) * minf(0.9, 0.35 * float(pf[3])), 0.0, 1.0)
 	var cold = maxf(0.0, 0.42 - c.tt)
 	var hot = maxf(0.0, c.tt - 0.80)
-	t += (cold * 4.0 + hot * 3.0 * float(PRESS_FX[c.press]["heat"])) * sh * ws
+	t += (cold * 4.0 + hot * 3.0 * float(pf[4])) * sh * ws
 	var fat: float = (maxf(0.0, c.stint_drv - 1) * 0.04 + fatigue(c) * 0.3) if is_wec() else 0.0
 	var cons: float = c.cons - fat - (0.08 if night else 0.0)
 	var is_launch: bool = c.lap == 0 and c.sec == 0
@@ -1020,9 +1088,9 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	var pressure = 1.5 if (not is_launch and gap_ahead != null and gap_ahead < 0.5) else 1.0
 	var p_err = 0.0
 	if not is_launch:
-		p_err = 0.036 * sh * err_m * press_kerb(c.press) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet) * (0.7 if c.traits.has("rain") else 1.0)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if att_on else 1.0) * ((1.15 if c.traits.has("night") else 1.5) if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
+		p_err = 0.036 * sh * err_m * press_kerb(pu) * pressure * (1.2 - cons) * (1.0 + 3.0 * w * (1.3 - c.wet) * (0.7 if c.traits.has("rain") else 1.0)) * (1.0 + wp / 5.0) * (1.5 if is_restart else 1.0) * (1.0 + cold * 5.0) * (1.2 if att_on else 1.0) * ((1.15 if c.traits.has("night") else 1.5) if night else 1.0) * (1.5 if c.drivers[c.drv].get("grade", "") == "B" else 1.0) * float(sx["err"])
 	# 트랙 리밋: 연석 공략이 과하면 경고, 세 번째부터 5초 페널티 (F1, 그린 상황에서만)
-	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(c.press) * (1.3 if att_on else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
+	if not is_wec() and not sc and not is_launch and rnd() < 0.012 * sh * err_m * (0.6 + c.aggr) * press_kerb(pu) * (1.3 if att_on else 1.0) * (1.0 + maxf(0.0, c.susp - 7.0) * 0.08):
 		c.tl_warn += 1
 		if c.tl_warn >= 3:
 			add_penalty(c, 5.0, "트랙 리밋 위반 %d회" % c.tl_warn)
@@ -1070,7 +1138,7 @@ func sector_time(c, gap_ahead, gap_behind, is_restart: bool) -> Dictionary:
 	# 연료 무게: 탱크가 가득한 초반엔 타이어가 더 닳고(×1.08) 가벼워질수록 덜 닳는다(×0.92). 레이스 평균은 거의 ×1.0
 	var fuel_full: float = TANK if is_wec() else laps * FPL
 	var fuel_wear: float = 0.92 + 0.16 * clampf(c.fuel / maxf(1.0, fuel_full), 0.0, 1.0)
-	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * fuel_wear * (1.0 + hot * 5.0 * float(PRESS_FX[c.press]["heat"])) * lift_wear * (1.0 + DIRTY_WEAR * dirty_f) * float(PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
+	c.wear = minf(1.0, c.wear + wear_rate * wear_m * over * fuel_wear * (1.0 + hot * 5.0 * float(pf[4])) * lift_wear * (1.0 + DIRTY_WEAR * dirty_f) * float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * (0.85 if night else 1.0) * float(sx["wear"]) * sh)
 	if is_wec():
 		c.fuel -= FPL * sh * wec_fuel_mult(c) * lift_fuel
 	else:
@@ -3809,19 +3877,17 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c.nerve = uni(0.5, 1.6)
 		if mine:
 			c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
-			c.press = "std"
+			c.psi = setup_psi(setups[k] if k < setups.size() else {})
 			c.tyre_every = 2
 			c.driver_every = 2
 			c.sc_early = false
 			c.comp = String(start_comps[k]) if k < start_comps.size() else "M"
 			if k < setups.size():
 				c.wing = float(setups[k].get("wing", c.wing))
-				c.press = setups[k].get("press", "std")
 			if k < sets.size():
 				c.tyre_sets = sets[k]
 		else:
 			c.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
-			c.press = "std"
 			c.tyre_every = 2 if rnd() < float(t["strategy"]) - 0.3 else 1
 			c.driver_every = 2
 			c.sc_early = rnd() < 0.7
@@ -3851,7 +3917,6 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 		c2.bop = uni(-0.004, 0.004)
 		c2.nerve = uni(0.5, 1.6)
 		c2.wing = clampf(round(float(CIRC["wingOpt"]) + gauss(0.7)), 1.0, 5.0)
-		c2.press = "std"
 		c2.tyre_every = 2 if rnd() < 0.5 else 1
 		c2.driver_every = 2
 		c2.sc_early = rnd() < 0.7
@@ -3904,16 +3969,15 @@ func _build_wec_entries(entries: Array, opts: Dictionary, start_comps: Array) ->
 		c.fuel = TANK
 		c.bop = uni(-0.004, 0.004)
 		c.nerve = uni(0.5, 1.6)
-		c.press = "std"
 		c.driver_every = 2
 		if c.mine:
 			c.wing = snappedf(float(CIRC.get("wingOpt", 3.0)), 0.1)
 			c.tyre_every = 2
 			c.sc_early = false
 			c.comp = String(start_comps[k]) if k < start_comps.size() else "M"
+			c.psi = setup_psi(setups[k] if k < setups.size() else {})
 			if k < setups.size():
 				c.wing = float(setups[k].get("wing", c.wing))
-				c.press = setups[k].get("press", "std")
 			if k < sets.size():
 				c.tyre_sets = sets[k]
 		else:

@@ -16,7 +16,7 @@
   ],
   "wecHours": 24,
   "rain": 0.3,
-  "wingOpt": 1.5,
+  "wingOpt": 1.5, "psiMin": 21.0, "trackT": 35,
   "hours": 24,
   "lapsOpt": {
    "short": 30,
@@ -233,7 +233,7 @@
   ],
   "wecHours": 6,
   "rain": 0.45,
-  "wingOpt": 2.5,
+  "wingOpt": 2.5, "psiMin": 21.5, "trackT": 25,
   "hours": 6,
   "lapsOpt": {
    "short": 15,
@@ -447,7 +447,7 @@
   ],
   "wecHours": 6,
   "rain": 0.4,
-  "wingOpt": 2.5,
+  "wingOpt": 2.5, "psiMin": 21.0, "trackT": 30,
   "hours": 6,
   "lapsOpt": {
    "short": 15,
@@ -569,7 +569,7 @@
   ],
   "wecHours": 6,
   "rain": 0.25,
-  "wingOpt": 3,
+  "wingOpt": 3, "psiMin": 20.5, "trackT": 40,
   "hours": 8,
   "lapsOpt": {
    "short": 18,
@@ -730,7 +730,7 @@
   ],
   "wecHours": 6,
   "rain": 0.35,
-  "wingOpt": 3.5,
+  "wingOpt": 3.5, "psiMin": 21.0, "trackT": 35,
   "hours": 6,
   "lapsOpt": {
    "short": 15,
@@ -888,7 +888,7 @@
   ],
   "wecHours": 10,
   "rain": 0.05,
-  "wingOpt": 2.8,
+  "wingOpt": 2.8, "psiMin": 20.5, "trackT": 30,
   "hours": 10,
   "lapsOpt": {
    "short": 20,
@@ -1049,7 +1049,7 @@
   ],
   "wecHours": 6,
   "rain": 0.45,
-  "wingOpt": 3,
+  "wingOpt": 3, "psiMin": 21.0, "trackT": 35,
   "hours": 6,
   "lapsOpt": {
    "short": 18,
@@ -1223,7 +1223,7 @@
   ],
   "wecHours": 6,
   "rain": 0.2,
-  "wingOpt": 2.8,
+  "wingOpt": 2.8, "psiMin": 20.5, "trackT": 45,
   "hours": 6,
   "lapsOpt": {
    "short": 15,
@@ -1385,7 +1385,7 @@
   ],
   "wecHours": 8,
   "rain": 0.05,
-  "wingOpt": 2.4,
+  "wingOpt": 2.4, "psiMin": 20.5, "trackT": 30,
   "hours": 8,
   "lapsOpt": {
    "short": 18,
@@ -1556,7 +1556,7 @@
   "overtake": 0.36,
   "wear": 1.25,
   "rain": 0.35,
-  "wingOpt": 3.0,
+  "wingOpt": 3.0, "psiMin": 20.0, "trackT": 45,
   "night": [
    0.85,
    1
@@ -1729,7 +1729,7 @@
   "overtake": 0.34,
   "wear": 1.12,
   "rain": 0.02,
-  "wingOpt": 2.6,
+  "wingOpt": 2.6, "psiMin": 20.5, "trackT": 30,
   "night": [
    0.6,
    1
@@ -1878,7 +1878,7 @@
   "overtake": 0.3,
   "wear": 1.05,
   "rain": 0.02,
-  "wingOpt": 2.8,
+  "wingOpt": 2.8, "psiMin": 20.5, "trackT": 30,
   "night": [
    0.5,
    1

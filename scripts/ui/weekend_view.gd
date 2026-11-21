@@ -215,8 +215,7 @@ func _render_practice() -> void:
 	var pv = K.vbox(4)
 	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bg.add_child(pv)
-	pv.add_child(K.label("타이어 공기압", 14, K.DIM))
-	K.seg(pv, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(sel), 14, ed)
+	_psi_block(pv, c, "q", ed)
 	if not sim.is_wec(): # WEC 는 급유 레이스 — 출발 연료는 늘 가득, 연료량은 레이스 중 피트에서 정한다
 		var fv = K.vbox(4)
 		fv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -277,7 +276,7 @@ func _render_practice() -> void:
 		var t := ""
 		for r in wk.practice_runs:
 			var col := "#a855f7" if r["best"] == best else "#e6edf3"
-			t += "%s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], WK.PRESS_KO[r["press"]], r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
+			t += "%s  W%.1f %s %s  %s  [color=%s]%s[/color]  평균 %s  마모 %.1f%%/랩\n" % [r["code"], r["wing"], "%.1fpsi" % float(r.get("psi", 0.0)), r.get("detail", ""), "롱런" if r["kind"] == "long" else "테스트", col, K.fmt_lap(r["best"]), K.fmt_lap(r["avg"]), r["wear_lap"]]
 		var rr = K.rtl(14)
 		rr.text = t
 		tc.add_child(rr)
@@ -673,8 +672,7 @@ func _render_grid() -> void:
 				wk.start_idx[slot] = _used_pick(card, slot, c.comp, int(wk.start_idx[slot]), _on_start_idx.bind(slot), "start")
 			else:
 				wk.start_idx[slot] = -1
-		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
-		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
+		_psi_block(card, c, "race", true)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):
 			_plan_editor(card, c)
 	_render_q_table()
@@ -693,9 +691,50 @@ func _on_wing(v: float, wl) -> void:
 	wl.text = "윙 각도 [b]W %.1f[/b] · %s" % [v, _wing_desc(v)]
 
 
-func _on_press(v, slot: int) -> void:
-	wk.set_press(slot, v)
-	refresh()
+## 타이어 공기압: 넣을 때(차가운) 값 슬라이더 + −/+ (0.5 psi). 위 띠 = 엔지니어 추천, 아래 = 달리면 몇까지 오르는지
+## kind: "q" 연습·예선 화면 / "race" 결승 출발 화면
+func _psi_block(parent: Control, c, kind: String, ed: bool) -> void:
+	var lab = K.rtl(14)
+	lab.text = _psi_text(c, kind)
+	parent.add_child(lab)
+	var lo: float = sim.psi_min
+	var span: float = RS.PSI_SPAN
+	var row = K.hbox(6)
+	parent.add_child(row)
+	var mid = K.vbox(0)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var bar = BandBar.new()
+	var lh: Array = wk.psi_band(c.slot, kind)
+	bar.lo = (float(lh[0]) - lo) / span
+	bar.hi = (float(lh[1]) - lo) / span
+	mid.add_child(bar)
+	var sl = K.slider(lo, lo + span, 0.5, c.psi, _on_psi.bind(c.slot, kind, lab), ed)
+	mid.add_child(sl)
+	var mb = K.btn("−", 16, func(): sl.value = c.psi - 0.5)
+	var pb = K.btn("+", 16, func(): sl.value = c.psi + 0.5)
+	for b in [mb, pb]:
+		b.disabled = not ed
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER # 슬라이더가 폭을 가져가게
+		b.custom_minimum_size = Vector2(44, 36)
+	row.add_child(mb)
+	row.add_child(mid)
+	row.add_child(pb)
+	parent.add_child(K.label("낮게: 연석 잘 먹음 / 잘 안 데워짐·미끄럼 · 높게: 직선 조금 빠름 / 튐·과열·마모", 12, K.DIM))
+
+
+func _psi_text(c, kind: String) -> String:
+	var lh: Array = wk.psi_band(c.slot, kind)
+	var rq: float = sim.press_rise("q")
+	var rr: float = sim.press_rise("race")
+	var run: String = "예선 런 약 [b]%.1f[/b] · 결승 약 [b]%.1f psi[/b]" % [c.psi + rq, c.psi + rr] if kind == "q" else "결승 약 [b]%.1f psi[/b]" % (c.psi + rr)
+	return "타이어 공기압 [b]%.1f psi[/b] [color=#8b98a5](규정 최소 %.1f)[/color]\n[color=#8b98a5]노면 %d°C → 달리면 %s까지 올라요 · 노란 띠 = 엔지니어 추천 %s %.1f~%.1f[/color]" % [c.psi, sim.psi_min, int(round(sim.track_t)), run, "예선용" if kind == "q" else "결승용", float(lh[0]), float(lh[1])]
+
+
+func _on_psi(v: float, slot: int, kind: String, lab) -> void:
+	wk.set_psi(slot, v)
+	lab.text = _psi_text(_my(slot), kind)
+	if kind == "q":
+		_update_live_feedback()
 
 
 ## 셋업 슬라이더 한 줄: 이름·값 + 추천 범위 띠 + 슬라이더

@@ -21,7 +21,6 @@ const RUN_MIN := 3.0   # 아웃랩 + 어택 랩 (분, 화면 막대 눈금용)
 const OUT_MIN := 1.6   # 아웃랩 (분): 체커기 전에 어택 랩을 시작해야 하므로 마지막 출발 = 세션 길이 - 1.6분
 const IN_MIN := 1.4    # 인랩 (분)
 const RED_MIN := 2.5   # 레드 플래그로 멈추는 시간 (세션 시계는 멈춘다)
-const PRESS_KO := {"low": "낮게", "std": "표준", "high": "높게"}
 const FUEL_LOAD_KO := {"light": "가볍게", "std": "표준", "heavy": "넉넉하게"}
 const PRACTICE_LAPS := 16
 
@@ -106,11 +105,12 @@ func setup(sim_, obligation_laps: int = 0, eng_quality: float = -1.0) -> void:
 	setups = []
 	bands = []
 	for c in my_cars():
-		setups.append({"wing": c.wing, "press": c.press, "fuel_load": c.fuel_load})
 		c.tyre_sets = sets[c.slot]
 		c.used_tyres = used_sets[c.slot]
 		eng_q = eng_quality if eng_quality >= 0.0 else sim.team_eng_q(c)
 		bands.append(_make_band(c))
+		c.psi = sim.psi_snap(float(bands[c.slot]["psi"]["c"])) # 연습·예선 기본 = 엔지니어 추천 (짧은 런 기준)
+		setups.append({"wing": c.wing, "psi": c.psi, "fuel_load": c.fuel_load})
 	var bias := {}
 	for k in ["S", "M", "H"]:
 		bias[k] = sim.uni(-0.24, 0.24)
@@ -147,11 +147,18 @@ func set_wing(slot: int, w: float) -> void:
 	_mark_dirty(slot)
 
 
-func set_press(slot: int, p: String) -> void:
+func set_psi(slot: int, v: float) -> void:
 	var c = my_cars()[slot]
-	c.press = p
-	setups[slot]["press"] = p
+	c.psi = sim.psi_snap(v)
+	setups[slot]["psi"] = c.psi
 	_mark_dirty(slot)
+
+
+## 엔지니어 추천 공기압 범위 [낮음, 높음]: kind "q" = 짧은 런(연습 테스트·예선), "race" = 결승 (오래 달려 더 오르니 그만큼 낮게)
+func psi_band(slot: int, kind: String) -> Array:
+	var lh: Array = band_lohi(slot, "psi")
+	var sh: float = sim.psi_rec(kind) - sim.psi_rec("q")
+	return [sim.psi_snap(float(lh[0]) + sh), sim.psi_snap(float(lh[1]) + sh)]
 
 
 func set_detail(slot: int, key: String, v: float) -> void:
@@ -185,17 +192,21 @@ const WING_RANGE := [1.0, 5.0]
 
 
 func _span(key: String) -> Array:
+	if key == "psi":
+		return [sim.psi_min, sim.psi_min + RS.PSI_SPAN]
 	return WING_RANGE if key == "wing" else RS.SETUP_RANGE[key]
 
 
 func _opt(c, key: String) -> float:
+	if key == "psi":
+		return sim.psi_rec("q")
 	return sim.wing_opt(0.0, c) if key == "wing" else float(sim.setup_opt(c)[key])
 
 
 ## 엔지니어 실력이 좋을수록 좁고 정확한 범위. 정답은 범위 안 어딘가 (가운데가 정답은 아님)
 func _make_band(c) -> Dictionary:
 	var b := {}
-	for key in ["wing", "susp", "bbias", "diff"]:
+	for key in ["wing", "susp", "bbias", "diff", "psi"]:
 		var r: Array = _span(key)
 		var span: float = float(r[1]) - float(r[0])
 		var hw: float = (0.08 + 0.22 * (1.0 - eng_q)) * span
@@ -228,6 +239,7 @@ func _refine_band(slot: int, laps_run: int) -> void:
 
 ## 엔지니어에게 맡기기: 추천 범위 한가운데로
 func engineer_apply(slot: int) -> void:
+	set_psi(slot, float(bands[slot]["psi"]["c"]))
 	for key in ["wing", "susp", "bbias", "diff"]:
 		var v: float = float(bands[slot][key]["c"])
 		if key == "wing":
@@ -252,7 +264,7 @@ func est_range_text(comp: String) -> String:
 	return "%.1f~%.1f%%/랩" % [lo * k, hi * k]
 
 
-func feedback(c) -> String:
+func feedback(c, kind: String = "q") -> String:
 	var d_w: float = c.wing - sim.wing_opt(0.0, c)
 	var a := "밸런스 좋아요"
 	if d_w <= -1.0:
@@ -264,10 +276,15 @@ func feedback(c) -> String:
 	elif d_w <= -0.75:
 		a = "약간 가볍지만 나쁘지 않아요"
 	var b := ""
-	if c.press == "low":
-		b = "그립과 예열은 좋은데 직선이 무겁고, 롱런에선 과열이 걱정돼요"
-	elif c.press == "high":
-		b = "직선은 잘 뻗지만 예열이 느리고 연석에서 튀어요"
+	var pu: float = sim.press_u(c, kind)
+	if pu >= 0.9:
+		b = "타이어가 딱딱하게 튀고 금방 뜨거워져요, 공기압이 너무 높아요"
+	elif pu >= 0.4:
+		b = "타이어가 조금 튀고 뒤로 갈수록 뜨거워져요"
+	elif pu <= -0.9:
+		b = "타이어가 잘 안 데워지고 미끄러워요, 공기압이 너무 낮아요"
+	elif pu <= -0.4:
+		b = "타이어 데워지는 게 조금 느리고 살짝 미끄러워요"
 	var tip: String = sim.setup_tip(c)
 	return a + (". " + b if b != "" else "") + (". " + tip if tip != "" else "")
 
@@ -342,7 +359,9 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 	var fuel: float = STINT * RS.FPL if kind == "long" else RS.FPL * 2.0
 	var CIRC: Dictionary = sim.CIRC
 	var ws: float = sim.wsc()
-	var wmult: float = float(RS.PRESS[c.press][1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c)["wear"])
+	var pu: float = sim.press_u(c, "race" if kind == "long" else "q") # 롱런 = 결승처럼 많이 오름, 테스트 = 예선처럼 조금
+	var pf: Array = RS.press_fx(pu)
+	var wmult: float = float(pf[1]) * (1.0 - (c.wing - 3.0) * 0.04) * c.tyre_deg_rate * float(sim.setup_extra(c)["wear"])
 	var wr: float = sim.true_wear_rate(comp) * float(CIRC["wear"]) * (RS.WEC_WEAR if sim.is_wec() else RS.WEAR_SCALE / 15.0) * wmult
 	var st: Variant = last_set
 	if st != null:
@@ -350,10 +369,10 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 		st["h"] = int(st["h"]) + 1
 	var res: Array = []
 	for i in n:
-		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + float(sim.setup_extra(c)["dt"])
+		var t: float = float(CIRC["base"]) * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"])) + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c)["dt"])
 		t += (wear * wear * float(RS.COMP[comp][2]) + sim.cliff_pen(comp, wear) + fuel * sim.fuel_k()) * ws + sim.gauss(0.25)
-		if c.press == "low" and wear > 0.5:
-			t += 0.3 * float(RS.PRESS_FX["low"]["heat"])
+		if pu > 0.0 and wear > 0.5:
+			t += 0.3 * pu # 공기압이 높으면 런 후반 과열
 		res.append(t)
 		wear += wr
 		fuel -= RS.FPL
@@ -366,9 +385,9 @@ func practice_run(slot: int, kind: String, comp: String = "M", set_mode: String 
 	if kind == "long":
 		wear_est["runs"] = int(wear_est["runs"]) + 1
 		wear_est["err"] = snappedf(float(wear_est["err"]) * 0.5, 0.001)
-	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "press": c.press, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
+	var r := {"code": c.code, "comp": comp, "laps": res, "best": best, "avg": tot / n, "wear_lap": (wr * 100.0) if sim.is_wec() else (wr * 15.0 / sim.laps * 100.0), "kind": kind, "wing": c.wing, "psi": c.psi, "detail": "S%.1f B%.1f D%d" % [c.susp, c.bbias, int(c.diff)]}
 	practice_runs.push_front(r)
-	var fb := "%s: %s" % [c.name, feedback(c)]
+	var fb := "%s: %s" % [c.name, feedback(c, "race" if kind == "long" else "q")]
 	if kind == "long":
 		fb += " (마모 추정 오차 ±%d%%로 축소)" % int(round(float(wear_est["err"]) * 100.0))
 	last_feedback[slot] = fb
@@ -473,20 +492,22 @@ func q_lap(c, push: String, traffic: Variant, stage: int, comp: String, used_set
 	var note := ("쓴 타이어 어택 (약 +%.2fs)" % used_pen) if used_set else ""
 	var deleted := false
 	var secs: Array = []
+	var pu: float = sim.press_u(c, "q")
+	var pf: Array = RS.press_fx(pu)
 	var CIRC: Dictionary = sim.CIRC
 	for s in NS:
 		var sh: float = sim.T.share[s]
 		var t: float = float(CIRC["base"]) * sh * sim.car_factor(c) * (1.0 - c.speed * float(RS.K["drv_k"]) * spd)
-		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(RS.PRESS[c.press][0]) + sim.press_straight(c.press) + float(sim.setup_extra(c)["dt"]) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
+		t += (comp_delta + used_pen + sim.setup_pen(c, 0.0) + float(pf[0]) + sim.press_straight(pu) + float(sim.setup_extra(c)["dt"]) + evo_bonus + stage_evo) * sh + 5.0 * 0.03 * sh
 		t += sim.gauss(0.10 * sqrt(sh) * sqrt(ws))
 		if sim.rnd() < trf_risk * sh * 1.6:
 			var loss: float = sim.uni(0.22, 0.68)
 			t += loss
 			note = "섹터 %d 트래픽 +%.2fs" % [s + 1, loss]
-		if sim.rnd() < 0.012 * err * sim.press_kerb(c.press) * (1.25 - c.cons) * (1.0 + absf(c.wing - float(CIRC["wingOpt"])) * 0.3):
+		if sim.rnd() < 0.012 * err * sim.press_kerb(pu) * (1.25 - c.cons) * (1.0 + absf(c.wing - float(CIRC["wingOpt"])) * 0.3):
 			t += sim.uni(0.3, 1.5)
 			note = "실수로 시간 손실"
-		if sim.rnd() < lim * (1.2 - c.cons) * sim.press_kerb(c.press):
+		if sim.rnd() < lim * (1.2 - c.cons) * sim.press_kerb(pu):
 			deleted = true
 			note = "섹터 %d 트랙 리밋 위반 → Q%d 기록 삭제" % [s + 1, stage]
 		secs.append(t)
@@ -976,6 +997,8 @@ func best_secs(exclude_id: int) -> Array:
 func finish_quali() -> void:
 	Q["done"] = true
 	done_quali = true
+	for c in my_cars():
+		set_psi(c.slot, c.psi + sim.psi_rec("race") - sim.psi_rec("q"))
 	var ord: Array = q_order()
 	sim.cars = ord
 	for i in ord.size():

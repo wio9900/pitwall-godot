@@ -52,7 +52,7 @@ func _init() -> void:
 	sv.new_race("monza", 0, 20, "dry", ["M", "M"], 515)
 	sv.prepare_start()
 	var sg := 0
-	while sv.leader_lap < 12 and not sv.done and sg < 100000:
+	while (sv.leader_lap < 12 or sv.sc) and not sv.done and sg < 100000: # SC 중엔 언더컷 계산을 안 하므로 그린일 때 확인
 		sv.advance(1.0)
 		sg += 1
 	var sv_bad := 0

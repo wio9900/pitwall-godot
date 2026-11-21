@@ -86,7 +86,7 @@ func _init() -> void:
 	wu.practice_run(0, "short", "M")  # 같은 세트 3랩 더
 	wu.practice_run(0, "short", "S")  # 새 S 세트 열고 3랩
 	var m_set: Dictionary = wu.used_sets[0]["M"][0]
-	var lw: float = su.set_lap_wear("M") * float(RaceSimS.PRESS[su.my_cars()[0].press][1])
+	var lw: float = su.set_lap_wear("M") # 공기압 마모 배율은 1 이상 (창 안이 가장 적게 닮)
 	var one_run: float = wu.q_used_pen("S", su.set_lap_wear("S") * WeekendS.Q_RUN_LAPS)
 	var more: float = wu.q_used_pen("S", float(wu.used_sets[0]["S"][0]["w"]))
 	# 결승 출발: 새 M 이 없으면 가장 덜 쓴 M 세트의 마모에서 출발
@@ -95,6 +95,27 @@ func _init() -> void:
 	c0.comp = "M"
 	wu.start_pref[0] = "used"
 	wu.commit_start_tyres()
+	# 공기압 psi (D①): 공짜 쪽 없음 · 더운 날은 최소에 걸림 · 예선용이 결승용보다 높거나 같음 · 드라이버 말은 방향이 맞음
+	var fo: Array = RaceSimS.press_fx(1.0)
+	var fl: Array = RaceSimS.press_fx(-1.0)
+	var f0: Array = RaceSimS.press_fx(0.0)
+	var psi_ok: bool = float(f0[0]) == 0.0 and float(fo[0]) > 0.0 and float(fl[0]) > 0.0 \
+		and float(fo[6]) < 0.0 and float(fo[5]) > 1.0 and float(fo[4]) > 1.0 \
+		and float(fl[6]) > 0.0 and float(fl[5]) < 1.0 and float(fl[3]) < 1.0
+	psi_ok = psi_ok and su.psi_rec("q") >= su.psi_rec("race") and su.my_cars()[0].psi >= su.psi_min
+	var keep_t: float = su.track_t
+	su.track_t = float(su.CIRC["trackT"]) + 40.0
+	psi_ok = psi_ok and su.psi_rec("race") == su.psi_min
+	su.track_t = keep_t
+	var cp = su.my_cars()[0]
+	var keep_p: float = cp.psi
+	cp.psi = su.psi_min + RaceSimS.PSI_SPAN
+	var fb_hi: String = wu.feedback(cp, "race")
+	cp.psi = keep_p
+	psi_ok = psi_ok and fb_hi.contains("튀")
+	print("   공기압: 최소 %.1f · 노면 %.0f°C · 추천 예선 %.1f / 결승 %.1f · 최고로 넣으면 \"%s\" %s" % [su.psi_min, su.track_t, su.psi_rec("q"), su.psi_rec("race"), fb_hi, "OK" if psi_ok else "실패"])
+	if not psi_ok:
+		fails += 1
 	var ok15: bool = wu.used_n(0, "M") == 1 and int(m_set["h"]) == 3 and absf(float(c0.wear) - float(m_set["w"])) < 0.001 \
 		and float(m_set["w"]) > lw * 7.0 and absf(one_run - 0.45) < 0.01 and more > one_run and absf(c0.used_set_pen - RaceSimS.HEAT_PEN * 2.0) < 0.001
 	print("   쓴 세트 마모: M 세트 %.0f%% (달군 %d) → 출발 마모 %.0f%% · 열 사이클 +%.2f초/랩 · 예선 손해 런1 %.2f / 숏런 세트 %.2f %s" % [float(m_set["w"]) * 100.0, int(m_set["h"]), c0.wear * 100.0, c0.used_set_pen, one_run, more, "OK" if ok15 else "실패"])

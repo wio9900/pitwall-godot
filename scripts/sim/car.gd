@@ -76,7 +76,7 @@ var undercut_try := -1    # 스톱별로 한 번만 시도
 var overcut_try := -1
 var traffic_try := -1
 var wing := 3.0
-var press := "std"
+var psi := 0.0         # 넣을 때(차가운) 타이어 공기압 psi (0 = 아직 안 정함)
 var susp := 5.5        # 서스펜션 강성 1(부드럽게)~10(단단하게)
 var bbias := 57.0      # 브레이크 밸런스 앞쪽 % 52~62
 var diff := 50.0       # 디퍼렌셜 잠김 % 20~80
