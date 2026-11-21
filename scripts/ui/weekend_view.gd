@@ -33,6 +33,8 @@ var q_comps: Array = ["S", "S"]
 var q_pushes: Array = ["std", "std"]
 var p_set := "auto"          # 연습 세트: auto(쓴 것 먼저) / new / used
 var q_sets: Array = ["auto", "auto"]  # 예선 세트: auto(새 것 먼저) / new / used
+var p_idx := -1              # 연습 '쓴 세트'에서 직접 고른 세트 번호 (used_sets 안, -1 = 가장 덜 쓴 것)
+var q_idx: Array = [-1, -1]  # 예선 같은 것 (결승 출발은 wk.start_idx)
 const SET_ITEMS := [["auto", "자동"], ["new", "새 세트"], ["used", "쓴 세트"]]
 var _q_ver := -1
 var _q_head: RichTextLabel
@@ -252,6 +254,8 @@ func _render_practice() -> void:
 		p_comp = pitems[0][0]
 	K.seg(card, pitems, p_comp, _on_pcomp, 14, anim == null)
 	p_set = _set_seg(card, sel, p_comp, "쓴 것 먼저", p_set, _on_pset, anim == null)
+	if p_set == "used":
+		p_idx = _used_pick(card, sel, p_comp, p_idx, _on_pidx, "", anim == null)
 	var h = K.hbox(6)
 	card.add_child(h)
 	h.add_child(K.btn("셋업 테스트 (3랩)", 15, func(): _run_practice("short")))
@@ -305,6 +309,7 @@ func _render_practice() -> void:
 
 func _on_pcomp(v) -> void:
 	p_comp = v
+	p_idx = -1
 	refresh()
 
 
@@ -313,11 +318,56 @@ func _on_pset(v) -> void:
 	refresh()
 
 
-## 새 세트 / 쓴 세트 고르기 버튼 (개수 표시, 없는 쪽은 "없음")
+func _on_pidx(v) -> void:
+	p_idx = int(v)
+	refresh()
+
+
+## 새 세트 / 쓴 세트 고르기 버튼 (개수 표시, 없는 쪽은 "없음"). 쓴 세트는 마모 % 를 작은 순으로
 func _set_items(slot: int, comp: String, auto_txt: String) -> Array:
 	var nn: int = int(wk.sets[slot].get(comp, 0))
 	var uu: int = wk.used_n(slot, comp)
-	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 세트 %d" % uu if uu > 0 else "쓴 세트 없음"]]
+	var ws: Array = []
+	for st in wk.used_sets[slot].get(comp, []):
+		ws.append(float(st["w"]))
+	ws.sort()
+	var pct: PackedStringArray = []
+	for w in ws:
+		pct.append("%d%%" % int(round(w * 100.0)))
+	return [["auto", "자동 (%s)" % auto_txt], ["new", "새 세트 %d" % nn if nn > 0 else "새 세트 없음"], ["used", "쓴 %d (%s)" % [uu, " · ".join(pct)] if uu > 0 else "쓴 세트 없음"]]
+
+
+## 쓴 세트 직접 고르기 줄 ("18% · 2회", 덜 쓴 순). cur = 고른 번호(-1 = 가장 덜 쓴 것, 그 버튼이 눌린 모양).
+## kind: "q" 예선 손해 / "start" 결승 출발 손해 한 줄, "" 없음. 돌려주는 값 = 유효한 번호(-1 그대로 둠)
+func _used_pick(card: Control, slot: int, comp: String, cur: int, cb: Callable, kind: String, enabled := true) -> int:
+	var arr: Array = wk.used_sets[slot].get(comp, [])
+	if arr.is_empty():
+		return -1
+	if cur >= arr.size():
+		cur = -1
+	var shown: int = cur if cur >= 0 else RS.least_worn(arr)
+	var order: Array = range(arr.size())
+	order.sort_custom(func(a, b): return float(arr[a]["w"]) < float(arr[b]["w"]))
+	var flow := HFlowContainer.new() # 세로 폰에서 세트가 많으면 줄바꿈
+	flow.add_theme_constant_override("h_separation", 4)
+	flow.add_theme_constant_override("v_separation", 4)
+	card.add_child(flow)
+	var grp := ButtonGroup.new()
+	for i in order:
+		var b = K.btn("%d%% · %d회" % [int(round(float(arr[i]["w"]) * 100.0)), int(arr[i]["h"])], 12)
+		b.toggle_mode = true
+		b.button_group = grp
+		b.button_pressed = i == shown
+		b.disabled = not enabled
+		b.pressed.connect(cb.bind(i))
+		flow.add_child(b)
+	var st: Dictionary = arr[shown]
+	if kind == "q":
+		card.add_child(K.label("이 세트로 어택: 예선 약 +%.2f초" % (wk.q_used_pen(comp, float(st["w"])) * sim.wsc()), 12, K.DIM))
+	elif kind == "start":
+		var hh: int = mini(3, int(st["h"]))
+		card.add_child(K.label("달군 %d회 → 랩당 +%.2f초 · 마모 %d%%에서 출발" % [int(st["h"]), RS.HEAT_PEN * float(hh), int(round(float(st["w"]) * 100.0))], 12, K.DIM))
+	return cur
 
 
 ## 세트 버튼 줄: 없는 쪽은 눌리지 않게 막고, 고른 쪽이 바닥났으면 "자동"으로 되돌린다. 돌려주는 값 = 실제 선택
@@ -336,7 +386,7 @@ func _set_seg(card: Control, slot: int, comp: String, auto_txt: String, cur: Str
 func _run_practice(kind: String) -> void:
 	if anim != null:
 		return
-	var r: Dictionary = wk.practice_run(sel, kind, p_comp, p_set)
+	var r: Dictionary = wk.practice_run(sel, kind, p_comp, p_set, p_idx if p_set == "used" else -1)
 	if r.is_empty():
 		_live.text = "[color=#ef4444]%s[/color]" % ("남은 연습 랩이 부족해요" if wk.practice_left[sel] < (5 if kind == "long" else 3) else "%s %s타이어가 남아 있지 않아요" % [RS.TYRE_KO[p_comp], {"new": "새 ", "used": "쓴 "}.get(p_set, "")])
 		return
@@ -408,6 +458,8 @@ func _render_quali() -> void:
 				q_comps[slot] = items[0][0]
 			K.seg(card, items, q_comps[slot], _on_q_comp.bind(slot), 14)
 			q_sets[slot] = _set_seg(card, slot, q_comps[slot], "새 것 먼저", String(q_sets[slot]), _on_q_set.bind(slot))
+			if q_sets[slot] == "used":
+				q_idx[slot] = _used_pick(card, slot, q_comps[slot], int(q_idx[slot]), _on_q_idx.bind(slot), "q")
 			K.seg(card, [["safe", "안전하게"], ["std", "표준"], ["limit", "한계까지"]], q_pushes[slot], _on_q_push.bind(slot), 14)
 			var go = K.btn("피트 출발 ▶", 18, _on_q_go.bind(slot))
 			go.disabled = float(wk.Q["red_left"]) > 0.0 or float(wk.Q["t"]) > wk.q_last_dep()
@@ -433,6 +485,7 @@ func _on_qspeed(v) -> void:
 
 func _on_q_comp(v, slot: int) -> void:
 	q_comps[slot] = v
+	q_idx[slot] = -1
 	refresh()
 
 
@@ -441,12 +494,17 @@ func _on_q_set(v, slot: int) -> void:
 	refresh()
 
 
+func _on_q_idx(v, slot: int) -> void:
+	q_idx[slot] = int(v)
+	refresh()
+
+
 func _on_q_push(v, slot: int) -> void:
 	q_pushes[slot] = v
 
 
 func _on_q_go(slot: int) -> void:
-	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot], q_sets[slot])
+	var err: String = wk.player_depart(slot, q_comps[slot], q_pushes[slot], q_sets[slot], int(q_idx[slot]) if q_sets[slot] == "used" else -1)
 	if err != "":
 		_live.text = "[color=#ef4444]%s[/color]" % err
 	if q_speed == 0:
@@ -611,6 +669,10 @@ func _render_grid() -> void:
 		K.seg(card, sitems, c.comp, _on_start_comp.bind(slot), 14, not c.q3_locked)
 		if not sim.is_wec() and not c.q3_locked and RS.SLICK.has(c.comp):
 			wk.start_pref[slot] = _set_seg(card, slot, c.comp, "새 것 먼저", String(wk.start_pref[slot]), _on_start_set.bind(slot))
+			if wk.start_pref[slot] == "used":
+				wk.start_idx[slot] = _used_pick(card, slot, c.comp, int(wk.start_idx[slot]), _on_start_idx.bind(slot), "start")
+			else:
+				wk.start_idx[slot] = -1
 		card.add_child(K.label("출발 직전 공기압", 14, K.DIM))
 		K.seg(card, [["low", "낮게"], ["std", "표준"], ["high", "높게"]], c.press, _on_press.bind(slot), 14)
 		if not sim.is_wec() and not sim.rules.get("no_pits", false):
@@ -805,8 +867,14 @@ func _on_start_set(v, slot: int) -> void:
 	refresh()
 
 
+func _on_start_idx(v, slot: int) -> void:
+	wk.start_idx[slot] = int(v)
+	refresh()
+
+
 func _on_start_comp(v, slot: int) -> void:
 	wk.set_start_comp(slot, v)
+	wk.start_idx[slot] = -1
 	if plan_edit.has(slot) and not plan_edit[slot]["edited"]:
 		plan_edit.erase(slot)
 	refresh()

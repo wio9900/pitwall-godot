@@ -175,9 +175,35 @@ func _process(_delta: float) -> bool:
 		main.new_entry = "create"
 		main._new_career()
 		main._start_weekend_career()
+		# 쓴 세트 칩·직접 고르기 (D-3): 미디엄 새 세트 두 번 → 쓴 세트 2개, 두 번째 세트를 골라 연습하면 그 세트만 마모가 쌓여야 함
+		var v = main.wk_view
+		main.wk.practice_run(0, "short", "M", "new")
+		main.wk.practice_run(0, "short", "M", "new")
+		var ua: Array = main.wk.used_sets[0]["M"]
+		var w0: float = float(ua[0]["w"])
+		v._on_pcomp("M")
+		v._on_pset("used")
+		v._on_pidx(1)
+		var chip: String = String(v._set_items(0, "M", "")[2][1])
+		v._run_practice("short")
+		v.anim = null
+		if ua.size() != 2 or float(ua[0]["w"]) != w0 or float(ua[1]["w"]) <= w0 or not chip.contains("%"):
+			print("  ! 쓴 세트 직접 고르기 실패: %s · %s" % [chip, ua])
+			quit(1)
+		print("쓴 세트 칩: %s" % chip)
+		v._on_pset("auto")
 		main.wk.auto_practice()
 		main.wk.start_quali()
 		main.wk.auto_quali()
+		v.refresh()
+		var c0 = main.wk.my_cars()[0]
+		if not c0.q3_locked and main.wk.used_n(c0.slot, c0.comp) > 0:
+			v._on_start_set("used", c0.slot)
+			v._on_start_idx(0, c0.slot)
+			if int(main.wk.start_idx[c0.slot]) != 0:
+				print("  ! 결승 출발 쓴 세트 번호 저장 실패")
+				quit(1)
+			v._on_start_set("auto", c0.slot)
 		main._begin_race()
 		print("커리어 레이스 시작: %s (%s)" % [main.sim.CIRC["name"], main.career.tier_meta()["short"]])
 		return false
