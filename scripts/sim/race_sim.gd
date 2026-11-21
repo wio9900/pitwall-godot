@@ -20,7 +20,12 @@ const COMP := {"S": [-1.05, 0.048, 4.0], "M": [0.0, 0.032, 3.3], "H": [0.50, 0.0
 ## WEC 하이퍼카(미쉐린) 전용: 컴파운드 사이 속도·마모 차이는 작고, 노면 온도 창이 고르는 기준 (수정 24).
 ## F1 표를 그대로 쓰면 소프트가 미디엄보다 1.5배 닳아 더블 스틴트도 못 버팀 — 실제 르망은 밤에 소프트 트리플 스틴트(미쉐린 2025).
 ## 미디엄은 F1 표와 같음 → LMGT3·LMP2(미디엄 한 종류) 결과는 그대로
-const WEC_COMP := {"S": [-0.25, 0.034, 3.6], "M": [0.0, 0.032, 3.3], "H": [0.30, 0.029, 3.0], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
+## 수정 31 역할 나누기: 소프트 = 추운 날 한 스틴트(마모 0.034 → 0.037, 더블이면 70% 로 절벽), 미디엄 = 더블, 하드 = 더운 날·트리플.
+## 하드 = 트리플 스틴트 타이어 (수정 31): 마모 0.029 → 0.024, 절벽 0.62 → WEC_H_CLIFF. 트리플(15랩) 끝 약 68% 로 절벽 전
+## (예전엔 미디엄보다 먼저 절벽이라 하드 장점이 온도 창 하나뿐이었음). 속도 +0.30 · 워머 금지 손해는 그대로
+const WEC_COMP := {"S": [-0.25, 0.037, 3.6], "M": [0.0, 0.032, 3.3], "H": [0.30, 0.024, 3.0], "I": [0.0, 0.038, 3.3], "W": [0.0, 0.032, 3.1]}
+const WEC_H_CLIFF := 0.75
+const SET_VAL := 0.6 # 세트가 모자랄 때 세트 하나 아끼는 값 (랩당 초 × 스틴트 랩, wsc 배율): 나중에 쓴 세트(약 30%)로 한 스틴트 더 탈 때 잃는 시간 어림
 const WIN_BASE := 0.15 # 온도 창을 벗어나는 순간 타이어 온도 목표가 과열·저온 경계까지 이동
 const AWD_WET := 0.12   # 사륜 구간 비율 1 일 때 비 오는 날 그립 손해를 이만큼 덜 (르망 흠뻑 젖음 ≈ 랩당 0.8초)
 const HY_VMAX := 340.0  # 하이퍼카 최고 속도 km/h — 트랙 상대 속도(T.spd 1 = 최고)를 km/h 로 어림
@@ -602,6 +607,15 @@ func cpv(k: String) -> Array:
 	return WEC_COMP[k] if is_wec() else COMP[k]
 
 
+## 이 컴파운드의 절벽이 시작되는 마모 (cliff_pen 과 같은 경계)
+func cliff_at(comp: String) -> float:
+	if comp == "H":
+		return WEC_H_CLIFF if is_wec() else H_CLIFF
+	if comp == "S" and not is_wec():
+		return 0.60
+	return 0.65
+
+
 func cliff_pen(comp: String, w: float) -> float:
 	if comp == "S" and is_wec() and w > 0.65: # WEC 소프트는 미디엄처럼 오래 감 (WEC_COMP)
 		return 1.5 + 2.5 * minf(1.0, (w - 0.65) / 0.35)
@@ -609,8 +623,10 @@ func cliff_pen(comp: String, w: float) -> float:
 		return 1.6 + 2.6 * minf(1.0, (w - 0.60) / 0.40)
 	if comp == "M" and w > 0.65:
 		return 1.5 + 2.5 * minf(1.0, (w - 0.65) / 0.35)
-	if comp == "H" and w > H_CLIFF:
-		return 2.0 + 2.8 * minf(1.0, (w - H_CLIFF) / (1.0 - H_CLIFF))
+	if comp == "H":
+		var hc: float = cliff_at("H")
+		if w > hc:
+			return 2.0 + 2.8 * minf(1.0, (w - hc) / (1.0 - hc))
 	return 0.0
 
 
@@ -1103,6 +1119,52 @@ func wec_pick_comp(c, n: int, noisy: bool = true) -> String:
 	# shortcut: 수정 25 진단 — 폰에서만 AI 타이어가 섞이는 원인 확인용. 출발(0랩)은 전부, 그 뒤는 하드를 고르거나 온도를 3°C 넘게 잘못 읽었을 때만. 원인 확정 후 지움
 	if noisy and not c.mine and (leader_lap == 0 or best == "H" or absf(temp - real_t) > 3.0):
 		BLog.add("타이어 L%d %s → %s (읽음 %.0f° 실제 %.0f° · %d랩 · %s · %s)" % [leader_lap, name_of(c), best, temp, real_t, n, " ".join(tl), c.wec_style])
+	return best
+
+
+## AI 새 세트 고르기 (수정 31): 컴파운드 × 이 세트로 탈 스틴트 수(팀 습관 m, 한 스틴트 더 m+1, 최대 3)를 같이 고른다.
+## 랩당 비용 = (달리는 시간 + 타이어 교체 시간 + 세트가 모자라면 세트 값) ÷ 랩 → "하드 트리플로 교체·세트 아끼기 vs 미디엄 더블로 빠르게".
+## 결과 스틴트 수는 c.set_plan (wec_decision 의 tyre_due), 컴파운드를 돌려준다. 온도 읽기 오차·성향은 wec_pick_comp 와 같다
+func wec_pick_set(c, left: int, noisy: bool = true) -> String:
+	var al: Array = wec_comps(c.cls)
+	var habit: int = maxi(1, c.tyre_every)
+	c.set_plan = habit
+	if left <= STINT + 1:
+		return wec_pick_comp(c, left, noisy) if al.size() > 1 else String(al[0])
+	var tyre_cost: float = wec_stop_time(c, true, false) - wec_stop_time(c, false, false)
+	# 세트 사정: 이 세트로 m 스틴트 탄 뒤 남은 스틴트를 더블로 채울 새 세트가 모자라면, 모자란 세트마다
+	# 쓴 세트를 다시 끼거나 스틴트를 늘려 잃는 시간(SET_VAL) — 세트가 빠듯한 르망에서 싱글 스틴트를 남발하지 않게
+	var stints_after: int = int(ceil(float(left) / STINT))
+	var spare: int = c.wec_sets - (1 if c.lap > 0 else 0) # 출발 세트는 wec_sets 에 안 들어 있음
+	var err: float = gauss(maxf(0.5, (1.0 - c.strategy) * 10.0)) if noisy else 0.0
+	var best := String(al[0])
+	var best_m := habit
+	var best_v := INF
+	var tl: PackedStringArray = []
+	for m in [habit, habit + 1]:
+		if m > 3:
+			continue
+		var n: int = mini(left, m * STINT)
+		var fin: bool = n >= left
+		var real_t: float = run_temp(n)
+		for k in al:
+			var t: float = comp_run_time(c, String(k), n, real_t + err)
+			if c.wec_style == "push" and k == "S":
+				t -= 0.1 * wsc() * n
+			elif c.wec_style == "save" and k == "H":
+				t -= 0.1 * wsc() * n
+			var deficit: int = maxi(0, int(ceil(maxf(0.0, float(stints_after - m)) / 2.0)) - spare)
+			var v: float = (t + (0.0 if fin else tyre_cost + deficit * SET_VAL * wsc() * STINT)) / n
+			tl.append("%s%d %.2f" % [k, m, v])
+			if v < best_v:
+				best_v = v
+				best = String(k)
+				best_m = m
+	c.set_plan = best_m
+	if best_m > habit:
+		_tally("세트 스틴트 늘림 %s" % best)
+	if noisy and not c.mine and (leader_lap == 0 or best == "H" or absf(err) > 3.0):
+		BLog.add("타이어 L%d %s → %s×%d (오차 %+.0f° · %s · %s)" % [leader_lap, name_of(c), best, best_m, err, " ".join(tl), c.wec_style]) # shortcut: 수정 25 진단
 	return best
 
 
@@ -2216,7 +2278,7 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 			var one_lap: float = FPL * fm_m
 			var fuel_line: float = c.fuel - one_lap * T.share[NS - 1]
 			if left >= 1 and fuel_line < one_lap * 0.90:
-				var d_t: bool = c.wear > 0.45 or kind_of(c.comp) != want_kind
+				var d_t: bool = c.wear > cliff_at(c.comp) - 0.20 or kind_of(c.comp) != want_kind
 				var comp0: String = (wec_pick_comp(c, wec_tyre_run(c, left), false) if want == "slick" else "W") if d_t else c.comp
 				say(c, "연료 부족! 다음 랩 완주 불가 → 자동 박스 (급유%s)" % ((" + " + TYRE_KO[comp0]) if d_t else ""))
 				var d_d: bool = c.auto_swap or must_swap(c)
@@ -2231,7 +2293,8 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 	var fm: float = wec_fuel_mult(c)
 	var fuel_at_line: float = c.fuel - FPL * T.share[NS - 1] * fm
 	var need_fuel: bool = fuel_at_line < FPL * fm * 0.92 and left >= 1
-	var worn_out: bool = c.wear >= 0.62 and left >= 2
+	var cl: float = cliff_at(c.comp) if SLICK.has(c.comp) else 0.65 # 미디엄·소프트 0.65(예전 고정값 기준), WEC 하드 0.75
+	var worn_out: bool = c.wear >= cl - 0.03 and left >= 2
 	var early: bool = c.sc_early and sc and cur > 2 and c.wear >= 0.38 and (fuel_at_line < FPL * fm * 2.2 or c.wear >= 0.50) and left > 2
 	var wrong: bool = kind_of(c.comp) != want_kind
 	var weather := false
@@ -2250,14 +2313,14 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		drv_due = drive_in_window(c, c.drv) + 1 >= int(lim_c["max_win"]) or tot_c + 1 >= int(lim_c["max_total"])
 	if not need_fuel and not worn_out and not early and not weather and not drv_due:
 		return null
-	var tyre_due: bool = c.stint_tyre + 1 >= c.tyre_every or c.wear >= 0.52 or worn_out
+	var tyre_due: bool = c.stint_tyre + 1 >= c.set_plan or c.wear >= cl - 0.13 or worn_out
 	# 세트 제한: 남은 스틴트에 비해 새 세트가 모자라면 마모가 심하지 않은 한 한 스틴트 더 탄다
 	if tyre_due and not wrong and want == "slick":
 		var stints_after: int = int(ceil(float(left) / STINT))
 		var short_sets: bool = c.wec_sets < int(ceil(stints_after / 2.0))
 		if c.wec_sets <= 0 and not worn_out:
 			tyre_due = false
-		elif short_sets and c.wear < 0.45 and not worn_out:
+		elif short_sets and c.wear < cl - 0.20 and not worn_out:
 			tyre_due = false
 	var tyres: bool = tyre_due or wrong
 	var driver: bool = c.stint_drv + 1 >= c.driver_every or must_swap(c) or drv_due
@@ -2270,8 +2333,8 @@ func wec_decision(c, cur: int, left: int, want: String) -> Variant:
 		driver = must_swap(c)
 	var comp: String = (c.comp if SLICK.has(c.comp) else "M") if want == "slick" else "W"
 	if want == "slick" and tyres:
-		# 컴파운드 선택: 이 타이어로 달릴 구간(마지막이면 남은 랩, 아니면 타이어 교체 주기)의 예상 노면 온도로 계산 (수정 24)
-		comp = wec_pick_comp(c, wec_tyre_run(c, left))
+		# 컴파운드·이 세트로 탈 스틴트 수: 예상 노면 온도 · 타이어 교체 시간 · 세트 사정으로 (수정 24 · 31)
+		comp = wec_pick_set(c, left)
 	if not tyres:
 		comp = c.comp
 	comp = wec_fit_comp(c.cls, comp)
@@ -2304,7 +2367,7 @@ func swap_due(c) -> bool:
 func wec_tyre_run(c, left: int) -> int:
 	if left <= STINT + 1:
 		return left
-	return mini(left, STINT * maxi(1, c.tyre_every))
+	return mini(left, STINT * maxi(1, c.set_plan))
 
 
 ## AI·자동 박스 급유량: 남은 거리가 한 탱크 안이면 완주에 필요한 만큼만(스플래시) → 정차가 짧다. 아니면 가득
@@ -3039,7 +3102,7 @@ func on_leader_lap() -> void:
 				say(c, "연료가 %.1f랩분 모자라요! 연비 모드에 리프트 앤 코스트까지 써야 해요" % short_std)
 			elif c.fuel_mode != "lean":
 				say(c, "지금 페이스면 연료가 %.1f랩분 모자라요. 'ERS·연료' 탭에서 세이브로 바꿔주세요" % short_std)
-		elif (c.wear > 0.7 or (c.comp == "H" and c.wear > H_CLIFF)) and not booked:
+		elif (c.wear > maxf(0.7, cliff_at(c.comp)) or (c.comp == "H" and c.wear > cliff_at("H"))) and not booked:
 			# 막판(3랩 이하)엔 피트 손실이 남은 랩에서 잃는 시간보다 커서 버티는 게 정답
 			if left <= 3:
 				say(c, "타이어가 다 됐지만 %d랩 남았어요. 끝까지 버틸게요" % left)
@@ -4490,9 +4553,10 @@ func _build_wec_field(opts: Dictionary, start_comps: Array) -> void:
 
 func _finish_wec_car(c, stall_keys: Array) -> void:
 	c.comp = wec_fit_comp(c.cls, c.comp)
-	if not c.mine and c.cls == "HY":
-		c.comp = wec_pick_comp(c, STINT * maxi(1, c.tyre_every)) # 출발 노면 온도로 (수정 24)
 	c.wec_sets = wec_race_sets(c.cls)
+	c.set_plan = c.tyre_every
+	if not c.mine and c.cls == "HY":
+		c.comp = wec_pick_set(c, laps) # 출발 노면 온도로 (수정 24 · 31)
 	# 세트가 매 정차 새 타이어를 낄 만큼 있으면(2026 LMGT3 등) AI 는 더블 스틴트 대신 매번 교체
 	if not c.mine and c.cls != "HY" and c.wec_sets + 1 >= int(ceil(float(laps) / STINT)):
 		c.tyre_every = 1

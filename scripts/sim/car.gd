@@ -26,6 +26,7 @@ var eng_eff := 1.0        # 연비 효율
 var tyre_every := 2       # 몇 스틴트마다 타이어 교체
 var driver_every := 2     # 몇 스틴트마다 드라이버 교대
 var stint_tyre := 0
+var set_plan := 2         # 지금 세트로 탈 스틴트 수 (AI 가 새 세트 낄 때 정함, 수정 31)
 var stint_drv := 0
 var wec_style := "std"    # AI 연비 성향 push / std / save
 var pen_log: Array = []   # 페널티 기록 [{lap, why, secs}]

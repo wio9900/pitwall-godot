@@ -562,7 +562,7 @@ func refresh() -> void:
 		var line3 := ""
 		if c.dnf == "":
 			var rate: float = c.wear / maxf(1.0, float(c.stint_laps))
-			var lim: float = RS.H_CLIFF if c.comp == "H" else 0.70
+			var lim: float = sim.cliff_at("H") if c.comp == "H" else 0.70
 			var rem_t := "-"
 			if c.stint_laps >= 1 and rate > 0.0005 and RS.SLICK.has(c.comp):
 				rem_t = "+%d" % maxi(0, int((lim - c.wear) / rate))

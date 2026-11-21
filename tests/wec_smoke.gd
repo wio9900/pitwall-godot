@@ -223,6 +223,15 @@ func _init() -> void:
 	print("   온도 창: 30°C 5랩 미디엄 %s · 낮 %.0f°C 10랩 → %s · 밤 %.0f°C → %s %s" % [m_short, t_day, pick_day, t_night, pick_night, "OK" if (win_ok and m_short and pick_day == "H" and pick_night == "S") else "실패"])
 	if not (win_ok and m_short and pick_day == "H" and pick_night == "S"):
 		fails += 1
+	# 수정 31: 하드 = 트리플 스틴트 타이어 — 15랩 끝 마모가 절벽 전, 트리플이면 30°C 에서도 하드가 미디엄보다 빠름, 33°C 더블은 미디엄
+	tw.true_mult = {"S": 1.0, "M": 1.0, "H": 1.0}
+	var h_end: float = tw.true_wear_rate("H") * float(tw.CIRC["wear"]) * RaceSimS.WEC_WEAR * 15.0
+	var h_tri: bool = tw.comp_run_time(hy, "H", 15, 30.0) < tw.comp_run_time(hy, "M", 15, 30.0)
+	var m_dbl: bool = tw.comp_run_time(hy, "M", 10, 33.0) < tw.comp_run_time(hy, "H", 10, 33.0)
+	var tri_ok: bool = h_end < tw.cliff_at("H") and tw.cliff_at("H") > tw.cliff_at("M") and h_tri and m_dbl
+	print("   하드 트리플: 15랩 끝 %.0f%% (절벽 %.0f%%) · 30°C 트리플 하드 %s · 33°C 더블 미디엄 %s %s" % [h_end * 100.0, tw.cliff_at("H") * 100.0, h_tri, m_dbl, "OK" if tri_ok else "실패"])
+	if not tri_ok:
+		fails += 1
 	# 타이어 할당(2026 규정 → 비율) · LMH 사륜 · 젖으면 노면이 식음
 	var aw = RaceSimS.new()
 	aw.new_race("spa", 0, 15, "dry", ["M", "M"], 77)
