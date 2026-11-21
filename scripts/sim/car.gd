@@ -93,6 +93,7 @@ var tt := 0.55          # 타이어 온도 (0~1)
 var wear := 0.0
 var comp := "M"
 var used: Dictionary = {}
+var set_h := 1               # 지금 낀 세트를 달군 횟수 (새 세트 1, 다시 낀 세트는 쌓임 — 보관할 때 wec_pool 의 h)
 var wec_pool: Dictionary = {} # WEC: 결승 중 뺀 드라이 세트 {S: [{w, h}…]} — 새 세트가 바닥나면 가장 덜 닳은 것부터 다시 낀다
 var used_set_pen := 0.0   # 헌 타이어 세트 페널티 (초/랩)
 var tyre_sets: Variant = null # 내 차: 주말 타이어 세트 {S, M, H} (주말 모드에서만)

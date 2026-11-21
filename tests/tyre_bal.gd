@@ -82,6 +82,13 @@ func _races(key: String, laps: int, n: int) -> void:
 	var sets_out := 0
 	var cliff_laps := 0
 	var hy_laps := 0
+	var team_pos := {} # 차 id → [순위 합, 판 수] (팀 실력 보정용)
+	var rows: Array = [] # [id, 주 컴파운드, 순위, 성향]
+	var out_lap := 0.0
+	var out_n := 0
+	var single_pre := 0
+	var single_post := 0
+	var reuse_n := 0
 	var t0 := Time.get_ticks_msec()
 	var dbg := {}
 	for s in n:
@@ -124,13 +131,29 @@ func _races(key: String, laps: int, n: int) -> void:
 					mv = int(p[k])
 					mk = String(k)
 			if c.dnf == "":
+				var tp: Array = team_pos.get(c.id, [0.0, 0])
+				team_pos[c.id] = [float(tp[0]) + sim.class_pos(c), int(tp[1]) + 1]
+				rows.append([c.id, mk, float(sim.class_pos(c)), c.wec_style])
+			if c.dnf == "":
 				main_pos[mk] = float(main_pos.get(mk, 0.0)) + sim.class_pos(c)
 				main_n[mk] = int(main_n.get(mk, 0)) + 1
 			# 세트당 스틴트 수: 타이어 바꾼 정차 사이 스틴트 수
 			var st := 1
+			var ran_out := false
 			for pl in c.pit_log:
+				if bool(pl.get("reuse", false)):
+					reuse_n += 1
+					if not ran_out:
+						ran_out = true
+						out_lap += float(pl["lap"]) / laps
+						out_n += 1
 				if bool(pl.get("tyres", true)):
 					spset[st] = int(spset.get(st, 0)) + 1
+					if st == 1:
+						if ran_out:
+							single_post += 1
+						else:
+							single_pre += 1
 					st = 1
 				else:
 					st += 1
@@ -144,6 +167,25 @@ func _races(key: String, laps: int, n: int) -> void:
 	for k in ["S", "M", "H"]:
 		if main_n.has(k):
 			pos += "%s 위주 %d대 평균 %.1f위 · " % [k, main_n[k], float(main_pos[k]) / main_n[k]]
+	# 팀 실력 보정: 같은 차의 전체 평균 순위와의 차이 (− = 평소보다 잘함)
+	var res := {}
+	var sty := {}
+	for r in rows:
+		var tp: Array = team_pos[r[0]]
+		var d: float = float(r[2]) - float(tp[0]) / int(tp[1])
+		var rr: Array = res.get(r[1], [0.0, 0])
+		res[r[1]] = [float(rr[0]) + d, int(rr[1]) + 1]
+		var ss: Array = sty.get(r[3], [0.0, 0, 0])
+		sty[r[3]] = [float(ss[0]) + float(r[2]), int(ss[1]) + 1, int(ss[2]) + (1 if r[1] == "S" else 0)]
+	var rs := ""
+	for k in ["S", "M", "H"]:
+		if res.has(k):
+			rs += "%s %+.2f · " % [k, float(res[k][0]) / int(res[k][1])]
+	var ys := ""
+	for k in sty:
+		ys += "%s %d대 평균 %.1f위 소프트위주 %d · " % [k, sty[k][1], float(sty[k][0]) / int(sty[k][1]), sty[k][2]]
+	print("팀 보정 순위 차(주 컴파운드) %s| 성향 %s" % [rs, ys])
+	print("세트 바닥 시점 평균 %.0f%% 지점 (%d대) · 재장착 %d회 · 싱글 스틴트 바닥 전 %d · 바닥 뒤 %d" % [100.0 * out_lap / maxf(1.0, out_n), out_n, reuse_n, single_pre, single_post])
 	if OS.get_environment("TB_DBG") != "":
 		var dk: Array = dbg.keys()
 		dk.sort_custom(func(x, y): return int(dbg[x]) > int(dbg[y]))
